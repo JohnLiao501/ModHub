@@ -149,7 +149,7 @@ function createMockController(initial = {}) {
      * ========================================================================= */
     const bootJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'boot.json'), 'utf8'));
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.0.0', 'boot.json 版本号必须为 1.0.0');
+    assert.equal(bootJson.version, '1.0.1', 'boot.json 版本号必须为 1.0.1');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     for (const file of ['javascript/modloader-optimization.js', 'javascript/dol-mod-market.js']) {
@@ -479,8 +479,31 @@ function createMockController(initial = {}) {
         assert.ok(market.KNOWN_MOD_MARKET_ALIASES[firstKey], `应用后必须能通过 bootName 键「${firstKey}」检索到别名映射`);
     }
 
+    /* =========================================================================
+     * 11. 模组安装分流：市场安装「稍后重载」不得切走页签
+     * ========================================================================= */
+    {
+        // 11.1 市场安装路径必须声明 keepCurrentTab（防止回归）
+        const marketSource = fs.readFileSync(path.join(__dirname, 'javascript', 'dol-mod-market.js'), 'utf8');
+        const marketCall = marketSource.match(/dolOptHandleAddMod\([^)]*?\{[\s\S]*?\}\)/);
+        assert.ok(marketCall && marketCall[0].includes('keepCurrentTab: true'), '市场安装调用必须传递 keepCurrentTab: true');
+        // 11.2 管理页本地导入路径不得携带 keepCurrentTab（保持原有高亮跳转设计）
+        const managerSource = fs.readFileSync(path.join(__dirname, 'javascript', 'modloader-optimization.js'), 'utf8');
+        const importCalls = managerSource.match(/dolOptHandleAddMod\([^)]*?\{[^}]*?\}\)/g) || [];
+        assert.ok(importCalls.length >= 4, '管理器本地导入调用点必须存在');
+        for (const call of importCalls) {
+            assert.ok(!call.includes('keepCurrentTab'), `本地导入不得携带 keepCurrentTab: ${call.slice(0, 80)}`);
+        }
+        // 11.3 分支结构断言：keepCurrentTab 分支只提示不跳页，本地导入分支保留原高亮跳转设计
+        const keepBranch = managerSource.match(/else if \(options\.keepCurrentTab\) \{[\s\S]*?\} else \{/);
+        assert.ok(keepBranch, '稍后重载分支必须包含 keepCurrentTab 专用处理');
+        assert.ok(!keepBranch[0].includes("dolOptSwitchTab('模组管理')"), 'keepCurrentTab 分支严禁切换页签');
+        const legacyBranch = managerSource.match(/\} else \{\s*window\._dolOptHighlightMods[\s\S]*?dolOptSwitchTab\('模组管理'\)/);
+        assert.ok(legacyBranch, '本地导入分支必须保留「切换管理页并高亮」的原有设计');
+    }
+
     suiteComplete = true;
-    console.log('ModHub v1.0.0 all tests PASSED!');
+    console.log('ModHub v1.0.1 all tests PASSED!');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

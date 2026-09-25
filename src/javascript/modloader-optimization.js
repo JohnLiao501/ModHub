@@ -1480,6 +1480,11 @@ window.dolOptHandleAddMod = async function(fileInput, options = {}) {
             if (ok) {
                 window.dolOptShowToast('正在重新载入游戏...', 'warning');
                 window.dolOptRestartGame();
+            } else if (options.keepCurrentTab) {
+                // 模组市场安装场景：玩家通常需要连续安装多个模组，
+                // 「稍后重载」后必须停留在市场页签，绝不切走打断浏览。
+                window._dolOptHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+                window.dolOptShowToast(`${label}已添加完成。全部安装完成后可手动点击【重新载入游戏】生效。`, 'info');
             } else {
                 window._dolOptHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
                 window.dolOptShowToast(`${label}已添加完成，已在列表中标出。全部操作完成后可手动点击【重新载入游戏】生效。`, 'info');

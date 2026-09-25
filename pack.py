@@ -65,6 +65,8 @@ def pack_mod():
         print('VERIFIED: All boot.json assets correctly packed with forward slashes!')
 
     # 3. 同步至游戏 MOD 目录
+    # 注意：游戏生效目录必须保持单一最新版。同名模组多版本并存会导致 ModLoader
+    # 重复加载或版本冲突，因此 MOD 目录中的旧包仍需自动移除（此为例外，见下）。
     if os.path.exists(mod_dir):
         shutil.copy2(release_target, mod_target)
         if not filecmp.cmp(release_target, mod_target, shallow=False):
@@ -76,14 +78,12 @@ def pack_mod():
                 os.remove(path)
                 print(f'Removed old package in MOD: {path}')
 
-    # 4. 清理 release 目录中的旧版包
-    for name in os.listdir(release_dir):
-        path = os.path.join(release_dir, name)
-        if name.startswith('ModHub-v') and name.endswith('.zip') and path != release_target:
-            os.remove(path)
-            print(f'Removed old package in release: {path}')
+    # 4. release 归档目录：历史版本永久保留，严禁自动清理（红线规约，见 AGENTS.md）
+    for name in sorted(os.listdir(release_dir)):
+        if name.startswith('ModHub-v') and name.endswith('.zip') and name != zip_name:
+            print(f'Kept archived package in release: {name}')
 
-    # 5. 清理项目根目录下散落的任何 zip 包体，确保“只保留在 release 和 MOD 文件夹”
+    # 5. 清理项目根目录下散落的任何 zip 包体，确保"只保留在 release 和 MOD 文件夹"
     for name in os.listdir('.'):
         if name.startswith('ModHub-v') and name.endswith('.zip'):
             try:

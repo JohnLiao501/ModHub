@@ -2072,6 +2072,8 @@
             if (typeof window.dolOptHandleAddMod === 'function') {
                 const installed = await window.dolOptHandleAddMod(dummyInput.files && dummyInput.files.length > 0 ? dummyInput : fileObjects, {
                     askRestart,
+                    // 市场内安装：「稍后重载」后停留市场页签，方便玩家连续安装多个模组
+                    keepCurrentTab: true,
                     targetModName: mod._matchedLocal?.name || '',
                     displayName: mod.name || ''
                 });
