@@ -12,7 +12,7 @@ Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 
 ## 目录与工具分工
 
 - `src/`：ModHub 模组核心源码（`boot.json`、`javascript/`、`stylesheet/`、`twee/`）。
-- `release/`：由 `pack.py` 打包生成的安装包（`ModHub-v<version>.zip`）；游戏中的实时调试生效副本位于同级 `../MOD/`。
+- `release/`：由 `pack.py` 打包生成的安装包（`ModHub-v<version>.zip`），历史版本永久保留；通过 GitHub Releases 分发，不再同步至游戏 MOD 文件夹。
 - `dolmod-site/`：模组市场在线索引、身份目录与反馈中心 Worker/Pages 仓库。
 - `mod-identities.json`：模组市场元数据与统一身份字典。
 - `dol-mod-extractor.js`：DoL 中文 Wiki 模组列表抓取、解析与身份合并脚本。

@@ -1,8 +1,6 @@
 import os
 import zipfile
-import shutil
 import json
-import filecmp
 
 def pack_mod():
     src_dir = 'src'
@@ -10,13 +8,11 @@ def pack_mod():
         boot = json.load(bf)
     version = boot['version']
     zip_name = f'ModHub-v{version}.zip'
-    
+
     release_dir = os.path.abspath('release')
-    mod_dir = os.path.abspath('../MOD')
     os.makedirs(release_dir, exist_ok=True)
-    
+
     release_target = os.path.join(release_dir, zip_name)
-    mod_target = os.path.join(mod_dir, zip_name)
 
     def should_exclude(rel_path):
         parts = rel_path.split('/')
@@ -64,26 +60,13 @@ def pack_mod():
             raise SystemExit(1)
         print('VERIFIED: All boot.json assets correctly packed with forward slashes!')
 
-    # 3. 同步至游戏 MOD 目录
-    # 注意：游戏生效目录必须保持单一最新版。同名模组多版本并存会导致 ModLoader
-    # 重复加载或版本冲突，因此 MOD 目录中的旧包仍需自动移除（此为例外，见下）。
-    if os.path.exists(mod_dir):
-        shutil.copy2(release_target, mod_target)
-        if not filecmp.cmp(release_target, mod_target, shallow=False):
-            raise SystemExit('CRITICAL: Copied package does not match source zip')
-        print(f'Copied and verified: {mod_target}')
-        for name in os.listdir(mod_dir):
-            path = os.path.join(mod_dir, name)
-            if name.startswith('ModHub-v') and name.endswith('.zip') and path != mod_target:
-                os.remove(path)
-                print(f'Removed old package in MOD: {path}')
-
-    # 4. release 归档目录：历史版本永久保留，严禁自动清理（红线规约，见 AGENTS.md）
+    # 3. release 归档目录：历史版本永久保留，严禁自动清理（红线规约，见 AGENTS.md）
+    # 注意：自 v1.0.1 起打包产物不再同步至游戏 MOD 文件夹，仅归档于 release/ 并通过 GitHub Releases 分发。
     for name in sorted(os.listdir(release_dir)):
         if name.startswith('ModHub-v') and name.endswith('.zip') and name != zip_name:
             print(f'Kept archived package in release: {name}')
 
-    # 5. 清理项目根目录下散落的任何 zip 包体，确保"只保留在 release 和 MOD 文件夹"
+    # 4. 清理项目根目录下散落的任何 zip 包体，确保"只保留在 release 文件夹"
     for name in os.listdir('.'):
         if name.startswith('ModHub-v') and name.endswith('.zip'):
             try:
