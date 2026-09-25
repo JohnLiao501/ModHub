@@ -38,28 +38,12 @@
                     "replaceFile": "twee/modloader/modloader-patch-story-caption.twee"
                 }
             ]
-        },
-        {
-            "modName": "BeautySelectorAddon",
-            "addonName": "BeautySelectorAddon",
-            "modVersion": "^2.0.0",
-            "params": {
-                "type": "(请确保启用此图像包) 原版优化 DolOptimization"
-            }
         }
     ],
     "dependenceInfo": [
         {
             "modName": "TweeReplacer",
             "version": "^1.0.0"
-        },
-        {
-            "modName": "BeautySelectorAddon",
-            "version": "^2.0.0"
-        },
-        {
-            "modName": "maplebirch",
-            "version": ">=2.0.0"
         }
     ]
 }
