@@ -1,0 +1,459 @@
+{
+  "schemaVersion": 1,
+  "mods": [
+    {
+      "id": "auto-clothes-repair",
+      "name": "衣物破损自动修补",
+      "bootNames": ["AutoClothesRepair"],
+      "aliases": ["自动修衣"],
+      "repositories": [],
+      "category": "界面与便利",
+      "tags": ["自动化", "服装"]
+    },
+    {
+      "id": "auto-clean",
+      "name": "自动清洁身体污垢",
+      "bootNames": ["AutoClean"],
+      "aliases": ["自动清洁"],
+      "repositories": [],
+      "category": "界面与便利",
+      "tags": ["自动化"]
+    },
+    {
+      "id": "auto-school",
+      "name": "自动上课与学校日常辅助",
+      "bootNames": ["AutoSchool"],
+      "aliases": ["自动上学"],
+      "repositories": [],
+      "category": "界面与便利",
+      "tags": ["自动化", "学校"]
+    },
+    {
+      "id": "dol-optimization",
+      "name": "原版优化",
+      "bootNames": ["原版优化", "DolOptimization"],
+      "aliases": ["原版优化OPT"],
+      "repositories": ["Degrees-of-Lewdity-DOL-Optimization"],
+      "repositoryKeys": ["ANLINSTUDIO/Degrees-of-Lewdity-DolOptimization"],
+      "category": "界面与便利",
+      "tags": ["综合优化", "园艺", "衣柜"]
+    },
+    {
+      "id": "baileys-office",
+      "name": "贝利办公室剧情扩展",
+      "bootNames": ["Bailey's Office E"],
+      "aliases": ["贝利办公室"],
+      "repositories": [],
+      "category": "剧情与角色",
+      "tags": ["剧情", "NPC"]
+    },
+    {
+      "id": "cummilk",
+      "name": "产奶与母乳扩展",
+      "bootNames": ["cummilk"],
+      "aliases": ["风味自制奶"],
+      "repositories": ["DOLMod-Cummilk"],
+      "repositoryKeys": ["Lethivia/DoL-mod-cummilk"],
+      "category": "玩法与内容",
+      "tags": ["料理", "物品", "剧情"]
+    },
+    {
+      "id": "doli",
+      "name": "D.O.L.I",
+      "bootNames": ["DOLI"],
+      "aliases": ["Degrees of Lewdity Intelligence"],
+      "repositories": ["DegreesOfLewdityIntelligence"],
+      "repositoryKeys": ["ArsNativa/Degrees-of-Lewdity-Intelligence"],
+      "category": "玩法与内容",
+      "tags": ["AI", "剧情", "战斗"]
+    },
+    {
+      "id": "dynamicest",
+      "name": "极致动态",
+      "bootNames": ["Dynamicest"],
+      "aliases": ["极致动态Dynamicest"],
+      "repositories": ["Degrees-of-Lewdity-DOL-Dynamicest"],
+      "repositoryKeys": ["ANLINSTUDIO/Degrees-of-Lewdity-DolDynamicest"],
+      "category": "界面与便利",
+      "tags": ["界面", "数值"]
+    },
+    {
+      "id": "extra-recipe-study",
+      "name": "额外菜谱研习",
+      "bootNames": ["ExtraRecipeStudy"],
+      "aliases": [],
+      "repositories": [],
+      "category": "玩法与内容",
+      "tags": ["料理"]
+    },
+    {
+      "id": "game-original-image-pack",
+      "name": "原版高清图像资源包",
+      "bootNames": ["GameOriginalImagePack"],
+      "aliases": [],
+      "repositories": [],
+      "category": "外观与资源",
+      "tags": ["图像"]
+    },
+    {
+      "id": "more-love-interests",
+      "name": "更多恋爱对象扩展",
+      "bootNames": ["More Love Interests Mod"],
+      "aliases": ["更多恋人"],
+      "repositories": ["DOL-More-Love-Interests-Mod"],
+      "repositoryKeys": ["Nephthelana/DoL-More-Love-Interests-Mod"],
+      "category": "剧情与角色",
+      "tags": ["恋爱"]
+    },
+    {
+      "id": "more-farm-upgrade",
+      "name": "农田深度升级扩展",
+      "bootNames": ["MoreFarmUpgrade"],
+      "aliases": ["更多农场升级"],
+      "repositories": ["DOL-More-Farm-Upgrade-Mod"],
+      "repositoryKeys": ["Qsx0391/DOL-More-Farm-Upgrade-Mod"],
+      "category": "玩法与内容",
+      "tags": ["农场"]
+    },
+    {
+      "id": "smartphone",
+      "name": "万能的智能手机",
+      "bootNames": ["SmartPhone Alpha", "SmartPhone"],
+      "aliases": ["万能的智能手机", "智能手机"],
+      "repositories": ["Degrees-of-Lewdity-DolSmartPhone"],
+      "repositoryKeys": ["ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone"],
+      "category": "玩法与内容",
+      "tags": ["社交", "剧情", "NPC"]
+    },
+    {
+      "id": "dol-phone-mod",
+      "name": "手机",
+      "bootNames": ["PhoneMod", "DOL-PhoneMod"],
+      "aliases": ["手机", "DOL-PhoneMod"],
+      "repositories": ["DOL-PhoneMod"],
+      "repositoryKeys": ["HCPTangHY/DOL-PhoneMod"],
+      "category": "玩法与内容",
+      "tags": ["社交", "聊天"]
+    },
+    {
+      "id": "dol-arcade-expansion",
+      "name": "游乐场扩充",
+      "bootNames": ["DOLArcadeExpansion"],
+      "aliases": ["游戏厅拓展", "遊戲廳拓展"],
+      "repositories": ["DOLArcadeExpansion"],
+      "repositoryKeys": ["chris81605/DOLArcadeExpansion"],
+      "category": "玩法与内容",
+      "tags": ["地点", "玩法"]
+    },
+    {
+      "id": "maplebirch",
+      "name": "秋枫白桦框架",
+      "bootNames": ["maplebirch"],
+      "aliases": ["Maplebirch Frameworks"],
+      "repositories": ["SCML-DOL-MaplebirchFramework"],
+      "repositoryKeys": ["MaplebirchLeaf/SCML-DOL-maplebirchframework"],
+      "category": "框架与前置",
+      "tags": ["开发接口"]
+    },
+    {
+      "id": "no-bus-harassment",
+      "name": "公交车防骚扰",
+      "bootNames": [],
+      "aliases": ["No Bus Harassment"],
+      "repositories": ["NoBusHarassmentMod"],
+      "repositoryKeys": ["Ayndpa/NoBusHarassmentMod"],
+      "category": "规则与数值",
+      "tags": ["事件", "规则"],
+      "dependencies": [{ "id": "maplebirch" }]
+    },
+    {
+      "id": "longer-combat-yanling",
+      "name": "更长遭遇战/言灵作弊集",
+      "bootNames": [],
+      "aliases": ["更长遭遇战", "言灵作弊集"],
+      "repositories": ["LongerCombat", "YanlingCheatCollection"],
+      "repositoryKeys": ["MaplebirchLeaf/LongerCombat", "MaplebirchLeaf/YanlingCheatCollection"],
+      "category": "玩法与内容",
+      "tags": ["战斗", "言灵"],
+      "dependencies": [{ "id": "maplebirch" }]
+    },
+    {
+      "id": "terra-expanding",
+      "name": "泰拉瑞亚拓展",
+      "bootNames": [],
+      "aliases": ["DOL Terra Expanding"],
+      "repositories": ["DOL-Terra-Expanding-Modd"],
+      "repositoryKeys": ["Nephthelana/DOL-Terra-Expanding-Modd"],
+      "category": "玩法与内容",
+      "tags": ["地图", "钓鱼", "玩法"],
+      "dependencies": [{ "id": "maplebirch" }]
+    },
+    {
+      "id": "simple-framework",
+      "name": "简易框架",
+      "bootNames": ["SimpleFramework"],
+      "aliases": ["SCML 简易框架"],
+      "repositories": ["SCMLSimpleFramework"],
+      "repositoryKeys": ["emicoto/SCMLSimpleFramework"],
+      "category": "框架与前置",
+      "tags": ["开发接口"]
+    },
+    {
+      "id": "baby-hawk",
+      "name": "鹰宝宝",
+      "bootNames": ["BabyHawk"],
+      "aliases": ["小鹰育雏扩展"],
+      "repositories": ["DOL-BabyHawk-Mod"],
+      "repositoryKeys": ["koooooiCarp/DOL-BabyHawk-Mod"],
+      "category": "玩法与内容",
+      "tags": ["成长", "互动"]
+    },
+    {
+      "id": "woven-realm",
+      "name": "织境空间",
+      "bootNames": ["AIStoryGen"],
+      "aliases": ["Woven Realm"],
+      "repositories": ["WovenRealm"],
+      "repositoryKeys": ["Kanna-hanabi/WovenRealm"],
+      "category": "剧情与角色",
+      "tags": ["AI", "剧情", "生成"]
+    },
+    {
+      "id": "dol-quest-assistant",
+      "name": "欲都孤儿任务助手",
+      "bootNames": ["DoLQuestAssistant"],
+      "aliases": ["DoL Quest Assistant", "任务辅助工具"],
+      "repositories": ["DoLQuestAssistant"],
+      "repositoryKeys": ["JohnLiao501/DoL-Quest-Assistant"],
+      "category": "界面与便利",
+      "tags": ["任务", "界面", "攻略"]
+    },
+    {
+      "id": "dom-robin",
+      "name": "强势罗宾扩展",
+      "bootNames": ["DomRobin"],
+      "aliases": ["Dom罗宾", "Robin Mod"],
+      "repositories": ["Degrees-of-Lewdity-Robin-Mod"],
+      "repositoryKeys": ["ZeroRing233/Degrees-of-Lewdity-RobinMod"],
+      "category": "剧情与角色",
+      "tags": ["NPC", "恋爱"]
+    },
+    {
+      "id": "honest-markets",
+      "name": "诚实市场模组",
+      "bootNames": ["HonestMarkets"],
+      "aliases": ["诚实市场"],
+      "repositories": [],
+      "category": "界面与便利",
+      "tags": ["商店"]
+    },
+    {
+      "id": "sydney-bare-study",
+      "name": "悉尼裸体学习",
+      "bootNames": ["Sydney Bare Study Mod"],
+      "aliases": ["悉尼无拘自习扩展"],
+      "repositories": ["DOL-Sydney-Bare-Study-Mod"],
+      "repositoryKeys": ["koooooiCarp/DOL-Sydney-Bare-Study-Mod"],
+      "category": "剧情与角色",
+      "tags": ["NPC", "剧情"]
+    },
+    {
+      "id": "npc-social-avatars",
+      "name": "NPC社交栏头像",
+      "bootNames": ["NPC Avatars Mod"],
+      "aliases": ["NPC头像增强模组"],
+      "repositories": ["DOL-npcicon-mods"],
+      "repositoryKeys": ["Eudemonism00/DOL-npcicon-mods"],
+      "category": "外观与资源",
+      "tags": ["头像", "NPC"]
+    },
+    {
+      "id": "woven-realm-cooking",
+      "name": "织境空间·料理扩展",
+      "bootNames": ["WovenRealmCookingAddon"],
+      "aliases": ["织境空间-料理扩展", "料理扩展", "Woven Realm Cooking Addon"],
+      "repositories": ["WovenRealmCookingAddon"],
+      "repositoryKeys": ["Kanna-hanabi/WovenRealm"],
+      "category": "玩法与内容",
+      "tags": ["AI", "料理", "剧情"]
+    },
+    {
+      "id": "whitney-expansion",
+      "name": "惠特尼剧情扩展",
+      "bootNames": ["WhitneyExpansion", "WhitneyExpansion_"],
+      "aliases": ["Whitney"],
+      "repositories": ["WhitneyExpansion"],
+      "repositoryKeys": ["Ayusai31/WhitneyExpansion"],
+      "category": "剧情与角色",
+      "tags": ["NPC", "剧情"]
+    },
+    {
+      "id": "mod-i18n",
+      "name": "本地化翻译",
+      "bootNames": ["ModI18N"],
+      "aliases": ["游戏中文汉化补丁", "I18N Mod"],
+      "repositories": ["Degrees-of-Lewdity-Mod-I18N-Mod"],
+      "repositoryKeys": ["Lyoko-Jeremie/Degrees-of-Lewdity_Mod_i18nMod"],
+      "category": "界面与便利",
+      "tags": ["翻译"]
+    },
+    {
+      "id": "wardrobe-incremental-expansion",
+      "name": "大大大衣柜容量扩展",
+      "bootNames": ["WardrobeIncrementalExpansion"],
+      "aliases": ["衣柜容量扩充", "扩建衣柜容量"],
+      "repositories": [],
+      "category": "界面与便利",
+      "tags": ["衣柜"]
+    },
+    {
+      "id": "defrock-sydney",
+      "name": "还俗&两面悉尼",
+      "bootNames": [],
+      "aliases": ["还俗与两面悉尼"],
+      "repositories": [],
+      "repositoryKeys": ["hxdnshx/sugarcube-2-ModLoader"],
+      "category": "剧情与角色",
+      "tags": ["剧情", "NPC"]
+    },
+    {
+      "id": "dol-sims",
+      "name": "模拟人生",
+      "bootNames": [],
+      "aliases": ["DolSims"],
+      "repositories": ["Degrees-of-Lewdity-DolSims"],
+      "repositoryKeys": ["MissedHeart/Degrees-of-Lewdity-DolSims"],
+      "category": "玩法与内容",
+      "tags": ["地点", "玩法"]
+    },
+    {
+      "id": "free-attitudes",
+      "name": "自由态度",
+      "bootNames": [],
+      "aliases": ["free attitudes"],
+      "repositories": [],
+      "repositoryKeys": ["emicoto/DOLMods"],
+      "category": "规则与数值",
+      "tags": ["规则", "对话"]
+    },
+    {
+      "id": "overfits-slots",
+      "name": "外套头套槽",
+      "bootNames": [],
+      "aliases": ["ReOverfits"],
+      "repositories": [],
+      "repositoryKeys": ["mirrormirroronwall/Dol-Miyako-Mods"],
+      "category": "玩法与内容",
+      "tags": ["服装", "装备", "界面"]
+    },
+    {
+      "id": "background-foreground-template",
+      "name": "背景前景",
+      "bootNames": [],
+      "aliases": ["background&foregroundtemplate"],
+      "repositories": [],
+      "repositoryKeys": ["miyakoAki4828/Dol-Miyako-Mods"],
+      "category": "外观与资源",
+      "tags": ["图像", "背景", "模板"]
+    },
+    {
+      "id": "eliminate-spaces",
+      "name": "消灭空格",
+      "bootNames": [],
+      "aliases": ["Eliminate Spaces"],
+      "repositories": [],
+      "repositoryKeys": ["omvjro/ovoDoLMods"],
+      "category": "修复与兼容",
+      "tags": ["文本", "显示"]
+    },
+    {
+      "id": "cattery",
+      "name": "猫咖出租屋",
+      "bootNames": [],
+      "aliases": ["Cattery"],
+      "repositories": ["Degrees-of-Lewdity-Cattery"],
+      "repositoryKeys": ["Maomaoi/Degrees-of-Lewdity-Cattery"],
+      "category": "玩法与内容",
+      "tags": ["地点", "宠物", "玩法"]
+    },
+    {
+      "id": "evil-cockroach",
+      "name": "邪恶蟑螂",
+      "bootNames": [],
+      "aliases": ["邪恶蟑螂（桌宠）", "邪恶蟑螂mod"],
+      "repositories": ["Evil-Cockroach-Mod"],
+      "repositoryKeys": ["LooopSpiner/Evil-Cockroach-Mod"],
+      "category": "外观与资源",
+      "tags": ["桌宠", "图像", "互动"],
+      "dependencies": [{ "id": "simple-framework" }]
+    },
+    {
+      "id": "dol-tv",
+      "name": "电视",
+      "bootNames": [],
+      "aliases": ["DoL TV"],
+      "repositories": ["DoL-mod-tv"],
+      "repositoryKeys": ["Lethivia/DoL-mod-tv"],
+      "category": "玩法与内容",
+      "tags": ["物品", "互动"]
+    },
+    {
+      "id": "free-speech-attitudes",
+      "name": "自由对话态度",
+      "bootNames": [],
+      "aliases": ["Free Speech Attitudes"],
+      "repositories": ["Free-Speech-Attitudes"],
+      "repositoryKeys": ["zbf0/Free-Speech-Attitudes"],
+      "category": "规则与数值",
+      "tags": ["规则", "对话"]
+    },
+    {
+      "id": "blood-boon",
+      "name": "血月诅咒",
+      "bootNames": ["BloodBoon"],
+      "aliases": [],
+      "repositories": [],
+      "repositoryKeys": ["3naka/DarksOuLs"],
+      "category": "规则与数值",
+      "tags": ["规则", "事件"]
+    },
+    {
+      "id": "trauma-appearance",
+      "name": "高创伤不减容貌",
+      "bootNames": [],
+      "aliases": [],
+      "repositories": [],
+      "repositoryKeys": ["a1066160186/BananaMods"],
+      "category": "规则与数值",
+      "tags": ["数值", "属性"]
+    },
+    {
+      "id": "factory-flower-sales",
+      "name": "农贸工厂卖花",
+      "bootNames": [],
+      "aliases": [],
+      "repositories": [],
+      "category": "玩法与内容",
+      "tags": ["农场", "商店"]
+    },
+    {
+      "id": "lurker-capture",
+      "name": "潜伏者捕捉狂",
+      "bootNames": [],
+      "aliases": [],
+      "repositories": [],
+      "category": "规则与数值",
+      "tags": ["数值", "捕捉"]
+    },
+    {
+      "id": "rainbow-bridge",
+      "name": "彩虹桥",
+      "bootNames": [],
+      "aliases": [],
+      "repositories": [],
+      "category": "玩法与内容",
+      "tags": ["地图", "地点", "导航"],
+      "dependencies": [{ "id": "simple-framework" }]
+    }
+  ]
+}

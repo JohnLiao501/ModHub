@@ -1,0 +1,5 @@
+<<case "modloader">>
+	<<run T.currentOverlay = "modloader"; $("#customOverlay").attr("data-overlay", "modloader")>>
+	<<replace #customOverlayTitle>><<titleModloader>><</replace>>
+	<<replace #customOverlayContent>><<modloadermodmanage>><</replace>>
+<<case "characteristics">>

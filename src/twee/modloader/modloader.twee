@@ -1,0 +1,93 @@
+:: modloader-optimization [widget]
+<<widget "titleModloader">>
+	<<setupTabs _args[0]>>
+	<div id="overlayTabs" class="tab dol-opt-modloader-tabs">
+		<<closeButtonMobile>>
+		<<button "模组管理">>
+			<<toggleTab>>
+			<<replace #customOverlayContent>><<modloadermodmanage>><</replace>>
+		<</button>>
+		<<button "模组市场">>
+			<<toggleTab>>
+			<<replace #customOverlayContent>><<modloadermarket>><</replace>>
+		<</button>>
+		<<button "模组说明">>
+			<<toggleTab>>
+			<<replace #customOverlayContent>><<modloaderreadme>><</replace>>
+		<</button>>
+		<<button "加载日志">>
+			<<toggleTab>>
+			<<replace #customOverlayContent>><<modloaderlog>><</replace>>
+		<</button>>
+		<<run setTimeout(function () {
+			var tabs = $("#overlayTabs.dol-opt-modloader-tabs");
+			var core = tabs.children("button").filter(function () {
+				return $(this).hasClass("customOverlayClose") || window.dolOptIsManagerTabLabel($(this).text());
+			});
+			core.addClass("dol-opt-core-tab");
+			if (core.not(".customOverlayClose").length >= 4) tabs.addClass("dol-opt-tabs-ready");
+		}, 0)>>
+	</div>
+	<<closeButton>>
+<</widget>>
+
+<<widget "modloadergeneral">>
+	<<modloadermodmanage>>
+<</widget>>
+
+<<widget "modloadermodmanage">>
+	<div id="dolOptModManageContainer" class="dol-opt-container"></div>
+	<<run setTimeout(initModManage, 1)>>
+<</widget>>
+
+<<widget "modloaderreadme">>
+	<div id="dolOptReadmeContainer" class="dol-opt-container"></div>
+	<<run setTimeout(initModReadMe, 1)>>
+<</widget>>
+
+<<widget "modloaderlog">>
+	<div class="dol-opt-container">
+		<div class="dol-opt-group-header">
+			<span class="gold">模组加载过程日志</span>
+			<div class="dol-opt-log-header-actions" style="display: flex; gap: 6px; align-items: center;">
+				<button id="btnToggleLogFullscreen" type="button" class="macro-button dol-opt-btn-secondary" onclick="window.dolOptToggleLogFullscreen()">全屏展示</button>
+				<button type="button" class="macro-button dol-opt-btn-secondary" onclick="window.dolOptCaptureLogScreenshot()">一键截图</button>
+				<button type="button" class="macro-button dol-opt-btn-primary" onclick="window.dolOptCopyLoadLog()">复制日志</button>
+			</div>
+		</div>
+		<div id="dolOptLogDiagnosisContainer"></div>
+		<div class="dol-opt-log-toolbar">
+			<div class="dol-opt-log-search-row">
+				<input id="dolOptLogSearch" class="dol-opt-search-input dol-opt-log-search" type="search" placeholder="搜索日志内容……" aria-label="搜索日志内容">
+				<span id="dolOptLogSearchStatus" class="dol-opt-log-search-status grey">0/0</span>
+			</div>
+			<div class="dol-opt-log-actions-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+				<div class="dol-opt-log-filter-group">
+					<button type="button" class="dol-opt-log-filter-btn active" data-filter="all" onclick="window.dolOptSetLogLevelFilter('all')">全部</button>
+					<button id="dolOptFilterError" type="button" class="dol-opt-log-filter-btn filter-error" data-filter="error" onclick="window.dolOptSetLogLevelFilter('error')">仅错误</button>
+					<button id="dolOptFilterWarn" type="button" class="dol-opt-log-filter-btn filter-warn" data-filter="warn" onclick="window.dolOptSetLogLevelFilter('warn')">仅警告</button>
+					<button type="button" class="dol-opt-log-filter-btn" data-filter="issues" onclick="window.dolOptSetLogLevelFilter('issues')">错误+警告</button>
+				</div>
+				<div style="display: flex; gap: 4px; align-items: center;">
+					<button type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptMoveLogMatch(-1)">↑ 上一处</button>
+					<button type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptMoveLogMatch(1)">↓ 下一处</button>
+					<button id="dolOptLogErrors" type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptJumpToLevel('error')"><span class="red">错误</span></button>
+					<button id="dolOptLogWarnings" type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptJumpToLevel('warn')"><span class="gold">警告</span></button>
+				</div>
+			</div>
+		</div>
+		<div id="dolOptLogContent" class="dol-opt-log-wrapper"></div>
+	</div>
+	<<script>>
+		setTimeout(() => {
+			if (typeof window.dolOptInitLogTools === 'function') {
+				window.dolOptInitLogTools();
+			}
+		}, 1);
+	<</script>>
+<</widget>>
+
+<<widget "modloadermarket">>
+	<div id="dolOptModMarketContainer" class="dol-opt-container"></div>
+	<<run setTimeout(window.dolOptInitMarket, 1)>>
+<</widget>>

@@ -1,0 +1,18 @@
+# 依赖与构建产物
+node_modules/
+dist/
+__pycache__/
+*.pyc
+
+# 独立部署的 Worker/Pages 站点仓库（独立 git 历史，不并入主仓库）
+dolmod-site/
+
+# AI 工作区（本地记忆与缓存，不入库）
+.workbuddy/
+
+# 打包产物（统一通过 GitHub Releases 分发，不入库）
+release/*.zip
+
+# 系统杂项
+Thumbs.db
+.DS_Store

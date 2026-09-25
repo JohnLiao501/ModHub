@@ -1,0 +1,65 @@
+{
+    "name": "ModHub",
+    "version": "1.0.0",
+    "styleFileList": [
+        "stylesheet/modloader-optimization.css"
+    ],
+    "scriptFileList": [
+        "javascript/modloader-optimization.js",
+        "javascript/dol-mod-market.js"
+    ],
+    "tweeFileList": [
+        "twee/modloader/modloader.twee"
+    ],
+    "imgFileList": [],
+    "addonPlugin": [
+        {
+            "modName": "TweeReplacer",
+            "addonName": "TweeReplacerAddon",
+            "modVersion": "^1.0.0",
+            "params": [
+                {
+                    "tip": "【ModHub】模组管理器主入口",
+                    "passage": "overlayReplace",
+                    "findString": "<<case \"characteristics\">>",
+                    "replaceFile": "twee/modloader/modloader-patch-base.twee"
+                },
+                {
+                    "tip": "【ModHub】模组管理器顶栏按钮",
+                    "passage": "Widgets Clothing Caption",
+                    "findString": "\t\t\t<<overlayReplace \"startFeats\">>\n\t\t<</button>>\n\t</div>",
+                    "replaceFile": "twee/modloader/modloader-patch-caption.twee"
+                },
+                {
+                    "tip": "【ModHub】侧栏 Mod管理器 按钮",
+                    "passage": "StoryCaption",
+                    "findRegex": "<<overlayReplace \\\"saves\\\">>\\r?\\n\\s*<</button>>\\r?\\n\\s*</div>",
+                    "regexFlag": "g",
+                    "replaceFile": "twee/modloader/modloader-patch-story-caption.twee"
+                }
+            ]
+        },
+        {
+            "modName": "BeautySelectorAddon",
+            "addonName": "BeautySelectorAddon",
+            "modVersion": "^2.0.0",
+            "params": {
+                "type": "(请确保启用此图像包) 原版优化 DolOptimization"
+            }
+        }
+    ],
+    "dependenceInfo": [
+        {
+            "modName": "TweeReplacer",
+            "version": "^1.0.0"
+        },
+        {
+            "modName": "BeautySelectorAddon",
+            "version": "^2.0.0"
+        },
+        {
+            "modName": "maplebirch",
+            "version": ">=2.0.0"
+        }
+    ]
+}

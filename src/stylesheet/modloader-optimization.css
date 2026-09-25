@@ -1,0 +1,2589 @@
+/* =========================================================================
+ * ModHub 模组管理器样式表 (视觉层级强化版)
+ * 遵循 Degrees of Lewdity 原生暗黑文字冒险风格，通过明度与语义边框建立四级视觉梯队
+ * ========================================================================= */
+
+.dol-opt-container {
+    padding: 6px 2px;
+}
+
+.dol-opt-section {
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    background-color: var(--850);
+}
+
+.dol-opt-restart-hint {
+    margin-left: 12px;
+    font-size: 0.85em;
+    vertical-align: middle;
+}
+
+.dol-opt-subdesc {
+    font-size: 0.82em;
+    margin-top: 4px;
+}
+
+/* ========== 1. 主要行动按钮 (Primary CTA Button) ========== */
+/* 应用于：重新载入游戏、智能整理、复制日志等核心主操作 */
+.dol-opt-btn-primary,
+button.dol-opt-btn-primary,
+.buttonlike.dol-opt-btn-primary {
+    background-color: var(--750) !important;
+    border: 1px solid var(--gold) !important;
+    color: #fff !important;
+    font-weight: bold !important;
+    padding: 6px 14px !important;
+    border-radius: 3px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.45) !important;
+    cursor: pointer !important;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
+    white-space: nowrap !important;
+}
+
+.dol-opt-btn-primary:hover,
+button.dol-opt-btn-primary:hover,
+.buttonlike.dol-opt-btn-primary:hover {
+    background-color: var(--700) !important;
+    border-color: #fff !important;
+    color: var(--gold) !important;
+}
+
+.dol-opt-btn-primary:active,
+button.dol-opt-btn-primary:active,
+.buttonlike.dol-opt-btn-primary:active {
+    transform: translateY(1px) !important;
+    box-shadow: 0 0 1px rgba(0, 0, 0, 0.4) !important;
+}
+
+/* ========== 2. 顶部 Tab 栏（等宽均分 + 顶条完整铺满 + 叉叉精准垂直居中） ========== */
+#customOverlay[data-overlay="modloader"] #customOverlayTitle {
+    position: relative !important;
+    display: flex !important;
+    align-items: stretch !important;
+    padding: 0.5rem 0.5rem 0 0.5rem !important;
+    box-sizing: border-box !important;
+}
+
+#customOverlay[data-overlay="modloader"] #overlayTabs {
+    /* display: flex !important; */
+    /* flex-wrap: nowrap !important; */
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding-right: 46px !important; /* 右侧留出 46px 给关闭叉叉，使灰底条完整延伸至右端 */
+    margin-bottom: 0 !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+}
+
+#customOverlay[data-overlay="modloader"] #overlayTabs::-webkit-scrollbar {
+    display: none;
+}
+
+/* 4个标签：保持与原版【存档/设置】界面一致的固定舒适等宽（120px）！ */
+#customOverlay[data-overlay="modloader"] #overlayTabs button {
+    /* flex: 0 0 120px !important; */
+    width: 120px !important;
+    max-width: 120px !important;
+    text-align: center !important;
+    padding: 7px 8px !important;
+    font-size: 0.9em !important;
+    font-weight: 500 !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
+	border-right: 1px solid var(--300) !important;
+}
+
+/* 公共标签栏会被其他模组延迟追加按钮；模组管理器只显示本页声明的标签。 */
+#overlayTabs.dol-opt-modloader-tabs.dol-opt-tabs-ready > button:not(.dol-opt-core-tab) {
+	display: none !important;
+}
+
+/* 右上角关闭按钮（叉叉）精准垂直居中在顶栏右侧区域 */
+#customOverlay[data-overlay="modloader"] .customOverlayClose {
+    position: absolute !important;
+    right: 14px !important;
+    top: calc(50% + 0.25rem) !important;
+    transform: translateY(-50%) !important;
+    width: 22px !important;
+    height: 22px !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+    opacity: 0.65 !important;
+    z-index: 10 !important;
+    transition: opacity 0.15s ease, transform 0.15s ease !important;
+}
+
+#customOverlay[data-overlay="modloader"] .customOverlayClose:hover {
+    opacity: 1 !important;
+    transform: translateY(-50%) scale(1.18) !important;
+}
+
+#customOverlay[data-overlay="modloader"] .customOverlayClose::before,
+#customOverlay[data-overlay="modloader"] .customOverlayClose::after {
+    position: absolute !important;
+    top: 0 !important;
+    left: 10px !important;
+    content: " " !important;
+    height: 22px !important;
+    width: 2.5px !important;
+    background-color: var(--000) !important;
+}
+
+/* ========== 3. 统计卡片网格 ========== */
+.dol-opt-stats-container,
+#dolOptMarketStats {
+    margin-bottom: 12px;
+    display: grid !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+}
+
+.dol-opt-market-update-all {
+    grid-column: 1 / -1;
+    max-width: initial;
+    min-height: 34px;
+    color: var(--gold) !important;
+    border-color: var(--gold) !important;
+}
+
+.dol-opt-stat-card {
+    background-color: var(--900) !important;
+    border: 1px solid var(--750) !important;
+    text-align: center;
+    padding: 10px 8px;
+    border-radius: 3px;
+}
+
+#dolOptMarketStats .dol-opt-stat-card.is-selected {
+    background-color: #383015 !important;
+    border-color: var(--gold, #d4af37) !important;
+    box-shadow: inset 0 0 0 1px rgba(212, 175, 55, 0.22);
+}
+
+#dolOptMarketStats .dol-opt-stat-card.is-selected .dol-opt-stat-label {
+    color: var(--gold, #d4af37) !important;
+    font-weight: bold;
+}
+
+.dol-opt-stat-num {
+    font-size: 1.5em;
+    font-weight: 800;
+    line-height: 1.2;
+    letter-spacing: 0.02em;
+    overflow: clip;
+}
+
+.dol-opt-stat-label {
+    font-size: 0.8em;
+    margin-top: 4px;
+}
+
+/* ========== 4. 提示条与分组标题 ========== */
+.dol-opt-hint-bar {
+    margin-bottom: 12px;
+    font-size: 0.85em;
+    line-height: 1.45;
+    background-color: var(--850);
+}
+
+.dol-opt-group-header {
+    font-size: 0.92em;
+    font-weight: bold;
+    margin: 14px 0 8px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--750);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+/* 吸顶操作栏（提示条 + 标题与核心操作按钮） */
+.dol-opt-sticky-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background-color: var(--850, #181818);
+    padding: 4px 0 6px 0;
+    border-bottom: 1px solid var(--750, #333);
+    margin-bottom: 10px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+
+.dol-opt-sticky-toolbar .dol-opt-hint-bar {
+    margin-bottom: 6px;
+}
+
+.dol-opt-sticky-toolbar .dol-opt-group-header {
+    margin: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+/* ========== 5. 折叠分区 ========== */
+.dol-opt-collapsible-section {
+    margin-top: 10px;
+}
+
+.dol-opt-section-summary {
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: bold;
+    padding: 6px 0;
+    color: var(--100);
+    border-bottom: 1px solid var(--750);
+    display: flex;
+    align-items: center;
+    list-style: none;
+    user-select: none;
+}
+
+.dol-opt-section-summary::-webkit-details-marker {
+    display: none;
+}
+
+.dol-opt-section-summary::before {
+    content: '';
+    display: inline-block;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--gold, #ffcc00);
+    margin-right: 8px;
+    transition: transform 0.2s ease;
+    transform-origin: 2px center;
+}
+
+.dol-opt-collapsible-section[open] > .dol-opt-section-summary::before {
+    transform: rotate(90deg);
+}
+
+.dol-opt-btn-move.btn-pressing {
+    opacity: 0.7;
+    transform: scale(0.92);
+    border-color: var(--gold, #ffcc00) !important;
+}
+
+.dol-opt-btn-move.btn-longpressed {
+    animation: dolOptPulse 0.4s ease;
+}
+
+.dol-opt-item.item-disabled {
+    opacity: 0.75;
+    background-color: rgba(25, 25, 25, 0.35);
+}
+
+.dol-opt-item.item-disabled:hover {
+    opacity: 0.96;
+    background-color: rgba(45, 45, 45, 0.55);
+}
+
+.dol-opt-section-content {
+    padding-top: 8px;
+}
+
+/* ========== 6. 模组与美化列表（宽屏单行） ========== */
+.dol-opt-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.dol-opt-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--800);
+    transition: background-color 0.15s ease;
+}
+
+.dol-opt-item:hover {
+    background-color: var(--800);
+}
+
+.dol-opt-item.item-disabled {
+    opacity: 0.7;
+}
+
+.dol-opt-item-info {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dol-opt-status-tag,
+.dol-opt-order-tag {
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+    font-weight: bold;
+    font-size: 0.88em;
+    line-height: 1.2;
+}
+
+.dol-opt-item-main {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dol-opt-item-title {
+    font-size: 0.92em;
+    font-weight: bold;
+    word-break: break-word;
+    line-height: 1.35;
+}
+
+.dol-opt-item-desc {
+    font-size: 0.76em;
+    margin-top: 2px;
+}
+
+.dol-opt-mod-alias {
+    color: var(--400);
+}
+
+/* 美化自动启用提示与锁定样式 */
+.dol-opt-beauty-auto-box {
+    margin-bottom: 8px;
+}
+.dol-opt-tag-auto {
+    background-color: rgba(255, 215, 0, 0.12);
+    border: 1px solid var(--gold);
+    padding: 1px 4px;
+    border-radius: 2px;
+}
+.dol-opt-btn-toggle.btn-auto-disabled {
+    opacity: 0.6;
+    cursor: not-allowed !important;
+    background-color: var(--850) !important;
+    border-color: var(--700) !important;
+    color: var(--500) !important;
+}
+
+/* ========== 顶部操作按钮组 ========== */
+.dol-opt-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* ========== 拖拽排序与指示线 ========== */
+.dol-opt-drag-handle {
+    cursor: grab;
+    padding: 2px 6px 2px 2px;
+    font-size: 1.1em;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    color: var(--600);
+    transition: color 0.15s ease;
+    flex-shrink: 0;
+}
+
+.dol-opt-drag-handle:hover,
+.dol-opt-item:hover .dol-opt-drag-handle {
+    color: var(--gold);
+}
+
+.dol-opt-drag-handle:active {
+    cursor: grabbing;
+}
+
+.dol-opt-item[draggable="true"] {
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.dol-opt-item.dragging,
+.dol-opt-item.touch-dragging {
+    opacity: 0.45 !important;
+    background-color: var(--750) !important;
+    border: 1px dashed var(--gold) !important;
+}
+
+.dol-opt-item.drag-over-top {
+    border-top: 2px solid var(--gold) !important;
+}
+
+.dol-opt-item.drag-over-bottom {
+    border-bottom: 2px solid var(--gold) !important;
+}
+
+/* ========== 模组高亮呼吸动画 ========== */
+@keyframes dolOptHighlightPulse {
+    0% {
+        background-color: rgba(218, 165, 32, 0.45);
+        border-color: var(--gold);
+        box-shadow: 0 0 10px rgba(218, 165, 32, 0.6);
+    }
+    35% {
+        background-color: rgba(218, 165, 32, 0.25);
+        border-color: var(--gold);
+        box-shadow: 0 0 14px rgba(218, 165, 32, 0.8);
+    }
+    100% {
+        background-color: transparent;
+        border-color: var(--800);
+        box-shadow: none;
+    }
+}
+
+.dol-opt-item.dol-opt-item-highlight {
+    animation: dolOptHighlightPulse 2.8s ease-out forwards;
+    border: 1px solid var(--gold) !important;
+}
+
+/* ========== 7. 实体操作按钮组 (Action Buttons) ========== */
+.dol-opt-btn-group {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+}
+
+.dol-opt-btn-group button {
+    background-color: #2b2b32 !important;
+    border: 1px solid var(--600) !important;
+    color: var(--000) !important;
+    padding: 3px 10px !important;
+    font-size: 0.82em !important;
+    font-weight: 500 !important;
+    min-width: unset !important;
+    white-space: nowrap !important;
+    border-radius: 3px !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+    transition: all 0.12s ease !important;
+    cursor: pointer !important;
+}
+
+.dol-opt-btn-group button:hover {
+    background-color: var(--700) !important;
+    border-color: var(--300) !important;
+    color: #fff !important;
+}
+
+.dol-opt-btn-group button:active {
+    transform: translateY(1px) !important;
+    box-shadow: none !important;
+}
+
+/* 状态切换：启用按钮微绿高亮 */
+.dol-opt-btn-group button.btn-enable {
+    border-color: rgba(34, 197, 94, 0.55) !important;
+    color: var(--green) !important;
+    font-weight: bold !important;
+}
+
+.dol-opt-btn-group button.btn-enable:hover {
+    background-color: #1a3d24 !important;
+    border-color: var(--green) !important;
+    color: #fff !important;
+}
+
+/* 破坏性操作：删除按钮微红警示 */
+.dol-opt-btn-group button.btn-delete {
+    border-color: rgba(236, 53, 53, 0.5) !important;
+}
+
+.dol-opt-btn-group button.btn-delete span.red {
+    font-weight: bold;
+}
+
+.dol-opt-btn-group button.btn-delete:hover {
+    background-color: #4a1515 !important;
+    border-color: var(--red) !important;
+}
+
+.dol-opt-btn-group button.btn-delete:hover span.red {
+    color: #fff !important;
+}
+
+.mod-empty {
+    text-align: center;
+    padding: 14px 0;
+    font-size: 0.85em;
+}
+
+/* ========== 8. 拖放上传区域 ========== */
+.drop-zone {
+    border: 1px dashed var(--600);
+    background-color: var(--850);
+    padding: 24px 16px;
+    text-align: center;
+    cursor: pointer;
+    margin-top: 6px;
+    position: relative;
+    border-radius: 3px;
+    transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+
+.drop-zone:hover,
+.drop-zone.drag-over {
+    border-color: var(--gold);
+    background-color: var(--800);
+}
+
+.drop-text {
+    font-size: 0.95em;
+    font-weight: bold;
+}
+
+.drop-subtext {
+    font-size: 0.8em;
+    margin-top: 4px;
+}
+
+.drop-zone input[type="file"] {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+}
+
+/* ========== 9. ReadMe 浏览器布局 ========== */
+.dol-opt-readme-layout {
+    display: flex;
+    gap: 14px;
+    min-height: 420px;
+}
+
+.dol-opt-readme-sidebar {
+    width: 230px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-right: 1px solid var(--750);
+    padding-right: 10px;
+}
+
+.dol-opt-search-input {
+    width: 100%;
+    box-sizing: border-box;
+    background-color: var(--900);
+    border: 1px solid var(--700);
+    color: var(--000);
+    padding: 5px 8px;
+    font-size: 0.85em;
+    border-radius: 3px;
+}
+
+.dol-opt-search-input:focus {
+    border-color: var(--gold);
+    outline: none;
+}
+
+.dol-opt-readme-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    overflow-y: auto;
+    max-height: 480px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.dol-opt-readme-mod-item {
+    padding: 6px 8px;
+    font-size: 0.84em;
+    cursor: pointer;
+    border-bottom: 1px solid var(--800);
+    border-left: 3px solid transparent;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+    word-break: break-all;
+}
+
+.dol-opt-readme-mod-item:hover {
+    background-color: var(--800);
+}
+
+/* ReadMe 选中项金色立体指示条 */
+.dol-opt-readme-mod-item.active {
+    background-color: var(--750) !important;
+    border-left: 3px solid var(--gold) !important;
+    color: var(--gold) !important;
+    font-weight: bold !important;
+}
+
+.dol-opt-readme-content {
+    flex: 1 1 auto;
+    min-width: 0;
+    max-height: 520px;
+    overflow-y: auto;
+    padding-right: 6px;
+}
+
+.dol-opt-readme-header {
+    border-bottom: 1px solid var(--750);
+    padding-bottom: 8px;
+    margin-bottom: 12px;
+}
+
+.dol-opt-readme-meta {
+    font-size: 0.8em;
+    display: flex;
+    gap: 12px;
+}
+
+.dol-opt-markdown-view {
+    font-size: 0.88em;
+    line-height: 1.65;
+}
+
+.dol-opt-readme-image {
+    display: block;
+    max-width: 100%;
+    height: auto;
+    margin: 10px auto;
+    border-radius: 4px;
+}
+
+/* 徽章与行内图片 */
+.dol-opt-readme-badge,
+.dol-opt-readme-badge-link .dol-opt-readme-image {
+    display: inline-block;
+    max-height: 20px;
+    height: 20px;
+    width: auto;
+    margin: 2px 3px;
+    vertical-align: middle;
+    border-radius: 3px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
+    transition: transform 0.15s ease, opacity 0.15s ease;
+}
+
+.dol-opt-readme-badge-link:hover .dol-opt-readme-image {
+    transform: translateY(-1px);
+    opacity: 0.92;
+}
+
+/* 徽章流式排列容器 */
+.dol-opt-readme-badge-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+    margin: 6px 0 12px;
+    line-height: 1;
+}
+
+/* ReadMe 链接样式 */
+.dol-opt-readme-link {
+    color: var(--gold, #ffcc00);
+    text-decoration: none;
+    transition: color 0.15s ease, text-shadow 0.15s ease;
+}
+
+.dol-opt-readme-link:hover {
+    color: #ffe680;
+    text-shadow: 0 0 6px rgba(255, 204, 0, 0.35);
+    text-decoration: underline;
+}
+
+.dol-opt-readme-badge-link {
+    text-decoration: none !important;
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+}
+
+/* 图片加载失败优雅降级卡片 */
+.dol-opt-image-fallback {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    max-width: 100%;
+    margin: 8px 0;
+    padding: 8px 12px;
+    background: rgba(30, 30, 30, 0.7);
+    border: 1px dashed var(--700, #444);
+    border-radius: 4px;
+    box-sizing: border-box;
+}
+
+.dol-opt-image-fallback .fallback-icon {
+    font-size: 1.3em;
+    flex-shrink: 0;
+}
+
+.dol-opt-image-fallback .fallback-content {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 0.9em;
+}
+
+.dol-opt-image-fallback .fallback-title {
+    color: var(--def, #eee);
+    word-break: break-all;
+}
+
+.dol-opt-image-fallback .fallback-tip {
+    font-size: 0.85em;
+}
+
+.dol-opt-image-fallback .fallback-link {
+    font-size: 0.85em;
+    margin-top: 2px;
+}
+
+.dol-opt-readme-rule {
+    border: 0;
+    border-top: 1px solid var(--750);
+    margin: 14px 0;
+}
+
+.dol-opt-readme-empty {
+    color: var(--grey);
+    font-style: italic;
+}
+
+.dol-opt-readme-market-summary {
+    padding: 10px;
+    margin: 8px 0 12px;
+}
+
+.dol-opt-readme-market-summary p {
+    margin: 6px 0 10px;
+    line-height: 1.5;
+}
+
+.dol-opt-readme-repo {
+    display: inline-block;
+    text-decoration: none;
+}
+
+.dol-opt-code-block {
+    background-color: var(--900);
+    border: 1px solid var(--750);
+    padding: 8px 10px;
+    overflow-x: auto;
+    font-family: monospace;
+    font-size: 0.85em;
+    border-radius: 3px;
+}
+
+.dol-opt-inline-code {
+    background-color: var(--800);
+    padding: 1px 5px;
+    font-family: monospace;
+    font-size: 0.9em;
+    border-radius: 2px;
+}
+
+.dol-opt-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 8px;
+    margin-top: 10px;
+}
+
+.meta-item.full-width {
+    grid-column: span 2;
+}
+
+.meta-key {
+    font-size: 0.78em;
+    display: block;
+    margin-bottom: 2px;
+}
+
+.meta-val {
+    font-size: 0.88em;
+}
+
+.dep-tag {
+    display: inline-block;
+    margin-right: 6px;
+    font-size: 0.82em;
+}
+
+/* ========== 10. 加载日志区域与报警联动 ========== */
+.dol-opt-log-toolbar {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.dol-opt-log-search-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+}
+
+.dol-opt-log-actions-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
+    width: 100%;
+}
+
+.dol-opt-log-toolbar button {
+    background-color: #2b2b32 !important;
+    border: 1px solid var(--600) !important;
+    color: var(--000) !important;
+    padding: 3px 10px !important;
+    font-size: 0.82em !important;
+    border-radius: 3px !important;
+    cursor: pointer !important;
+    transition: all 0.12s ease !important;
+    white-space: nowrap !important;
+    width: auto !important;
+    max-width: none !important;
+    min-width: unset !important;
+}
+
+.dol-opt-log-toolbar button:hover {
+    background-color: var(--700) !important;
+    border-color: var(--300) !important;
+}
+
+/* 日志错误动态红框警报 */
+.dol-opt-log-toolbar button.has-errors {
+    border-color: var(--red) !important;
+    background-color: #381818 !important;
+}
+
+/* 日志警告动态金框警报 */
+.dol-opt-log-toolbar button.has-warnings {
+    border-color: var(--gold) !important;
+    background-color: #382e18 !important;
+}
+
+.dol-opt-log-search {
+    flex: 1 1 auto;
+    width: 100%;
+}
+
+.dol-opt-log-search-status {
+    font-size: 0.82em;
+    min-width: 44px;
+    text-align: center;
+    flex-shrink: 0;
+    padding: 2px 6px;
+    background-color: var(--850);
+    border: 1px solid var(--750);
+    border-radius: 3px;
+}
+
+.dol-opt-log-wrapper {
+    background-color: var(--900);
+    border: 1px solid var(--750);
+    padding: 8px 10px;
+    max-height: 480px;
+    overflow-y: auto;
+    font-family: monospace;
+    font-size: 0.78em;
+    line-height: 1.4;
+    border-radius: 3px;
+    transition: max-height 0.2s ease;
+}
+
+/* 全屏模组管理与日志弹窗 */
+/* 1. 父级遮罩容器同步扩展为 100% 视口，消除 backdrop-filter 包含块偏移并覆盖整个屏幕 */
+.customOverlayContainer:has(#customOverlay.dol-opt-overlay-fullscreen),
+.customOverlayContainer.dol-opt-container-fullscreen {
+    position: fixed !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100vw !important;
+    width: 100% !important;
+    height: 100vh !important;
+    height: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    z-index: 99999 !important;
+}
+
+/* 2. 弹窗本体在全屏容器内绝对铺满，严格限制在视口之内，杜绝任何右侧溢出 */
+#customOverlay.dol-opt-overlay-fullscreen {
+    position: absolute !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-sizing: border-box !important;
+    background-color: var(--900) !important;
+    z-index: 100000 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+}
+
+/* 全屏状态下顶部 Tab 栏完整铺满，关闭叉叉精准钉在右上角 */
+#customOverlay.dol-opt-overlay-fullscreen #customOverlayTitle {
+    flex-shrink: 0 !important;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 0.5rem 0.75rem 0 0.75rem !important;
+    background-color: var(--850) !important;
+}
+
+#customOverlay.dol-opt-overlay-fullscreen .customOverlayClose {
+    right: 18px !important;
+}
+
+/* 3. 内容区域 Flex 垂直展开，禁止外层滚动条，把滚动权完全移交给日志区域 */
+#customOverlay.dol-opt-overlay-fullscreen #customOverlayContent {
+    flex: 1 1 auto !important;
+    height: auto !important;
+    max-height: none !important;
+    margin: 0 0.75rem 0.75rem 0.75rem !important;
+    padding: 0.75rem !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+/* 4. 全屏日志容器及其子项自适应布局 */
+#customOverlay.dol-opt-overlay-fullscreen .dol-opt-container {
+    display: flex !important;
+    flex-direction: column !important;
+    height: 100% !important;
+    max-height: 100% !important;
+    overflow: hidden !important;
+    padding: 0 !important;
+    margin: 0 !important;
+}
+
+/* 全屏状态下隐藏冗长诊断卡片与大标题，把屏幕垂直空间 100% 释放给日志与搜索工具 */
+#customOverlay.dol-opt-overlay-fullscreen #dolOptLogDiagnosisContainer {
+    display: none !important;
+}
+
+#customOverlay.dol-opt-overlay-fullscreen .dol-opt-group-header > span.gold {
+    display: none !important;
+}
+
+#customOverlay.dol-opt-overlay-fullscreen .dol-opt-group-header {
+    flex-shrink: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    margin: 0 0 6px 0 !important;
+    padding: 0 !important;
+    gap: 6px !important;
+}
+
+#customOverlay.dol-opt-overlay-fullscreen .dol-opt-log-toolbar {
+    flex-shrink: 0 !important;
+    margin-bottom: 6px !important;
+}
+
+/* 5. 日志文本区域吃满剩余全部视口垂直空间，单一内部滚动条，极致视距与截图体验 */
+#customOverlay.dol-opt-overlay-fullscreen .dol-opt-log-wrapper {
+    flex: 1 1 auto !important;
+    height: 100% !important;
+    max-height: none !important;
+    min-height: 180px !important;
+    overflow-y: auto !important;
+    overflow-x: auto !important;
+}
+
+/* 日志级别筛选胶囊组 */
+.dol-opt-log-filter-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+}
+
+.dol-opt-log-filter-btn {
+    padding: 3px 8px !important;
+    font-size: 0.82em !important;
+    border-radius: 3px !important;
+    background-color: var(--850) !important;
+    border: 1px solid var(--750) !important;
+    color: var(--def) !important;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.dol-opt-log-filter-btn:hover {
+    background-color: var(--750) !important;
+    border-color: var(--500) !important;
+}
+
+.dol-opt-log-filter-btn.active {
+    background-color: var(--700) !important;
+    border-color: var(--gold) !important;
+    color: var(--gold) !important;
+    font-weight: bold;
+}
+
+.dol-opt-log-filter-btn.filter-error.active {
+    background-color: #381818 !important;
+    border-color: var(--red) !important;
+    color: #ff8888 !important;
+}
+
+.dol-opt-log-filter-btn.filter-warn.active {
+    background-color: #382e18 !important;
+    border-color: var(--gold) !important;
+    color: #ffd700 !important;
+}
+
+/* 级别筛选隐藏规则 */
+.dol-opt-log-wrapper.filter-error-only .dol-opt-log-row:not(.log-row-error) {
+    display: none !important;
+}
+
+.dol-opt-log-wrapper.filter-warn-only .dol-opt-log-row:not(.log-row-warn) {
+    display: none !important;
+}
+
+.dol-opt-log-wrapper.filter-issues-only .dol-opt-log-row:not(.log-row-error):not(.log-row-warn) {
+    display: none !important;
+}
+
+.dol-opt-log-wrapper mark.dol-opt-log-match {
+    background-color: var(--gold);
+    color: var(--900);
+    padding: 0 1px;
+}
+
+.dol-opt-log-wrapper mark.dol-opt-log-match.active {
+    background-color: var(--red);
+    color: #fff;
+}
+
+/* ========== 10.1 置顶诊断卡片 (0 Emoji) ========== */
+.dol-opt-diagnosis-card {
+    background-color: var(--850);
+    border: 1px solid var(--700);
+    border-radius: 4px;
+    padding: 10px 14px;
+    margin-bottom: 12px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.dol-opt-diagnosis-card.diag-error {
+    border-color: var(--red);
+    background-color: rgba(45, 15, 15, 0.7);
+}
+
+.dol-opt-diagnosis-card.diag-normal {
+    border-color: var(--green);
+    background-color: rgba(15, 35, 20, 0.6);
+}
+
+.dol-opt-diag-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 8px;
+}
+
+.dol-opt-diag-title {
+    font-size: 0.96em;
+    font-weight: bold;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.dol-opt-diag-title.red {
+    color: #ff6b6b;
+}
+
+.dol-opt-diag-title.green {
+    color: #51cf66;
+}
+
+.dol-opt-btn-locate {
+    padding: 3px 10px !important;
+    font-size: 0.82em !important;
+}
+
+.dol-opt-diag-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+    flex-wrap: wrap;
+}
+
+.diag-label {
+    font-size: 0.82em;
+    flex-shrink: 0;
+}
+
+.diag-badges {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+}
+
+.dol-opt-diag-badge {
+    background-color: var(--800);
+    border: 1px solid var(--600);
+    color: var(--000);
+    font-size: 0.78em;
+    padding: 2px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.dol-opt-diag-badge:hover {
+    background-color: var(--700);
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
+.dol-opt-diag-badge.mod-badge {
+    border-color: #7b4397;
+    color: #e0b0ff;
+}
+
+.dol-opt-diag-badge.file-badge {
+    border-color: #2b5876;
+    color: #8ed0ff;
+}
+
+.dol-opt-diag-issues {
+    margin-top: 10px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding-top: 8px;
+}
+
+.dol-opt-issue-item {
+    background-color: rgba(0, 0, 0, 0.3);
+    border-left: 3px solid var(--gold);
+    padding: 6px 10px;
+    margin-bottom: 6px;
+    border-radius: 2px;
+}
+
+.dol-opt-issue-item .issue-title {
+    font-size: 0.88em;
+    font-weight: bold;
+    margin-bottom: 2px;
+}
+
+.dol-opt-issue-item .issue-desc {
+    font-size: 0.8em;
+    line-height: 1.4;
+    margin-bottom: 3px;
+}
+
+.dol-opt-issue-item .issue-solution {
+    font-size: 0.82em;
+    line-height: 1.4;
+}
+
+.dol-opt-diag-footer {
+    margin-top: 10px;
+    padding-top: 6px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    font-size: 0.84em;
+}
+
+/* ========== 10.2 结构化日志行排版 ========== */
+.dol-opt-log-stream {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.dol-opt-log-row {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 3px 6px;
+    border-radius: 2px;
+    font-family: Consolas, "Liberation Mono", Menlo, Courier, monospace;
+    font-size: 0.88em;
+    line-height: 1.4;
+    border-left: 3px solid transparent;
+    transition: background-color 0.12s ease;
+    word-break: break-word;
+}
+
+.dol-opt-log-row:hover {
+    background-color: rgba(255, 255, 255, 0.04);
+}
+
+.dol-opt-log-row.log-row-error {
+    background-color: rgba(220, 53, 69, 0.08);
+    border-left-color: var(--red);
+}
+
+.dol-opt-log-row.log-row-warn {
+    background-color: rgba(255, 193, 7, 0.05);
+    border-left-color: var(--gold);
+}
+
+.dol-opt-log-row.log-row-info {
+    border-left-color: var(--800);
+}
+
+.dol-opt-log-time {
+    color: var(--500);
+    opacity: 0.75;
+    font-size: 0.84em;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.dol-opt-log-badge {
+    font-size: 0.76em;
+    font-weight: bold;
+    padding: 1px 5px;
+    border-radius: 2px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.dol-opt-log-badge.log-badge-error {
+    background-color: rgba(220, 53, 69, 0.3);
+    color: #ff6b6b;
+    border: 1px solid #ff4d4f;
+}
+
+.dol-opt-log-badge.log-badge-warn {
+    background-color: rgba(255, 193, 7, 0.2);
+    color: #ffd166;
+    border: 1px solid #e0a800;
+}
+
+.dol-opt-log-badge.log-badge-info {
+    background-color: rgba(100, 150, 200, 0.12);
+    color: #a0c4ff;
+}
+
+.dol-opt-log-msg {
+    flex: 1 1 auto;
+    color: var(--000);
+}
+
+.dol-opt-highlight-pulse {
+    animation: dolOptPulse 1.2s ease-in-out 2;
+}
+
+@keyframes dolOptPulse {
+    0% { background-color: rgba(220, 53, 69, 0.4); }
+    50% { background-color: rgba(255, 215, 0, 0.3); }
+    100% { background-color: rgba(220, 53, 69, 0.08); }
+}
+
+/* ========== 11. Toast 提示 ========== */
+.toast {
+    position: fixed;
+    bottom: 32px;
+    left: 50%;
+    transform: translateX(-50%) translateY(16px);
+    opacity: 0;
+    visibility: hidden;
+    background-color: var(--900);
+    border: 1px solid var(--700);
+    color: var(--000);
+    padding: 8px 16px;
+    font-size: 0.85em;
+    line-height: 1.4;
+    z-index: 100005;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0.2s;
+    pointer-events: none;
+    max-width: min(90vw, 460px);
+    box-sizing: border-box;
+    text-align: center;
+    border-radius: 4px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.75);
+    word-break: break-word;
+}
+
+.toast.show {
+    opacity: 1;
+    visibility: visible;
+    transform: translateX(-50%) translateY(0);
+}
+
+.toast.warning {
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
+.toast.success {
+    border-color: var(--green);
+    color: var(--green);
+}
+
+/* 诊断长图移动端预览模态框 */
+.dol-opt-screenshot-preview {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: 100%;
+    box-sizing: border-box;
+}
+
+.dol-opt-screenshot-tip {
+    font-size: 0.85em;
+    line-height: 1.4;
+    text-align: center;
+    padding: 4px 8px;
+    background: rgba(255, 215, 0, 0.08);
+    border: 1px dashed rgba(255, 215, 0, 0.35);
+    border-radius: 4px;
+}
+
+.dol-opt-screenshot-box {
+    max-height: 52vh;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border: 1px solid var(--700);
+    border-radius: 4px;
+    background: #0d0d0d;
+    padding: 4px;
+    -webkit-overflow-scrolling: touch;
+}
+
+.dol-opt-screenshot-img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 2px;
+    user-select: auto;
+    -webkit-user-select: auto;
+    -webkit-touch-callout: default;
+}
+
+/* =========================================================================
+ * 移动端与窄屏响应式核心适配 (max-width: 640px)
+ * ========================================================================= */
+@media (max-width: 640px) {
+    /* 容器增加底部安全间距，彻底防范底层状态栏与浮动球遮挡 */
+    .dol-opt-container {
+        padding: 4px 0 60px 0 !important;
+    }
+
+    .toast {
+        bottom: max(36px, calc(env(safe-area-inset-bottom, 0px) + 20px));
+        max-width: calc(100vw - 28px);
+        font-size: 0.82em;
+        padding: 6px 12px;
+    }
+
+    /* 移动端 Tab 按钮弹性等分自适应 */
+    #customOverlay[data-overlay="modloader"] #overlayTabs button {
+        /* flex: 1 1 0 !important; */
+        /* width: 0 !important; */
+        max-width: none !important;
+        min-width: 0 !important;
+        padding: 6px 1px !important;
+        font-size: 0.82em !important;
+        white-space: nowrap !important;
+        letter-spacing: -0.5px !important;
+    }
+
+    /* 统计网格 2x2 对称排版 */
+    .dol-opt-stats-container,
+    #dolOptMarketStats {
+        grid-template-columns: repeat(2, 1fr) !important;
+        gap: 6px !important;
+    }
+
+    .dol-opt-stat-card {
+        padding: 8px 4px;
+    }
+
+    .dol-opt-stat-num {
+        font-size: 1.3em;
+    }
+
+    .dol-opt-download-progress {
+        flex-wrap: wrap;
+    }
+
+    .dol-opt-download-track {
+        flex-basis: 100%;
+    }
+
+    .dol-opt-download-label {
+        flex: 1 1 auto;
+        min-width: 0;
+        white-space: normal;
+        text-align: left;
+    }
+
+    /* 重启区域移动端整行布局 */
+    .dol-opt-section {
+        padding: 8px 6px;
+    }
+
+    #btnRestart {
+        width: 100% !important;
+        display: block;
+        box-sizing: border-box;
+        text-align: center;
+        padding: 9px 0 !important;
+    }
+
+    .dol-opt-restart-hint {
+        display: block;
+        margin-left: 0 !important;
+        margin-top: 6px !important;
+        line-height: 1.35;
+        font-size: 0.8em;
+    }
+
+    /* 列表项自适应双层布局：“上信息、下操作” */
+    .dol-opt-item {
+        display: flex !important;
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 6px !important;
+        padding: 8px 6px !important;
+    }
+
+    /* 上层：状态标签 + 完整模组名称与版本 */
+    .dol-opt-item-info {
+        display: flex !important;
+        align-items: flex-start !important;
+        gap: 6px !important;
+        width: 100% !important;
+    }
+
+    .dol-opt-status-tag,
+    .dol-opt-order-tag {
+        white-space: nowrap !important;
+        flex-shrink: 0 !important;
+        font-size: 0.85em !important;
+        padding-top: 1px;
+    }
+
+    .dol-opt-item-title {
+        font-size: 0.92em !important;
+        line-height: 1.35 !important;
+        word-break: break-word !important;
+    }
+
+    .dol-opt-item-desc {
+        font-size: 0.75em !important;
+        line-height: 1.3 !important;
+    }
+
+    /* 下层：操作按钮栏，彻底覆盖原版 width: 100% 导致的压缩变形 */
+    .dol-opt-btn-group {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: flex-start !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        gap: 6px !important;
+        margin-top: 4px !important;
+    }
+
+    .dol-opt-btn-group button {
+        width: auto !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        min-height: 32px !important;
+        height: 32px !important;
+        padding: 3px 6px !important;
+        font-size: 0.82em !important;
+        white-space: nowrap !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+    }
+
+    /* 移动排序按钮：▲ / ▼ 保持方正触控块 */
+    .dol-opt-btn-group button.dol-opt-btn-move {
+        flex: 0 0 36px !important;
+        width: 36px !important;
+        padding: 0 !important;
+        text-align: center !important;
+        font-size: 0.9em !important;
+    }
+
+    /* 启用/禁用与删除按钮：平分剩余整行空间 */
+    .dol-opt-btn-group button.dol-opt-btn-toggle,
+    .dol-opt-btn-group button.dol-opt-btn-delete {
+        flex: 1 1 0 !important;
+        padding: 4px 6px !important;
+        text-align: center !important;
+    }
+
+    /* 分组标题自适应 */
+    .dol-opt-group-header {
+        align-items: stretch !important;
+        flex-direction: column !important;
+        gap: 6px !important;
+    }
+
+    .dol-opt-group-header button,
+    .dol-opt-header-actions button {
+        width: 100% !important;
+        min-height: 34px !important;
+    }
+
+    .dol-opt-header-actions {
+        display: flex !important;
+        flex-direction: column !important;
+        width: 100% !important;
+        gap: 6px !important;
+    }
+
+    /* ReadMe 浏览器移动端上下折叠 */
+    .dol-opt-readme-layout {
+        flex-direction: column !important;
+        min-height: unset !important;
+    }
+
+    .dol-opt-readme-sidebar {
+        width: 100% !important;
+        border-right: none !important;
+        border-bottom: 1px solid var(--750) !important;
+        padding-right: 0 !important;
+        padding-bottom: 8px !important;
+    }
+
+    .dol-opt-readme-list {
+        max-height: 140px !important;
+    }
+
+    .dol-opt-meta-grid {
+        grid-template-columns: 1fr !important;
+    }
+
+    .meta-item.full-width {
+        grid-column: span 1 !important;
+    }
+
+    /* 日志工具栏移动端结构化两行排布 */
+    .dol-opt-log-toolbar {
+        display: flex !important;
+        flex-direction: column !important;
+        gap: 6px !important;
+        width: 100% !important;
+        margin-bottom: 8px !important;
+    }
+
+    /* 第一行：搜索框与 0/0 匹配计数 */
+    .dol-opt-log-search-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 6px !important;
+        width: 100% !important;
+    }
+
+    .dol-opt-log-search {
+        flex: 1 1 auto !important;
+        width: auto !important;
+        min-width: 0 !important;
+        margin: 0 !important;
+        height: 32px !important;
+        box-sizing: border-box !important;
+    }
+
+    .dol-opt-log-search-status {
+        flex: 0 0 auto !important;
+        min-width: 44px !important;
+        height: 32px !important;
+        line-height: 30px !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+        padding: 0 6px !important;
+        font-size: 0.82em !important;
+    }
+
+    /* 第二行：4 个控制按钮平分一行排布 */
+    .dol-opt-log-actions-row {
+        display: flex !important;
+        align-items: center !important;
+        gap: 4px !important;
+        width: 100% !important;
+    }
+
+    .dol-opt-log-actions-row button,
+    .dol-opt-log-toolbar button.dol-opt-log-btn {
+        /* flex: 1 1 0 !important; */   /*这里两个地方注释掉，我发现显示起来对移动端更加友好*/
+        width: auto !important;
+        max-width: none !important;
+        min-width: 0 !important;
+        min-height: 32px !important;
+        height: 32px !important;
+        /* padding: 3px 2px !important; */
+        font-size: 0.78em !important;
+        white-space: nowrap !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+    }
+
+    /* 移动端全屏日志专属视距与操作优化 */
+    #customOverlay.dol-opt-overlay-fullscreen #customOverlayContent {
+        margin: 0 4px 4px 4px !important;
+        padding: 6px !important;
+    }
+
+    #customOverlay.dol-opt-overlay-fullscreen .dol-opt-container {
+        padding: 0 !important;
+        margin: 0 !important;
+    }
+
+    #customOverlay.dol-opt-overlay-fullscreen .dol-opt-group-header {
+        display: flex !important;
+        flex-direction: row !important;
+        align-items: center !important;
+        justify-content: stretch !important;
+        width: 100% !important;
+        margin: 0 0 6px 0 !important;
+        padding: 0 !important;
+    }
+
+    #customOverlay.dol-opt-overlay-fullscreen .dol-opt-log-header-actions {
+        display: flex !important;
+        flex-direction: row !important;
+        width: 100% !important;
+        gap: 4px !important;
+    }
+
+    #customOverlay.dol-opt-overlay-fullscreen .dol-opt-log-header-actions button {
+        flex: 1 1 0 !important;
+        width: auto !important;
+        min-width: 0 !important;
+        height: 32px !important;
+        min-height: 32px !important;
+        padding: 2px 4px !important;
+        font-size: 0.82em !important;
+        white-space: nowrap !important;
+        text-align: center !important;
+        box-sizing: border-box !important;
+        margin: 0 !important;
+    }
+
+    #customOverlay.dol-opt-overlay-fullscreen .dol-opt-log-wrapper {
+        min-height: 240px !important;
+    }
+}
+
+/* ========== 游戏原生暗黑风格模态对话框 (Game-Native Modal Dialog) ========== */
+.dol-opt-modal-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(2px);
+    z-index: 100000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    animation: dolOptFadeIn 0.15s ease-out forwards;
+}
+
+.dol-opt-modal-dialog {
+    position: relative;
+    width: 100%;
+    min-width: 0;
+    max-width: 440px;
+    box-sizing: border-box;
+    background-color: var(--850, #1a1a1a);
+    border: 1px solid var(--600, #444);
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.85);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    animation: dolOptScaleIn 0.18s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    font-family: inherit;
+    color: #e0e0e0;
+}
+
+.dol-opt-modal-backdrop.dol-opt-modal-closing {
+    opacity: 0;
+    transition: opacity 0.18s ease-out;
+}
+
+.dol-opt-modal-backdrop.dol-opt-modal-closing .dol-opt-modal-dialog {
+    transform: scale(0.95);
+    transition: transform 0.18s ease-out;
+}
+
+@keyframes dolOptFadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+}
+
+@keyframes dolOptScaleIn {
+    from {
+        opacity: 0;
+        transform: scale(0.92);
+    }
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+.dol-opt-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    background-color: var(--900, #111);
+    border-bottom: 1px solid var(--750, #333);
+}
+
+.dol-opt-modal-title {
+    min-width: 0;
+    font-size: 1.05em;
+    font-weight: bold;
+    letter-spacing: 0.5px;
+    overflow-wrap: anywhere;
+}
+
+.dol-opt-modal-close {
+    flex-shrink: 0;
+    background: transparent !important;
+    border: none !important;
+    color: var(--400, #888) !important;
+    font-size: 1.4em !important;
+    line-height: 1 !important;
+    padding: 0 4px !important;
+    cursor: pointer !important;
+    transition: color 0.15s ease !important;
+}
+
+.dol-opt-modal-close:hover {
+    color: #fff !important;
+}
+
+.dol-opt-modal-body {
+    padding: 20px 18px;
+    font-size: 0.95em;
+    line-height: 1.6;
+    color: #eee;
+    word-break: break-word;
+}
+
+.dol-opt-modal-message {
+    color: #ddd;
+}
+
+.dol-opt-modal-select-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-top: 16px;
+    color: var(--400, #aaa);
+}
+
+.dol-opt-modal-select {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 7px 9px;
+    background: var(--900, #111);
+    border: 1px solid var(--600, #444);
+    color: var(--000, #eee);
+}
+
+.dol-opt-install-dialog {
+    max-width: 560px;
+    max-height: calc(100vh - 32px);
+}
+
+.dol-opt-install-dialog .dol-opt-modal-body {
+    overflow-y: auto;
+}
+
+.dol-opt-install-overview {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--650, #3c3c3c);
+}
+
+.dol-opt-install-overview strong {
+    color: var(--gold, #d4af37);
+    font-size: 1.08em;
+}
+
+.dol-opt-install-overview span,
+.dol-opt-install-label,
+.dol-opt-install-size {
+    color: var(--400, #aaa);
+}
+
+.dol-opt-install-files {
+    margin-top: 4px;
+}
+
+.dol-opt-install-file {
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: baseline;
+    padding: 9px 0;
+    border-bottom: 1px solid var(--750, #303030);
+}
+
+.dol-opt-install-name {
+    min-width: 0;
+    color: var(--000, #eee);
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+.dol-opt-install-size {
+    white-space: nowrap;
+}
+
+.dol-opt-install-meta {
+    margin: 6px 0 0;
+}
+
+.dol-opt-install-meta > div {
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr);
+    gap: 10px;
+    padding: 7px 0;
+}
+
+.dol-opt-install-meta dt {
+    color: var(--400, #aaa);
+}
+
+.dol-opt-install-meta dd {
+    margin: 0;
+    color: var(--100, #ddd);
+}
+
+.dol-opt-install-dependencies {
+    margin-bottom: 14px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--650, #3c3c3c);
+}
+
+.dol-opt-install-dependencies strong {
+    color: var(--gold, #d4af37);
+}
+
+.dol-opt-install-dependencies ul {
+    margin: 6px 0 0;
+    padding-left: 20px;
+}
+
+.dol-opt-install-dialog .dol-opt-modal-select-wrap {
+    padding-top: 14px;
+    border-top: 1px solid var(--650, #3c3c3c);
+}
+
+.dol-opt-install-dialog .dol-opt-modal-select-wrap > span {
+    color: var(--gold, #d4af37);
+    font-weight: 600;
+}
+
+.dol-opt-modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    padding: 12px 16px;
+    background-color: var(--900, #111);
+    border-top: 1px solid var(--750, #333);
+}
+
+.dol-opt-modal-footer .macro-button {
+    padding: 6px 16px !important;
+    font-size: 0.9em !important;
+    min-width: 80px !important;
+    white-space: nowrap !important;
+    cursor: pointer !important;
+    border-radius: 3px !important;
+}
+
+.dol-opt-modal-footer .macro-button:disabled {
+    opacity: 0.45;
+    cursor: not-allowed !important;
+    box-shadow: none !important;
+}
+
+.dol-opt-install-dialog .dol-opt-modal-footer .macro-button {
+    flex: 1 1 0;
+}
+
+.dol-opt-modal-btn-cancel {
+    background-color: var(--800, #222) !important;
+    border: 1px solid var(--500, #555) !important;
+    color: #ccc !important;
+}
+
+.dol-opt-modal-btn-cancel:hover {
+    background-color: var(--750, #333) !important;
+    color: #fff !important;
+    border-color: #888 !important;
+}
+
+.dol-opt-btn-danger {
+    background-color: #3b1818 !important;
+    border: 1px solid var(--red, #e53935) !important;
+    color: #ff9999 !important;
+    font-weight: bold !important;
+}
+
+.dol-opt-btn-danger:hover {
+    background-color: #551d1d !important;
+    border-color: #ff6666 !important;
+    color: #fff !important;
+    box-shadow: 0 0 8px rgba(229, 57, 53, 0.4) !important;
+}
+
+@media (max-width: 600px) {
+    .dol-opt-install-dialog .dol-opt-modal-body {
+        padding: 14px 12px;
+    }
+
+    .dol-opt-install-file {
+        grid-template-columns: minmax(0, 1fr) auto;
+        gap: 3px 8px;
+    }
+
+    .dol-opt-install-file .dol-opt-install-label {
+        grid-column: 1 / -1;
+        font-size: 0.82em;
+    }
+
+    .dol-opt-install-meta > div {
+        grid-template-columns: 1fr;
+        gap: 1px;
+    }
+
+    .dol-opt-install-dialog .dol-opt-modal-footer {
+        gap: 8px;
+        padding: 10px 12px;
+    }
+}
+
+@media (max-width: 420px) {
+    .dol-opt-install-overview {
+        flex-direction: column;
+        gap: 2px;
+    }
+}
+
+/* ========== 吸顶操作与提示工具栏（模组管理页面） ========== */
+.dol-opt-sticky-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 30;
+    background-color: var(--850, #181818);
+    padding-top: 4px;
+    padding-bottom: 8px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--750, #333);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.45);
+}
+
+.dol-opt-sticky-toolbar .dol-opt-hint-bar {
+    margin-bottom: 8px;
+}
+
+.dol-opt-sticky-toolbar .dol-opt-group-header {
+    margin-bottom: 0;
+}
+
+/* =========================================================================
+ * 模组市场 (Dol Mod Market) 专属样式表
+ * 遵循原生暗黑文字冒险风格与移动端第一优先适配原则
+ * ========================================================================= */
+
+#dolOptModMarketContainer {
+    padding-bottom: 60px; /* 底部安全边距，防底层状态栏遮挡 */
+}
+
+.dol-opt-market-source {
+    margin: -2px 2px 10px;
+    font-size: 0.82em;
+    line-height: 1.5;
+}
+
+.dol-opt-market-source a {
+    color: var(--gold, #d4af37);
+    text-decoration: none;
+    border-bottom: 1px dotted currentColor;
+}
+
+.dol-opt-market-source a:hover,
+.dol-opt-market-source a:focus-visible {
+    color: #fff;
+    border-bottom-style: solid;
+    outline: none;
+}
+
+/* 工具栏容器 */
+.dol-opt-market-toolbar {
+    margin-bottom: 12px;
+    background-color: var(--850, #181818);
+    padding: 10px;
+    border: 1px solid var(--750, #333);
+    border-radius: 4px;
+}
+
+.dol-opt-market-search-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.dol-opt-market-search-row .dol-opt-search-input {
+    flex: 1;
+    min-width: 0;
+    height: 34px;
+    box-sizing: border-box;
+    padding: 6px 10px;
+    background-color: var(--900, #111);
+    border: 1px solid var(--600, #555);
+    color: #fff;
+    border-radius: 3px;
+    font-size: 0.9em;
+}
+
+.dol-opt-market-search-row .dol-opt-search-input:focus {
+    border-color: var(--gold, #d4af37);
+    outline: none;
+}
+
+/* 过滤行与胶囊分类 */
+.dol-opt-market-filter-row {
+    display: grid;
+    gap: 10px;
+}
+
+.dol-opt-market-filter-footer {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--750, #333);
+}
+
+.dol-opt-market-text-action,
+.dol-opt-market-ignore-actions button {
+    min-height: 32px;
+    padding: 3px 0;
+    background: transparent;
+    border: 0;
+    color: var(--gold, #d4af37);
+    font: inherit;
+    font-size: 0.84em;
+    cursor: pointer;
+}
+
+.dol-opt-market-text-action:hover,
+.dol-opt-market-text-action:focus-visible,
+.dol-opt-market-ignore-actions button:hover,
+.dol-opt-market-ignore-actions button:focus-visible,
+.dol-opt-market-text-action.is-selected {
+    color: #fff;
+    text-decoration: underline;
+    text-underline-offset: 3px;
+    outline: none;
+}
+
+.dol-opt-market-capsules {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.capsule-btn {
+    width: 100% !important;
+    min-width: 0 !important;
+    padding: 4px 10px !important;
+    font-size: 0.82em !important;
+    background-color: var(--800, #222) !important;
+    border: 1px solid var(--700, #444) !important;
+    color: var(--300, #aaa) !important;
+    border-radius: 12px !important;
+    cursor: pointer !important;
+    min-height: 28px !important;
+    line-height: 1.2 !important;
+    transition: all 0.15s ease !important;
+}
+
+.capsule-btn:hover {
+    background-color: var(--750, #2a2a2a) !important;
+    color: #fff !important;
+    border-color: var(--600, #555) !important;
+}
+
+.capsule-btn.active {
+    background-color: #383015 !important;
+    border-color: var(--gold, #d4af37) !important;
+    color: var(--gold, #d4af37) !important;
+    font-weight: bold !important;
+}
+
+.dol-opt-market-selects {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+}
+
+.dol-opt-select {
+    width: 100%;
+    height: 30px;
+    padding: 2px 6px;
+    background-color: var(--850, #181818);
+    border: 1px solid var(--600, #555);
+    color: #eee;
+    border-radius: 3px;
+    font-size: 0.85em;
+    cursor: pointer;
+}
+
+.dol-opt-select:focus {
+    border-color: var(--gold, #d4af37);
+    outline: none;
+}
+
+/* 模组卡片网格布局 */
+.dol-opt-market-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+}
+
+/* 模组卡片 */
+.dol-opt-market-card {
+    background-color: var(--850, #181818);
+    border: 1px solid var(--750, #333);
+    border-radius: 4px;
+    padding: 12px 14px;
+    height: 290px;
+    display: flex;
+    flex-direction: column;
+    box-sizing: border-box;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.dol-opt-market-card:hover {
+    border-color: var(--600, #555);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.4);
+}
+
+.dol-opt-market-card-header {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.dol-opt-market-title-wrap {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 8px;
+}
+
+.dol-opt-market-title {
+    font-size: 1.05em;
+    font-weight: bold;
+    word-break: break-word;
+    line-height: 1.3;
+}
+
+/* 状态徽章 */
+.dol-opt-market-badge {
+    font-size: 0.75em;
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    line-height: 1.2;
+    border: 1px solid transparent;
+}
+
+.badge-update {
+    background-color: #3b3014;
+    border-color: var(--gold, #d4af37);
+    color: var(--gold, #d4af37);
+    font-weight: bold;
+}
+
+.badge-installed {
+    background-color: var(--800, #222);
+    border-color: var(--600, #555);
+    color: var(--300, #aaa);
+}
+
+.badge-ignored {
+    background-color: #29251b;
+    border-color: #806f45;
+    color: #c8b783;
+}
+
+.badge-new {
+    background-color: #162f1a;
+    border-color: #4caf50;
+    color: #81c784;
+}
+
+.badge-external {
+    background-color: #1e2838;
+    border-color: #4a6fa5;
+    color: #90caf9;
+}
+
+/* 标签列表 */
+.dol-opt-market-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.dol-opt-market-tag {
+    font-size: 0.72em;
+    padding: 1px 5px;
+    background-color: var(--800, #222);
+    border: 1px solid var(--700, #444);
+    color: var(--300, #888);
+    border-radius: 2px;
+}
+
+.dol-opt-market-category {
+    border-color: var(--gold, #d4af37);
+    color: var(--gold, #d4af37);
+}
+
+/* 元数据栏 */
+.dol-opt-market-meta {
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: 10px;
+    font-size: 0.82em;
+    margin-bottom: 8px;
+    line-height: normal;
+}
+
+/* 模组简介描述 */
+.dol-opt-market-desc {
+    font-size: 0.85em;
+    color: var(--200, #ccc);
+    line-height: 1.45;
+    margin-bottom: 12px;
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    word-break: break-word;
+}
+
+.dol-opt-market-desc::-webkit-scrollbar {
+    display: none;
+}
+
+/* 模组卡片底部操作栏 */
+.dol-opt-market-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: auto;
+}
+
+.dol-opt-market-ignore-actions {
+    display: flex;
+    gap: 18px;
+    margin: 0 0 4px;
+}
+
+.dol-opt-market-actions button,
+.dol-opt-market-actions .buttonlike {
+    min-height: 32px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    box-sizing: border-box !important;
+}
+
+.dol-opt-market-actions .btn-market-install,
+.dol-opt-market-actions .btn-market-update {
+    flex: 1;
+}
+
+.dol-opt-download-progress {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 10px;
+}
+
+.dol-opt-download-progress[hidden] {
+    display: none;
+}
+
+.dol-opt-download-track {
+    height: 6px;
+    flex: 1;
+    overflow: hidden;
+    border: 1px solid var(--700, #444);
+    border-radius: 4px;
+    background: var(--900, #111);
+}
+
+.dol-opt-download-bar {
+    width: 0;
+    height: 100%;
+    background: var(--gold, #d4af37);
+    transition: width 0.18s ease-out;
+}
+
+.dol-opt-download-label {
+    min-width: 104px;
+    font-size: 0.76em;
+    text-align: right;
+    white-space: nowrap;
+}
+
+.dol-opt-download-cancel {
+    flex: 0 0 auto;
+    padding: 2px 7px !important;
+    border: 1px solid var(--red, #b64b4b) !important;
+    background: transparent !important;
+    color: var(--red, #d66) !important;
+    font-size: 0.75em !important;
+    cursor: pointer;
+}
+
+.dol-opt-download-cancel[hidden] {
+    display: none !important;
+}
+
+.dol-opt-download-progress.is-indeterminate .dol-opt-download-bar {
+    width: 38%;
+    animation: dolOptDownloadFlow 1.1s ease-in-out infinite;
+}
+
+.dol-opt-download-progress.is-error .dol-opt-download-bar {
+    width: 100%;
+    background: var(--red, #b64b4b);
+}
+
+@keyframes dolOptDownloadFlow {
+    from { transform: translateX(-110%); }
+    to { transform: translateX(280%); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dol-opt-download-progress.is-indeterminate .dol-opt-download-bar {
+        width: 100%;
+        animation: none;
+        opacity: 0.65;
+    }
+}
+
+.dol-opt-btn-secondary {
+    background-color: var(--800, #222) !important;
+    border: 1px solid var(--700, #444) !important;
+    color: var(--300, #aaa) !important;
+    padding: 4px 12px !important;
+    border-radius: 3px !important;
+    font-size: 0.85em !important;
+}
+
+.dol-opt-btn-secondary[disabled] {
+    opacity: 0.55 !important;
+    cursor: default !important;
+}
+
+.dol-opt-btn-sub {
+    background-color: transparent !important;
+    border: 1px solid var(--600, #555) !important;
+    color: #ddd !important;
+    padding: 4px 10px !important;
+    border-radius: 3px !important;
+    font-size: 0.85em !important;
+    text-decoration: none !important;
+}
+
+.dol-opt-btn-sub:hover {
+    border-color: var(--gold, #d4af37) !important;
+    color: var(--gold, #d4af37) !important;
+}
+
+/* 窄屏与手机端响应式微调 */
+@media (max-width: 900px) {
+    .dol-opt-market-capsules {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+@media (max-width: 600px) {
+    .dol-opt-market-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .dol-opt-market-search-row {
+        display: grid;
+        grid-template-columns: 1fr;
+    }
+
+    .dol-opt-market-search-row .dol-opt-search-input {
+        grid-column: auto;
+    }
+
+    .dol-opt-market-selects {
+        grid-template-columns: 1fr;
+    }
+
+    .dol-opt-market-search-row button {
+        width: 100% !important;
+    }
+}
+
+@media (max-width: 420px) {
+    .dol-opt-market-capsules {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* ========== 15. 全域立体模组更新提醒体系样式 ========== */
+
+/* 顶部 Tab 胶囊数字气泡徽标 */
+.dol-opt-tab-badge {
+    display: inline-block;
+    background-color: var(--gold, #d4af37);
+    color: #111111;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+    vertical-align: middle;
+    line-height: 1.2;
+    box-shadow: 0 0 6px rgba(218, 165, 32, 0.6);
+    pointer-events: none;
+}
+
+/* 模组管理置顶醒目金边提示横幅 */
+.dol-opt-update-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(90deg, rgba(218, 165, 32, 0.18) 0%, rgba(30, 30, 38, 0.85) 100%);
+    border: 1px solid var(--gold, #d4af37);
+    border-radius: 4px;
+    padding: 9px 14px;
+    margin: 8px 0 10px 0;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.dol-opt-update-banner-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.dol-opt-update-banner-title {
+    font-weight: 600;
+    font-size: 0.95em;
+    color: var(--gold, #d4af37);
+}
+
+.dol-opt-update-banner-sub {
+    font-size: 0.82em;
+    color: var(--300, #bbb);
+}
+
+.dol-opt-update-banner .dol-opt-btn-primary {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 4px 14px !important;
+}
+
+/* 模组管理列表原地更新按钮 */
+.btn-inline-update {
+    background-color: var(--gold, #d4af37) !important;
+    color: #111 !important;
+    font-weight: bold !important;
+    border: 1px solid #ffd700 !important;
+}
+
+.btn-inline-update:hover {
+    background-color: #ffd700 !important;
+    box-shadow: 0 0 8px rgba(218, 165, 32, 0.8) !important;
+}
+
+/* 模组市场中可更新项强制置顶的微光金边卡片 */
+.dol-opt-market-card.dol-opt-market-card-updatable {
+    border: 1px solid var(--gold, #d4af37) !important;
+    background: linear-gradient(180deg, rgba(218, 165, 32, 0.08) 0%, rgba(30, 30, 36, 0.95) 100%) !important;
+    box-shadow: 0 0 10px rgba(218, 165, 32, 0.25) !important;
+}
+
+/* 金色数字静态强调，避免常驻文字阴影动画持续触发重绘 */
+.dol-opt-pulse-gold {
+    font-weight: bold;
+    text-shadow: 0 0 4px rgba(218, 165, 32, 0.55);
+}
+
+.dol-opt-clickable {
+    cursor: pointer !important;
+    transition: transform 0.12s ease, border-color 0.12s ease !important;
+}
+
+.dol-opt-clickable:hover {
+    transform: translateY(-2px);
+    border-color: var(--gold, #d4af37) !important;
+}
+
+@media (max-width: 600px) {
+    .dol-opt-update-banner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .dol-opt-update-banner .dol-opt-btn-primary {
+        align-self: flex-start;
+        width: 100%;
+    }
+}
+
+/* 管理器保存期间统一禁用输入，保持原生布局与窄屏宽度。 */
+.dol-opt-manager-controls {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+#dolOptManagerStatus { margin: 6px 0; font-size: 0.9em; overflow-wrap: anywhere; }
