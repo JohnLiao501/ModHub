@@ -19,14 +19,7 @@
 			<<toggleTab>>
 			<<replace #customOverlayContent>><<modloaderlog>><</replace>>
 		<</button>>
-		<<run setTimeout(function () {
-			var tabs = $("#overlayTabs.dol-opt-modloader-tabs");
-			var core = tabs.children("button").filter(function () {
-				return $(this).hasClass("customOverlayClose") || window.dolOptIsManagerTabLabel($(this).text());
-			});
-			core.addClass("dol-opt-core-tab");
-			if (core.not(".customOverlayClose").length >= 4) tabs.addClass("dol-opt-tabs-ready");
-		}, 0)>>
+		<<run setTimeout(window.dolOptInitOverlayTabs, 0)>>
 	</div>
 	<<closeButton>>
 <</widget>>

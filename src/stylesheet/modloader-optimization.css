@@ -96,6 +96,26 @@ button.dol-opt-btn-primary:active,
 	border-right: 1px solid var(--300) !important;
 }
 
+/* 手机端（左侧）关闭按钮适配：紧凑醒目，不挤占过多标签宽度 */
+#customOverlay[data-overlay="modloader"] #overlayTabs button.dol-opt-mobile-close-tab {
+    width: auto !important;
+    min-width: 64px !important;
+    max-width: 80px !important;
+    padding: 7px 12px !important;
+    color: var(--red, #ff5555) !important;
+    font-weight: bold !important;
+    background: var(--850, #222) !important;
+}
+
+#customOverlay[data-overlay="modloader"] #overlayTabs button.dol-opt-mobile-close-tab:hover {
+    background: var(--800, #333) !important;
+    color: var(--gold, #ffaa00) !important;
+}
+
+#customOverlay[data-overlay="modloader"] #overlayTabs.dol-opt-has-mobile-close {
+    padding-right: 0 !important;
+}
+
 /* 公共标签栏会被其他模组延迟追加按钮；模组管理器只显示本页声明的标签。 */
 #overlayTabs.dol-opt-modloader-tabs.dol-opt-tabs-ready > button:not(.dol-opt-core-tab) {
 	display: none !important;
@@ -1884,19 +1904,381 @@ button.dol-opt-btn-primary:active,
     color: var(--100, #ddd);
 }
 
+/* ===== 安装确认弹窗：前置依赖展示区 ===== */
 .dol-opt-install-dependencies {
     margin-bottom: 14px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--650, #3c3c3c);
+    font-size: 0.96em;
 }
 
-.dol-opt-install-dependencies strong {
+.dol-opt-install-dependencies-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.dol-opt-install-dependencies-title {
     color: var(--gold, #d4af37);
+    font-size: 1.08em;
+    font-weight: 600;
 }
 
+.dol-opt-install-dependencies-tip {
+    font-size: 0.82em;
+    color: var(--400, #888);
+}
+
+.dol-opt-dep-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.dol-opt-dep-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--750, #333);
+    border-radius: 4px;
+    box-sizing: border-box;
+    min-height: 38px;
+    transition: background-color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
+}
+
+.dol-opt-dep-item.dol-opt-dep-actionable {
+    cursor: pointer;
+    user-select: none;
+}
+
+.dol-opt-dep-item.dol-opt-dep-actionable:hover {
+    background: rgba(212, 175, 55, 0.06);
+    border-color: var(--600, #4c4c4c);
+}
+
+.dol-opt-dep-item.dol-opt-dep-satisfied {
+    background: rgba(74, 222, 128, 0.03);
+    border-color: rgba(74, 222, 128, 0.18);
+}
+
+.dol-opt-dep-item.dol-opt-dep-skipped {
+    opacity: 0.65;
+    background: rgba(0, 0, 0, 0.2);
+    border-color: var(--800, #222);
+}
+
+.dol-opt-dep-bullet {
+    font-weight: bold;
+    font-size: 1.1em;
+    line-height: 1;
+    flex-shrink: 0;
+    width: 16px;
+    text-align: center;
+}
+
+.dol-opt-dep-checkbox {
+    width: 16px;
+    height: 16px;
+    margin: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+    accent-color: var(--gold, #d4af37);
+}
+
+.dol-opt-dep-content {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px;
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.dol-opt-dep-name {
+    color: var(--000, #eee);
+    font-weight: 600;
+    font-size: 1em;
+    overflow-wrap: anywhere;
+}
+
+.dol-opt-dep-version {
+    font-size: 0.85em;
+    color: var(--400, #aaa);
+}
+
+.dol-opt-dep-status {
+    margin-left: auto;
+    font-size: 0.82em;
+    font-weight: 600;
+    padding: 2px 7px;
+    border-radius: 3px;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.dol-opt-dep-status.green {
+    color: var(--green, #4ade80);
+    background: rgba(74, 222, 128, 0.12);
+    border: 1px solid rgba(74, 222, 128, 0.25);
+}
+
+.dol-opt-dep-status.gold {
+    color: var(--gold, #d4af37);
+    background: rgba(212, 175, 55, 0.12);
+    border: 1px solid rgba(212, 175, 55, 0.25);
+}
+
+.dol-opt-dep-status.purple {
+    color: var(--purple, #c084fc);
+    background: rgba(192, 132, 252, 0.12);
+    border: 1px solid rgba(192, 132, 252, 0.25);
+}
+
+.dol-opt-dep-status.grey {
+    color: var(--400, #888);
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--700, #404040);
+}
+
+/* 兼容回退结构：若纯文本或历史 ul 列表 */
 .dol-opt-install-dependencies ul {
     margin: 6px 0 0;
     padding-left: 20px;
+}
+
+/* ===== 安装确认弹窗：兼容性与冲突警告卡片 ===== */
+.dol-opt-install-conflict-card {
+    margin-bottom: 14px;
+    padding: 10px 12px;
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.12) 0%, rgba(30, 20, 20, 0.75) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    border-radius: 4px;
+    box-sizing: border-box;
+    box-shadow: 0 2px 8px rgba(239, 68, 68, 0.1);
+}
+
+.dol-opt-conflict-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.dol-opt-conflict-badge {
+    font-size: 0.78em;
+    font-weight: 700;
+    padding: 2px 6px;
+    border-radius: 3px;
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid rgba(239, 68, 68, 0.4);
+    letter-spacing: 0.5px;
+}
+
+.dol-opt-conflict-heading {
+    font-size: 1.02em;
+    font-weight: 600;
+}
+
+.dol-opt-conflict-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.dol-opt-conflict-item {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 0.9em;
+    padding-top: 6px;
+    border-top: 1px dashed rgba(239, 68, 68, 0.25);
+}
+
+.dol-opt-conflict-item:first-child {
+    padding-top: 0;
+    border-top: none;
+}
+
+.dol-opt-conflict-title-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.dol-opt-conflict-name {
+    font-weight: 600;
+}
+
+.dol-opt-conflict-tag {
+    font-size: 0.8em;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 3px;
+    margin-left: auto;
+    white-space: nowrap;
+}
+
+.dol-opt-conflict-tag.red {
+    color: var(--red, #ef4444);
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.dol-opt-conflict-tag.gold {
+    color: var(--gold, #d4af37);
+    background: rgba(212, 175, 55, 0.15);
+    border: 1px solid rgba(212, 175, 55, 0.3);
+}
+
+.dol-opt-conflict-tag.green {
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.15);
+    border: 1px solid rgba(74, 222, 128, 0.3);
+}
+
+.dol-opt-conflict-badge.green {
+    background: rgba(74, 222, 128, 0.2);
+    border: 1px solid rgba(74, 222, 128, 0.4);
+    color: #4ade80;
+}
+
+.dol-opt-conflict-heading.green {
+    color: #4ade80;
+}
+
+.dol-opt-install-conflict-card.is-resolved {
+    background: linear-gradient(180deg, rgba(74, 222, 128, 0.1) 0%, rgba(18, 28, 20, 0.8) 100%);
+    border: 1px solid rgba(74, 222, 128, 0.45);
+    box-shadow: 0 2px 8px rgba(74, 222, 128, 0.1);
+}
+
+.dol-opt-install-conflict-card.is-resolved .dol-opt-conflict-item {
+    border-top-color: rgba(74, 222, 128, 0.25);
+}
+
+.dol-opt-conflict-reason {
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+.dol-opt-conflict-advice {
+    font-size: 0.85em;
+    line-height: 1.4;
+    color: var(--000, #eee);
+}
+
+.dol-opt-conflict-action-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 6px;
+    padding-top: 4px;
+}
+
+.dol-opt-conflict-disable-btn {
+    font-size: 0.82em;
+    padding: 3px 10px;
+    min-height: 28px;
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid rgba(239, 68, 68, 0.45);
+    color: #fca5a5;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.dol-opt-conflict-disable-btn:hover {
+    background: rgba(239, 68, 68, 0.3);
+    border-color: #ef4444;
+    color: #fff;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.35);
+}
+
+.dol-opt-conflict-disable-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.dol-opt-conflict-cleared {
+    margin-bottom: 14px;
+    padding: 8px 12px;
+    background: rgba(74, 222, 128, 0.08);
+    border: 1px solid rgba(74, 222, 128, 0.35);
+    border-radius: 4px;
+    font-size: 0.9em;
+    font-weight: 600;
+    box-sizing: border-box;
+}
+
+/* ===== 冲突二次确认高亮警示框 ===== */
+.dol-opt-modal-conflict-intro {
+    font-size: 0.95em;
+    line-height: 1.5;
+    margin-bottom: 6px;
+}
+
+.dol-opt-modal-conflict-alert-box {
+    background: linear-gradient(180deg, rgba(239, 68, 68, 0.18) 0%, rgba(35, 15, 15, 0.88) 100%);
+    border: 1px solid rgba(239, 68, 68, 0.6);
+    border-radius: 5px;
+    padding: 10px 14px;
+    margin: 10px 0 12px 0;
+    box-shadow: 0 0 14px rgba(239, 68, 68, 0.22);
+}
+
+.dol-opt-modal-conflict-alert-box.is-resolved {
+    background: linear-gradient(180deg, rgba(74, 222, 128, 0.12) 0%, rgba(18, 30, 20, 0.88) 100%) !important;
+    border: 1px solid rgba(74, 222, 128, 0.5) !important;
+    box-shadow: 0 0 14px rgba(74, 222, 128, 0.18) !important;
+}
+
+.dol-opt-modal-conflict-item {
+    font-size: 1.04em;
+    font-weight: 500;
+    line-height: 1.6;
+}
+
+.dol-opt-modal-conflict-warning {
+    font-size: 0.92em;
+    line-height: 1.5;
+    padding-top: 8px;
+    margin-top: 8px;
+    border-top: 1px dashed rgba(239, 68, 68, 0.35);
+    font-weight: 500;
+}
+
+.dol-opt-modal-conflict-question {
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.dol-opt-modal-conflict-question.green {
+    color: #4ade80;
+    font-weight: 500;
+}
+
+/* 框架禁用影响的模组列表弹窗 */
+.dol-opt-modal-affected-box {
+    background: rgba(212, 175, 55, 0.1);
+    border: 1px solid rgba(212, 175, 55, 0.35);
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin: 10px 0;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.dol-opt-modal-affected-item {
+    font-size: 0.92em;
+    line-height: 1.6;
 }
 
 .dol-opt-install-dialog .dol-opt-modal-select-wrap {
@@ -2581,6 +2963,24 @@ button.dol-opt-btn-primary:active,
     .dol-opt-update-banner .dol-opt-btn-primary {
         align-self: flex-start;
         width: 100%;
+    }
+    .dol-opt-dep-item {
+        padding: 6px 8px;
+        gap: 8px;
+        min-height: 36px;
+    }
+    .dol-opt-dep-status {
+        font-size: 0.78em;
+        padding: 2px 5px;
+    }
+    .dol-opt-conflict-action-row {
+        width: 100%;
+    }
+    .dol-opt-conflict-disable-btn {
+        width: 100%;
+        min-height: 32px;
+        font-size: 0.84em;
+        text-align: center;
     }
 }
 

@@ -149,7 +149,7 @@ function createMockController(initial = {}) {
      * ========================================================================= */
     const bootJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'boot.json'), 'utf8'));
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.0.1', 'boot.json 版本号必须为 1.0.1');
+    assert.equal(bootJson.version, '1.0.2', 'boot.json 版本号必须为 1.0.2');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     for (const file of ['javascript/modloader-optimization.js', 'javascript/dol-mod-market.js']) {
@@ -442,6 +442,60 @@ function createMockController(initial = {}) {
         const marketSource = fs.readFileSync(path.join(__dirname, 'javascript', 'dol-mod-market.js'), 'utf8');
         assert.ok(!/[^.\w]alert\s*\(/.test(marketSource), '市场模块严禁调用浏览器原生 alert()');
         assert.ok(!/window\.confirm\s*\(/.test(marketSource), '市场模块严禁调用 window.confirm()');
+        // 9.4 模态框 customResult 与 onRender 扩展契约
+        let renderedDialog = null;
+        const customPromise = sb.dolOptConfirm({
+            title: '自定义测试',
+            message: '测试信息',
+            onRender: (dlg) => { renderedDialog = dlg; },
+            customResult: () => ({ customValue: 'test1234', isCustom: true })
+        });
+        assert.ok(renderedDialog, 'onRender 回调必须被成功调用并传入 dialog DOM');
+        const overlay3 = sb.document.body.children[sb.document.body.children.length - 1];
+        overlay3.children[0].querySelector('.dol-opt-modal-btn-confirm').click();
+        const customResult = await customPromise;
+        assert.deepEqual(customResult, { customValue: 'test1234', isCustom: true }, '点击确认必须回传 customResult 提取的对象');
+
+        // 9.5 多层模态弹窗栈堆叠契约（子弹窗严禁摧毁父弹窗 DOM）
+        const parentPromise = sb.dolOptConfirm({ title: '父弹窗', message: '主流程待处理' });
+        const parentOverlay = sb.document.body.children[sb.document.body.children.length - 1];
+        assert.ok(parentOverlay, '父弹窗必须成功挂载');
+
+        // 在父弹窗激活状态下打开子弹窗（如快捷禁用影响评估确认框）
+        const childPromise = sb.dolOptConfirm({ title: '子弹窗', message: '子操作确认' });
+        const childOverlay = sb.document.body.children[sb.document.body.children.length - 1];
+        assert.notEqual(parentOverlay, childOverlay, '子弹窗必须创建独立遮罩');
+        assert.ok(sb.document.body.children.includes(parentOverlay), '子弹窗打开时父弹窗遮罩严禁被提前删除');
+        const parentZ = parseInt(parentOverlay.style.zIndex || '100000', 10);
+        const childZ = parseInt(childOverlay.style.zIndex || '100000', 10);
+        assert.ok(childZ > parentZ, '子弹窗 z-index 必须高于父弹窗');
+
+        // 子弹窗点击取消，父弹窗依然完好无损保留在 DOM 中
+        childOverlay.children[0].querySelector('.dol-opt-modal-btn-cancel').click();
+        assert.equal(await childPromise, false, '子弹窗取消回传 false');
+        assert.ok(sb.document.body.children.includes(parentOverlay), '子弹窗关闭后父弹窗必须完好存留');
+
+        // 父弹窗继续完成正常确认
+        parentOverlay.children[0].querySelector('.dol-opt-modal-btn-confirm').click();
+        assert.equal(await parentPromise, true, '父弹窗必须正常回传 true');
+
+        // 9.6 confirmDelay 倒计时禁用契约（用于冲突二次拦截）
+        const delayPromise = sb.dolOptConfirm({
+            title: '倒计时测试',
+            message: '请仔细核对',
+            confirmText: '坚持执行',
+            confirmDelay: 5
+        });
+        const delayOverlay = sb.document.body.children[sb.document.body.children.length - 1];
+        const delayConfirmBtn = delayOverlay.children[0].querySelector('.dol-opt-modal-btn-confirm');
+        assert.equal(delayConfirmBtn.disabled, true, '带有 confirmDelay 的确认按钮初始必须为禁用状态');
+        assert.ok(delayOverlay.children[0].innerHTML.includes('(5s)'), '确认按钮初始文本必须包含 5s 倒计时提示');
+        assert.ok(delayOverlay.children[0].innerHTML.includes('disabled'), '确认按钮初始必须包含 disabled 属性');
+        // 点击禁用状态的按钮不得触发提前 resolve
+        delayConfirmBtn.click();
+        // 模拟点击取消正常退出
+        delayOverlay.children[0].querySelector('.dol-opt-modal-btn-cancel').click();
+        assert.equal(await delayPromise, false, '取消关闭时能正常返回');
     }
 
     /* =========================================================================
@@ -656,7 +710,7 @@ function createMockController(initial = {}) {
             { name: 'DoLSims', version: '0.8.1.7' },
             { name: 'Wraith\'sReflection', version: '1.3.0' },
             { name: 'NoBusHarassmentMod', version: '1.0.3' },
-            { name: 'ModHub', version: '1.0.1' }
+            { name: 'ModHub', version: '1.0.2' }
         ];
 
         assert.equal(market.checkModInstallStatus(mouthMod, testProfiles), 'up_to_date', 'GuideToMe 本地已安装时，市场控制NPC嘴部必须识别为 up_to_date');
@@ -823,8 +877,571 @@ function createMockController(initial = {}) {
         }
     }
 
+    /* =========================================================================
+     * 13. 前置依赖展示与可勾选契约（多色状态指示与可选安装）
+     * ========================================================================= */
+    {
+        const sb = loadMarket();
+        const market = sb.dolModMarket;
+        assert.equal(typeof market.formatDependencyListHtml, 'function', '必须导出 formatDependencyListHtml 函数');
+
+        // 13.1 前置依赖全部满足场景
+        const satisfiedPlan = {
+            requirements: [
+                { mod: { name: '秋枫白桦框架' }, dependency: { id: 'maplebirch', version: '^1.0.0' } }
+            ],
+            actions: []
+        };
+        const satisfiedHtml = market.formatDependencyListHtml(satisfiedPlan);
+        assert.ok(satisfiedHtml.includes('dol-opt-dep-satisfied'), '已满足依赖必须带有 dol-opt-dep-satisfied 类');
+        assert.ok(satisfiedHtml.includes('green'), '已满足依赖状态必须带有 green 绿色高亮');
+        assert.ok(satisfiedHtml.includes('已满足'), '已满足依赖必须显示「已满足」标签');
+        assert.ok(!satisfiedHtml.includes('type="checkbox"'), '已满足依赖不应展示勾选框');
+
+        // 13.2 包含未安装、待更新、未启用多种状态的场景
+        const modA = { name: '已安装模组' };
+        const modB = { name: '未安装模组' };
+        const modC = { name: '待更新模组' };
+        const modD = { name: '未启用模组' };
+        const mixedPlan = {
+            requirements: [
+                { mod: modA, dependency: { id: 'modA' } },
+                { mod: modB, dependency: { id: 'modB', version: '^2.0.0' } },
+                { mod: modC, dependency: { id: 'modC', version: '^1.5.0' } },
+                { mod: modD, dependency: { id: 'modD' } }
+            ],
+            actions: [
+                { type: 'install', mod: modB, requirement: '^2.0.0' },
+                { type: 'update', mod: modC, local: { version: '1.0.0' }, requirement: '^1.5.0' },
+                { type: 'enable', mod: modD }
+            ]
+        };
+        const mixedHtml = market.formatDependencyListHtml(mixedPlan);
+        // 未安装项：金色，可勾选
+        assert.ok(mixedHtml.includes('未安装'), '必须包含「未安装」状态');
+        assert.ok(mixedHtml.includes('data-active-color="gold"'), '未安装状态色彩必须为 gold');
+        assert.ok(mixedHtml.includes('name="dolOptDepReq"'), '待处理项必须提供复选框');
+        assert.ok(mixedHtml.includes('checked'), '复选框必须默认勾选');
+        // 需更新项：金色
+        assert.ok(mixedHtml.includes('需更新'), '必须包含「需更新」状态');
+        // 未启用项：紫色
+        assert.ok(mixedHtml.includes('未启用'), '必须包含「未启用」状态');
+        assert.ok(mixedHtml.includes('data-active-color="purple"'), '未启用状态色彩必须为 purple');
+
+        // 13.3 勾选与取消勾选时的 actions 过滤逻辑断言
+        // 模拟用户仅勾选未安装模组 (reqIndex 1)，取消更新与启用
+        const selectedReqIndices = new Set([1]);
+        const filteredActions = mixedPlan.actions.filter(action =>
+            mixedPlan.requirements.some((req, idx) => req.mod === action.mod && selectedReqIndices.has(idx))
+        );
+        assert.equal(filteredActions.length, 1, '取消勾选后只保留选中的 1 项 action');
+        assert.equal(filteredActions[0].mod.name, '未安装模组', '保留的 action 必须对应选中的未安装模组');
+
+        // 模拟用户全部取消勾选
+        const emptyIndices = new Set();
+        const noneActions = mixedPlan.actions.filter(action =>
+            mixedPlan.requirements.some((req, idx) => req.mod === action.mod && emptyIndices.has(idx))
+        );
+        assert.equal(noneActions.length, 0, '全部取消勾选时 actions 必须为空');
+    }
+
+    /* =========================================================================
+     * 14. 模组安装兼容性与冲突检测契约（枫叶框架 vs 简易框架等）
+     * ========================================================================= */
+    {
+        const sb = loadMarket();
+        const market = sb.dolModMarket;
+        const cssContent = fs.readFileSync(path.join(__dirname, 'stylesheet', 'modloader-optimization.css'), 'utf8');
+        assert.ok(Array.isArray(market.KNOWN_MOD_CONFLICT_RULES), '必须导出已知模组冲突规则库');
+        assert.equal(typeof market.detectModInstallationConflicts, 'function', '必须导出 detectModInstallationConflicts');
+        assert.equal(typeof market.formatConflictWarningHtml, 'function', '必须导出 formatConflictWarningHtml');
+
+        // 14.1 场景 1：本地已安装且启用「秋枫白桦框架」，安装依赖「简易框架」的模组（如日落伊甸园）
+        const localProfiles = [
+            {
+                name: 'maplebirch',
+                bootJson: { name: 'maplebirch', nickName: { chs: '秋枫白桦框架' } },
+                displayNames: ['秋枫白桦框架', 'maplebirch']
+            }
+        ];
+        const targetMod = { name: '日落伊甸园', id: 'InTheEdenAfterSunset' };
+        const candidateActions = [
+            { type: 'install', mod: { name: '简易框架', id: 'SimpleFramework' } }
+        ];
+        // 本地未禁用（即处于启用状态）
+        const conflicts = market.detectModInstallationConflicts(targetMod, candidateActions, localProfiles, new Set());
+        assert.equal(conflicts.length, 1, '必须准确识别 1 项已知互斥冲突');
+        assert.equal(conflicts[0].incomingMod.name, '简易框架', '即将引入的冲突模组必须为简易框架');
+        assert.equal(conflicts[0].localConflictMod.name, '秋枫白桦框架', '本地冲突模组必须识别为秋枫白桦框架');
+        assert.equal(conflicts[0].localConflictMod.isEnabled, true, '本地模组必须识别为已启用状态');
+
+        // 验证 HTML 渲染
+        const conflictHtml = market.formatConflictWarningHtml(conflicts);
+        assert.ok(conflictHtml.includes('dol-opt-install-conflict-card'), '必须包含冲突警告卡片容器');
+        assert.ok(conflictHtml.includes('兼容性警告'), '必须包含兼容性警告标签');
+        assert.ok(conflictHtml.includes('本地冲突已启用·高风险'), '启用冲突必须包含高风险警示');
+        assert.ok(conflictHtml.includes('秋枫白桦框架'), '必须包含秋枫白桦框架名称');
+        assert.ok(conflictHtml.includes('简易框架'), '必须包含简易框架名称');
+
+        // 14.2 场景 2：玩家取消勾选冲突前置依赖「简易框架」
+        const emptyActions = [];
+        const clearedConflicts = market.detectModInstallationConflicts(targetMod, emptyActions, localProfiles, new Set());
+        assert.equal(clearedConflicts.length, 0, '取消勾选冲突前置后，冲突数量必须归零');
+
+        // 14.3 场景 3：本地存在冲突模组但处于禁用状态
+        const disabledNames = new Set(['maplebirch']);
+        const disabledConflicts = market.detectModInstallationConflicts(targetMod, candidateActions, localProfiles, disabledNames);
+        assert.equal(disabledConflicts.length, 1, '禁用状态下依然需要提醒冲突存在');
+        assert.equal(disabledConflicts[0].localConflictMod.isEnabled, false, '本地模组必须识别为未启用');
+        const disabledHtml = market.formatConflictWarningHtml(disabledConflicts);
+        assert.ok(disabledHtml.includes('本地已安装·当前禁用'), '未启用模组必须显示当前禁用标签');
+        assert.ok(disabledHtml.includes('is-resolved'), '冲突已全部排除时卡片容器必须携带 is-resolved 类名');
+        assert.ok(disabledHtml.includes('检查通过'), '冲突已全部排除时卡片徽章必须显示【检查通过】');
+        assert.ok(disabledHtml.includes('冲突已排除 · 兼容性检查通过'), '冲突已全部排除时卡片标题必须切换为检查通过文本');
+        assert.ok(!disabledHtml.includes('dol-opt-conflict-disable-btn'), '已禁用模组无需再渲染快捷禁用按钮');
+
+        // 14.4 场景 4：目标模组自身直接为冲突模组（如本地有秋枫，直接安装简易框架）
+        const directMod = { name: '简易框架', id: 'SimpleFramework' };
+        const directConflicts = market.detectModInstallationConflicts(directMod, [], localProfiles, new Set());
+        assert.equal(directConflicts.length, 1, '直接安装冲突模组必须触发冲突警告');
+        assert.equal(directConflicts[0].incomingMod.role, '目标模组', '冲突角色必须为目标模组');
+
+        // 14.5 场景 5：纯英文技术名模组（无中文 nickName）必须能自动映射为中文友好名称，且建议文本去除重复的“建议”
+        const englishOnlyProfiles = [
+            {
+                name: 'maplebirch',
+                bootJson: { name: 'maplebirch' },
+                displayNames: ['maplebirch']
+            }
+        ];
+        const enConflicts = market.detectModInstallationConflicts(targetMod, candidateActions, englishOnlyProfiles, new Set());
+        assert.equal(enConflicts.length, 1, '英文标识模组必须能正常匹配冲突');
+        assert.equal(enConflicts[0].localConflictMod.name, '秋枫白桦框架', '无中文属性的英文技术模组必须回退映射为冲突组中文名称');
+        assert.equal(enConflicts[0].localConflictMod.rawName, 'maplebirch', '底层原始名称必须保留为 maplebirch 用于接口调用');
+        assert.ok(!enConflicts[0].advice.startsWith('建议'), '建议正文开头严禁带有重复的「建议」二字');
+
+        // 14.6 场景 6：启用冲突卡片中必须渲染快捷禁用按钮
+        const enHtml = market.formatConflictWarningHtml(enConflicts);
+        assert.ok(enHtml.includes('dol-opt-conflict-disable-btn'), '启用的冲突模组卡片中必须包含快捷禁用按钮');
+        assert.ok(enHtml.includes('data-conflict-raw="maplebirch"'), '快捷禁用按钮必须携带底层原始名称');
+        assert.ok(enHtml.includes('快捷禁用【秋枫白桦框架】'), '快捷禁用按钮必须呈现中文友好名称');
+
+        // 14.7 场景 7：findDependentModsForConflict 依赖影响深度评估
+        const depTestProfiles = [
+            {
+                name: 'maplebirch',
+                bootJson: { name: 'maplebirch' }
+            },
+            {
+                name: 'CustomStoryMod',
+                bootJson: {
+                    name: 'CustomStoryMod',
+                    nickName: { chs: '自制剧情模组' },
+                    version: '1.2.0',
+                    dependenceInfo: [{ modName: 'maplebirch', version: '^1.0.0' }]
+                }
+            },
+            {
+                name: 'CustomClothMod',
+                bootJson: {
+                    name: 'CustomClothMod',
+                    nickName: { chs: '自制服装模组' },
+                    version: '2.0.1',
+                    addonPlugin: [{ modName: 'scml-dol-maplebirchframework', addonName: 'cloth' }]
+                }
+            },
+            {
+                name: 'IndependentMod',
+                bootJson: {
+                    name: 'IndependentMod',
+                    nickName: { chs: '独立无依赖模组' }
+                }
+            },
+            {
+                name: 'DisabledDependentMod',
+                bootJson: {
+                    name: 'DisabledDependentMod',
+                    nickName: { chs: '已禁用的下游模组' },
+                    dependenceInfo: [{ modName: 'maplebirch' }]
+                }
+            }
+        ];
+        const testDisabledNames = new Set(['disableddependentmod']);
+        const affected = market.findDependentModsForConflict('maplebirch', depTestProfiles, testDisabledNames);
+        assert.equal(affected.length, 2, '必须准确找出 2 个依赖于 maplebirch 的已启用模组');
+        const affectedNames = affected.map(a => a.name);
+        assert.ok(affectedNames.includes('自制剧情模组'), '必须包含自制剧情模组');
+        assert.ok(affectedNames.includes('自制服装模组'), '必须包含自制服装模组');
+        assert.ok(!affectedNames.includes('独立无依赖模组'), '绝不能包含无依赖的独立模组');
+        assert.ok(!affectedNames.includes('已禁用的下游模组'), '已被禁用的模组不能作为受影响活跃项混淆提示');
+
+        // 14.8 场景 8：样式表必须包含二次确认高亮警告框与快捷禁用按钮样式
+        assert.ok(cssContent.includes('.dol-opt-modal-conflict-alert-box'), 'CSS 必须定义二次确认的高亮警示盒样式');
+        assert.ok(cssContent.includes('.dol-opt-conflict-disable-btn'), 'CSS 必须定义冲突卡片快捷禁用按钮样式');
+    }
+
+    // -------------------------------------------------------------------------
+    // 15. 模组管理页启用冲突检测、删除受影响模组评估与简易框架别名契约
+    // -------------------------------------------------------------------------
+    {
+        const manager = loadManager();
+
+        // 15.1 契约 1：Simple Frameworks 别名映射与副标题必须准确解析为【简易框架】，严禁误判为【秋枫白桦框架】
+        const sfSubtext = manager.dolOptGetModSubtext('Simple Frameworks', {
+            name: 'Simple Frameworks',
+            bootJson: { name: 'Simple Frameworks', version: '2.0.5' }
+        }, false);
+        assert.equal(sfSubtext, '简易框架', 'Simple Frameworks 必须准确映射为【简易框架】');
+
+        const sfWithS = manager.dolOptGetModSubtext('SimpleFrameworks', null, false);
+        assert.equal(sfWithS, '简易框架', 'SimpleFrameworks 必须准确映射为【简易框架】');
+
+        // 15.2 契约 2：市场端源码中二次确认弹窗的确认按钮文本必须为【继续安装】
+        const marketJs = fs.readFileSync(path.join(__dirname, 'javascript', 'dol-mod-market.js'), 'utf8');
+        assert.ok(marketJs.includes("confirmText: '继续安装'"), '市场冲突二次确认弹窗的确认按钮文本必须为【继续安装】');
+
+        // 15.3 契约 3：模组管理页启用冲突检测引擎 dolOptCheckEnableConflicts
+        assert.equal(typeof manager.dolOptCheckEnableConflicts, 'function', '必须导出 dolOptCheckEnableConflicts');
+        const activeMods = [
+            { name: 'maplebirch', enabled: true },
+            { name: 'IndependentMod', enabled: true }
+        ];
+        // 待启用简易框架
+        const conflictDetected = manager.dolOptCheckEnableConflicts('Simple Frameworks', activeMods);
+        assert.ok(conflictDetected, '当已启用秋枫白桦时，启用 Simple Frameworks 必须检出互斥冲突');
+        assert.equal(conflictDetected.ruleId, 'maplebirch-vs-simpleframework');
+        assert.ok(conflictDetected.targetDisplayName.includes('简易框架') || conflictDetected.targetDisplayName === 'Simple Frameworks');
+        assert.ok(conflictDetected.conflictDisplayName.includes('秋枫白桦') || conflictDetected.conflictDisplayName === 'maplebirch');
+
+        // 反向检测：当已启用简易框架时，启用秋枫白桦同样检出冲突
+        const activeWithSF = [
+            { name: 'Simple Frameworks', enabled: true }
+        ];
+        const reverseConflict = manager.dolOptCheckEnableConflicts('maplebirch', activeWithSF);
+        assert.ok(reverseConflict, '当已启用简易框架时，启用秋枫白桦必须检出互斥冲突');
+
+        // 无冲突场景：启用普通独立模组不触发冲突
+        const noConflict = manager.dolOptCheckEnableConflicts('NormalMod', activeMods);
+        assert.equal(noConflict, null, '普通独立模组启用时不应产生互斥冲突');
+
+        // 15.4 契约 4：模组删除时的下游受影响模组评估 dolOptFindDependentMods
+        assert.equal(typeof manager.dolOptFindDependentMods, 'function', '必须导出 dolOptFindDependentMods');
+        manager._dolOptModState = {
+            sideMods: [
+                { name: 'maplebirch', enabled: true },
+                { name: 'StoryModA', enabled: true },
+                { name: 'ClothModB', enabled: false },
+                { name: 'StandaloneMod', enabled: true }
+            ]
+        };
+        // 模拟 modInfo
+        const mockModInfoMap = new Map([
+            ['maplebirch', { name: 'maplebirch', bootJson: { name: 'maplebirch', version: '5.0.4', nickName: { chs: '秋枫白桦框架' } } }],
+            ['storymoda', { name: 'StoryModA', bootJson: { name: 'StoryModA', version: '1.2.0', dependenceInfo: [{ modName: 'maplebirch' }] } }],
+            ['clothmodb', { name: 'ClothModB', bootJson: { name: 'ClothModB', version: '1.0.0', dependenceInfo: [{ modName: 'Maplebirch' }] } }],
+            ['standalonemod', { name: 'StandaloneMod', bootJson: { name: 'StandaloneMod', version: '1.0.0' } }]
+        ]);
+        const oldGetModInfo = manager.dolOptGetModInfo;
+        manager.dolOptGetModInfo = name => mockModInfoMap.get(String(name).toLowerCase()) || null;
+
+        const depResult = await manager.dolOptFindDependentMods('maplebirch');
+        assert.equal(depResult.length, 2, '必须找出 2 个依赖 maplebirch 的下游模组');
+        const depNames = depResult.map(d => d.rawName);
+        assert.ok(depNames.includes('StoryModA'), '受影响列表必须包含 StoryModA');
+        assert.ok(depNames.includes('ClothModB'), '受影响列表必须包含 ClothModB');
+        assert.ok(!depNames.includes('StandaloneMod'), '受影响列表绝不能包含 StandaloneMod');
+
+        // 15.5 契约 5：dolOptToggleSideMod 启用冲突拦截确认
+        let confirmCallArgs = null;
+        manager.dolOptConfirm = async (opts) => {
+            confirmCallArgs = opts;
+            return false; // 模拟玩家点击【暂不启用】
+        };
+        manager._dolOptModState = {
+            sideMods: [
+                { name: 'maplebirch', enabled: true },
+                { name: 'Simple Frameworks', enabled: false }
+            ],
+            sideEnabled: ['maplebirch'],
+            sideDisabled: ['Simple Frameworks']
+        };
+        const toggleResult = await manager.dolOptToggleSideMod('Simple Frameworks', true);
+        assert.equal(toggleResult, false, '玩家取消启用时必须返回 false 且中断启用流程');
+        assert.ok(confirmCallArgs, '必须弹出冲突确认弹窗');
+        assert.equal(confirmCallArgs.title, '模组冲突风险确认');
+        assert.equal(confirmCallArgs.confirmText, '继续启用');
+        assert.equal(confirmCallArgs.cancelText, '暂不启用');
+        assert.equal(confirmCallArgs.confirmDelay, 5, '冲突启用弹窗必须设置 5 秒倒计时');
+        assert.equal(manager._dolOptModState.sideMods.find(m => m.name === 'Simple Frameworks').enabled, false, '未确认前保持禁用状态');
+        assert.ok(confirmCallArgs.trustedMessageHtml.includes('dol-opt-conflict-disable-btn'), '模组管理启用冲突弹窗必须包含快捷禁用按钮');
+        assert.ok(confirmCallArgs.trustedMessageHtml.includes('快捷禁用【秋枫白桦框架】'), '模组管理启用冲突弹窗快捷禁用按钮必须呈现中文友好名称');
+        assert.equal(typeof confirmCallArgs.onRender, 'function', '冲突启用弹窗必须提供 onRender 钩子以支持快捷禁用交互');
+
+        // 15.6 契约 6：市场安装弹窗中前置依赖与主按钮文案必须统一为【一键安装】
+        assert.ok(marketJs.includes('默认勾选一键安装，可取消勾选'), '市场前置依赖提示文案必须为默认勾选一键安装');
+        assert.ok(marketJs.includes('一键安装（含'), '市场安装确认按钮文本必须包含一键安装');
+
+        // 15.7 契约 7：dolOptDeleteSideMod 删除被依赖模组时的下游警示弹窗
+        let deleteConfirmArgs = null;
+        manager.dolOptConfirm = async (opts) => {
+            deleteConfirmArgs = opts;
+            return false; // 模拟取消删除
+        };
+        manager._dolOptModState = {
+            sideMods: [
+                { name: 'maplebirch', enabled: true },
+                { name: 'StoryModA', enabled: true }
+            ],
+            sideEnabled: ['maplebirch', 'StoryModA'],
+            sideDisabled: []
+        };
+        manager.dolOptGetModInfo = name => mockModInfoMap.get(String(name).toLowerCase()) || null;
+        const deleteResult = await manager.dolOptDeleteSideMod('maplebirch');
+        assert.equal(deleteResult, undefined, '取消删除时必须中断流程');
+        assert.ok(deleteConfirmArgs, '删除具有下游依赖的模组必须触发确认弹窗');
+        assert.equal(deleteConfirmArgs.title, '确认删除模组（存在依赖警告）');
+        assert.ok(deleteConfirmArgs.message.includes('StoryModA'), '删除提示文本中必须包含依赖它的下游模组');
+        assert.equal(deleteConfirmArgs.confirmDelay, 5, '存在依赖警告的删除弹窗必须设置 5 秒倒计时');
+
+        // 恢复 mock
+        manager.dolOptGetModInfo = oldGetModInfo;
+    }
+
+    // 16. 需求回归与缺陷修复验证测试
+    {
+        const manager = loadManager();
+        const market = loadMarket().dolModMarket;
+        // 16.1 契约 1：前置依赖与冲突卡片标题去除 (1) 数字
+        const testDepPlan = {
+            requirements: [{ mod: { name: 'DepA' }, dependency: { id: 'DepA', version: '1.0.0' } }],
+            actions: [{ type: 'install', mod: { name: 'DepA' } }]
+        };
+        const depHtml = market.formatDependencyListHtml(testDepPlan);
+        assert.ok(depHtml.includes('<strong class="dol-opt-install-dependencies-title">前置依赖</strong>'), '前置依赖标题必须为干净的【前置依赖】');
+        assert.ok(!depHtml.includes('前置依赖（'), '前置依赖标题绝不能包含括号数字标记');
+
+        const testConflicts = [{
+            incomingMod: { name: 'ModX' },
+            localConflictMod: { name: 'ModY', rawName: 'ModY', isEnabled: true },
+            reason: '测试冲突原因',
+            advice: '测试冲突建议'
+        }];
+        const conflictHtml = market.formatConflictWarningHtml(testConflicts);
+        assert.ok(conflictHtml.includes('<strong class="dol-opt-conflict-heading red">检测到已知模组冲突</strong>'), '冲突卡片标题必须为干净的【检测到已知模组冲突】');
+        assert.ok(!conflictHtml.includes('已知模组冲突（'), '冲突卡片标题绝不能包含括号数字标记');
+
+        // 16.2 契约 2：对手冲突组别名隔离与防误诊（解决 CustomHair 误归秋枫白桦）
+        const oldGetModInfo = manager.dolOptGetModInfo;
+        const testModInfoMap = new Map([
+            ['maplebirch', {
+                bootJson: {
+                    name: 'maplebirch',
+                    alias: ['Simple Frameworks'], // 诱发误判的关键污染源
+                    version: '5.0.4'
+                }
+            }],
+            ['customhair', {
+                bootJson: {
+                    name: 'CustomHair',
+                    dependenceInfo: [{ modName: 'Simple Frameworks' }],
+                    version: '1.2.0'
+                }
+            }],
+            ['maplemod', {
+                bootJson: {
+                    name: 'MapleMod',
+                    dependenceInfo: [{ modName: 'maplebirch' }],
+                    version: '1.0.0'
+                }
+            }],
+            ['simpleframework', {
+                bootJson: {
+                    name: 'simpleframework',
+                    version: '1.0.0'
+                }
+            }]
+        ]);
+
+        manager.dolOptGetModInfo = name => testModInfoMap.get(String(name).toLowerCase()) || null;
+        manager._dolOptModState = {
+            sideMods: [
+                { name: 'maplebirch', enabled: true },
+                { name: 'CustomHair', enabled: true },
+                { name: 'MapleMod', enabled: true },
+                { name: 'simpleframework', enabled: false }
+            ],
+            sideEnabled: ['maplebirch', 'CustomHair', 'MapleMod'],
+            sideDisabled: ['simpleframework']
+        };
+
+        const mapleDeps = await manager.dolOptFindDependentMods('maplebirch');
+        const mapleDepNames = mapleDeps.map(m => m.name || m.rawName);
+        assert.ok(mapleDepNames.includes('MapleMod'), '依赖 maplebirch 的 MapleMod 必须被识别出来');
+        assert.ok(!mapleDepNames.includes('CustomHair'), '依赖 Simple Frameworks 的 CustomHair 绝不能被归入 maplebirch 的下游！');
+
+        const simpleDeps = await manager.dolOptFindDependentMods('Simple Frameworks');
+        const simpleDepNames = simpleDeps.map(m => m.name || m.rawName);
+        assert.ok(simpleDepNames.includes('CustomHair'), '依赖 Simple Frameworks 的 CustomHair 必须属于 Simple Frameworks 的下游');
+        assert.ok(!simpleDepNames.includes('MapleMod'), '依赖 maplebirch 的 MapleMod 绝不能属于 Simple Frameworks 的下游');
+
+        // 测试 market 端的 findDependentModsForConflict 对手隔离
+        const mockProfiles = [
+            { name: 'maplebirch', rawName: 'maplebirch', bootJson: testModInfoMap.get('maplebirch').bootJson },
+            { name: 'CustomHair', rawName: 'CustomHair', bootJson: testModInfoMap.get('customhair').bootJson },
+            { name: 'MapleMod', rawName: 'MapleMod', bootJson: testModInfoMap.get('maplemod').bootJson }
+        ];
+        const marketAffected = market.findDependentModsForConflict('maplebirch', mockProfiles, new Set());
+        const marketAffectedNames = marketAffected.map(m => m.name || m.rawName);
+        assert.ok(marketAffectedNames.includes('MapleMod'), '市场端冲突检测中 MapleMod 属于 maplebirch 下游');
+        assert.ok(!marketAffectedNames.includes('CustomHair'), '市场端冲突检测中 CustomHair 绝不能误归 maplebirch 下游');
+
+        manager.dolOptGetModInfo = oldGetModInfo;
+
+        // 16.3 契约 3：核心框架判断与重启建议强化
+        assert.equal(manager.dolOptIsFrameworkMod('maplebirch'), true, 'maplebirch 必须被判定为核心框架');
+        assert.equal(manager.dolOptIsFrameworkMod('秋枫白桦框架'), true, '秋枫白桦框架 必须被判定为核心框架');
+        assert.equal(manager.dolOptIsFrameworkMod('Simple Frameworks'), true, 'Simple Frameworks 必须被判定为核心框架');
+        assert.equal(manager.dolOptIsFrameworkMod('SomeCustomFrameworkMod'), true, '名称包含 framework 的模组必须被识别为框架');
+        assert.equal(manager.dolOptIsFrameworkMod('普通发型美化'), false, '普通模组绝不能被识别为框架');
+
+        let reloadConfirmArgs = null;
+        manager.dolOptConfirm = async (opts) => {
+            reloadConfirmArgs = opts;
+            return false;
+        };
+        // 恢复真实 window.dolOptOfferReload 实现进行断言验证
+        const optCode = fs.readFileSync(path.join(__dirname, 'javascript', 'modloader-optimization.js'), 'utf8');
+        const offerReloadMatch = optCode.match(/window\.dolOptOfferReload = async function\([\s\S]*?\n\};/);
+        assert.ok(offerReloadMatch, '源码中必须定义真实的 window.dolOptOfferReload');
+        vm.runInContext(offerReloadMatch[0], manager);
+
+        await manager.dolOptOfferReload('测试框架已更改', { isFramework: true });
+        assert.ok(reloadConfirmArgs, '必须调用确认弹窗');
+        assert.equal(reloadConfirmArgs.title, '重新载入游戏（强烈建议）', '核心框架变更必须使用【重新载入游戏（强烈建议）】标题');
+        assert.equal(reloadConfirmArgs.confirmText, '立即重新载入', '核心框架变更确认按钮必须为【立即重新载入】');
+        assert.equal(reloadConfirmArgs.cancelText, '稍后重载', '核心框架变更取消按钮必须为【稍后重载】');
+        assert.equal(reloadConfirmArgs.confirmType, 'danger', '核心框架变更确认弹窗必须为高风险醒目类型');
+        assert.ok(reloadConfirmArgs.trustedMessageHtml.includes('强烈建议立即重新载入'), '提示内容中必须包含强烈建议字样');
+
+        // 16.4 契约 4：移动端左侧关闭按钮识别与样式支持
+        assert.equal(manager.dolOptIsCloseButton('Close'), true, 'Close 必须被识别为移动端关闭按钮');
+        assert.equal(manager.dolOptIsCloseButton('关闭'), true, '关闭 必须被识别为移动端关闭按钮');
+        assert.equal(manager.dolOptIsCloseButton('關閉'), true, '關閉 必须被识别为移动端关闭按钮');
+        assert.equal(manager.dolOptIsCloseButton('模组管理'), false, '普通 Tab 绝不能被识别为关闭按钮');
+        assert.equal(manager.dolOptIsCloseButton({ textContent: 'Close' }), true, 'DOM 元素节点文本为 Close 时必须识别为关闭按钮');
+
+        const tweeContent = fs.readFileSync(path.join(__dirname, 'twee/modloader/modloader.twee'), 'utf8');
+        assert.ok(tweeContent.includes('dolOptInitOverlayTabs'), 'modloader.twee 必须通过外部函数 dolOptInitOverlayTabs 初始化顶栏');
+        assert.ok(!tweeContent.includes('var isClose ='), 'modloader.twee 绝不能内联复杂函数，杜绝 SugarCube Unexpected token 报错');
+
+        const managerJs = fs.readFileSync(path.join(__dirname, 'javascript/modloader-optimization.js'), 'utf8');
+        assert.ok(managerJs.includes('dol-opt-mobile-close-tab'), 'modloader-optimization.js 必须赋予移动端关闭按钮专属类名');
+        assert.ok(managerJs.includes('dol-opt-has-mobile-close'), 'modloader-optimization.js 必须为容器添加 dol-opt-has-mobile-close 类名');
+
+        const cssContent = fs.readFileSync(path.join(__dirname, 'stylesheet/modloader-optimization.css'), 'utf8');
+        assert.ok(cssContent.includes('.dol-opt-mobile-close-tab'), 'CSS 中必须包含移动端关闭按钮样式定义');
+        assert.ok(cssContent.includes('.dol-opt-has-mobile-close'), 'CSS 中必须包含带有移动端关闭按钮时的容器留白样式');
+
+        // 16.5 契约 5：连续安装/多步骤下载过程中不弹出重启提示打断，全部完成后统一弹窗
+        const marketJs = fs.readFileSync(path.join(__dirname, 'javascript/dol-mod-market.js'), 'utf8');
+        assert.ok(marketJs.includes('skipReloadOffer: options.skipReloadOffer'), 'downloadAndInstallMod 必须透传 skipReloadOffer 到底层');
+        assert.ok(marketJs.includes('await window.dolOptToggleSideMod(action.local.name, true, { silentOfferReload: true })'), '多步骤计划中启用前置必须静默处理，严禁中途弹出重载提醒');
+        assert.ok(marketJs.includes('skipReloadOffer: true'), '多步骤计划与批量更新中下载安装必须显式声明 skipReloadOffer: true');
+        assert.ok(managerJs.includes('(!options || !options.skipReloadOffer)'), 'dolOptHandleAddMod 必须尊重 skipReloadOffer 守护，杜绝擅自提前弹窗');
+        assert.ok(managerJs.includes('if (!options?.keepCurrentTab)'), 'dolOptHandleAddMod 必须在非 keepCurrentTab 模式下才允许跳转页签');
+
+        // 16.6 契约 6：列表禁用模组必须执行下游依赖排查，且 Toast 不再包含冗余的原排序字样
+        assert.ok(managerJs.includes('!targetEnable && !options.skipConfirm'), 'dolOptToggleSideMod 必须在禁用前检查是否需二次确认');
+        assert.ok(managerJs.includes('window.dolOptFindDependentMods(modName)'), 'dolOptToggleSideMod 必须调用 dolOptFindDependentMods 排查下游受影响模组');
+        assert.ok(!managerJs.includes('（原排序保持不变）'), 'Toast 提示中严禁残留（原排序保持不变）冗余文字');
+        assert.ok(marketJs.includes('{ silentOfferReload: true, skipConfirm: true }'), '市场快捷禁用必须传入 skipConfirm: true 杜绝二次弹窗');
+
+        // 16.7 契约 7：简易框架与秋枫白桦互斥组仲裁引擎与防别名污染
+        // 模拟运行环境中 ModLoader 别名重定向导致 dolOptGetModInfo('Simple Frameworks') 返回 maplebirch 信息，
+        // 且其 subtext 为【秋枫白桦框架】的极端污染场景
+        const conflictModInfoMap = new Map([
+            ['maplebirch', {
+                name: 'maplebirch',
+                bootJson: {
+                    name: 'maplebirch',
+                    alias: ['Simple Frameworks'],
+                    version: '5.0.4',
+                    nickName: { chs: '秋枫白桦框架' }
+                }
+            }],
+            ['simple frameworks', {
+                name: 'maplebirch', // ModLoader 别名映射返回了 maplebirch
+                bootJson: {
+                    name: 'maplebirch',
+                    alias: ['Simple Frameworks'],
+                    version: '5.0.4',
+                    nickName: { chs: '秋枫白桦框架' }
+                }
+            }],
+            ['simpleframework', {
+                name: 'simpleframework',
+                bootJson: {
+                    name: 'simpleframework',
+                    version: '1.0.0'
+                }
+            }]
+        ]);
+        manager.dolOptGetModInfo = name => conflictModInfoMap.get(String(name).toLowerCase()) || null;
+
+        // 场景 A：当前已启用 maplebirch，准备启用 Simple Frameworks
+        const activeMaplebirch = [
+            { name: 'maplebirch', enabled: true },
+            { name: 'SomeOtherMod', enabled: true }
+        ];
+        const sfConflict = manager.dolOptCheckEnableConflicts('Simple Frameworks', activeMaplebirch);
+        assert.ok(sfConflict, '当已启用 maplebirch 时，启用 Simple Frameworks 必须检出互斥冲突');
+        assert.equal(sfConflict.targetDisplayName, '简易框架', '待启用模组展示名称必须锁定为【简易框架】，绝不能被 maplebirch 别名污染为秋枫白桦！');
+        assert.equal(sfConflict.conflictDisplayName, '秋枫白桦框架', '已启用冲突模组展示名称必须为【秋枫白桦框架】');
+        assert.notEqual(sfConflict.targetDisplayName, sfConflict.conflictDisplayName, '待启用与已冲突模组展示名称绝不能相同！');
+        assert.equal(sfConflict.targetRawName, 'Simple Frameworks', '待启用原始名称必须为 Simple Frameworks');
+        assert.equal(sfConflict.conflictRawName, 'maplebirch', '已冲突原始名称必须为 maplebirch');
+
+        // 场景 B：当前已启用 Simple Frameworks，准备启用 maplebirch
+        const activeSimple = [
+            { name: 'Simple Frameworks', enabled: true }
+        ];
+        const mbConflict = manager.dolOptCheckEnableConflicts('maplebirch', activeSimple);
+        assert.ok(mbConflict, '当已启用 Simple Frameworks 时，启用 maplebirch 必须检出互斥冲突');
+        assert.equal(mbConflict.targetDisplayName, '秋枫白桦框架', '待启用模组必须为秋枫白桦框架');
+        assert.equal(mbConflict.conflictDisplayName, '简易框架', '冲突模组必须为简易框架');
+
+        // 场景 C：同组内不产生虚假互斥冲突（同为简易框架组）
+        const activeSameGroup = [
+            { name: 'simpleframework', enabled: true }
+        ];
+        const sameGroupConflict = manager.dolOptCheckEnableConflicts('Simple Frameworks', activeSameGroup);
+        assert.equal(sameGroupConflict, null, '同属于简易框架组的模组绝不能自身跟自身产生互斥冲突');
+
+        // 恢复 getModInfo
+        manager.dolOptGetModInfo = oldGetModInfo;
+
+        // 16.8 契约 8：ModHub 市场分类归类为【界面与便利】与身份库契约
+        const catalogData = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'mod-identities.json'), 'utf8'));
+        const modhubIdentity = catalogData.mods.find(m => m.id === 'modhub');
+        assert.ok(modhubIdentity, 'mod-identities.json 必须收录 modhub 身份');
+        assert.equal(modhubIdentity.category, '界面与便利', 'ModHub 在身份库中分类必须为【界面与便利】');
+        assert.ok(Array.isArray(modhubIdentity.bootNames) && modhubIdentity.bootNames.includes('ModHub'), 'modhub 必须包含 bootNames: ModHub');
+
+        // 测试市场端的分类自动推导逻辑
+        assert.equal(typeof market.deriveClassification, 'function', '市场必须导出 deriveClassification');
+        const hubClassified1 = market.deriveClassification('ModHub模组管理中心', '用于在游戏内管理、排序和更新模组的管理套件');
+        assert.equal(hubClassified1.category, '界面与便利', 'ModHub模组管理中心 必须归入【界面与便利】分类');
+        assert.ok(hubClassified1.tags.includes('管理'), 'ModHub 标签必须包含【管理】');
+
+        const hubClassified2 = market.deriveClassification('ModHub', '游戏内模组中心');
+        assert.equal(hubClassified2.category, '界面与便利', 'ModHub 必须归入【界面与便利】分类');
+
+        const hubClassified3 = market.deriveClassification('dol-mod-hub', 'Mod Manager');
+        assert.equal(hubClassified3.category, '界面与便利', '包含 mod-hub 的仓库模组必须归入【界面与便利】分类');
+    }
+
     suiteComplete = true;
-    console.log('ModHub v1.0.1 all tests PASSED!');
+    console.log('ModHub v1.0.2 all tests PASSED!');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

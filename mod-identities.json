@@ -2,6 +2,16 @@
   "schemaVersion": 1,
   "mods": [
     {
+      "id": "modhub",
+      "name": "ModHub模组管理中心",
+      "bootNames": ["ModHub", "ModHub模组管理中心"],
+      "aliases": ["ModHub", "ModHub模组管理套件", "模组管理器与市场套件", "模组管理中心", "Degrees-of-Lewdity-ModHub"],
+      "repositories": ["ModHub", "Degrees-of-Lewdity-ModHub"],
+      "repositoryKeys": ["JohnLiao501/ModHub", "NEEDMEET/ModHub"],
+      "category": "界面与便利",
+      "tags": ["模组管理", "模组市场", "一键更新"]
+    },
+    {
       "id": "auto-clothes-repair",
       "name": "衣物破损自动修补",
       "bootNames": ["AutoClothesRepair"],
@@ -191,8 +201,18 @@
     {
       "id": "simple-framework",
       "name": "简易框架",
-      "bootNames": ["SimpleFramework"],
-      "aliases": ["SCML 简易框架"],
+      "bootNames": [
+        "SimpleFramework",
+        "Simple Frameworks",
+        "SimpleFrameworks",
+        "Simple Framework"
+      ],
+      "aliases": [
+        "SCML 简易框架",
+        "Simple Frameworks",
+        "SimpleFrameworks",
+        "Simple Framework"
+      ],
       "repositories": ["SCMLSimpleFramework"],
       "repositoryKeys": ["emicoto/SCMLSimpleFramework"],
       "category": "框架与前置",

@@ -152,6 +152,50 @@ window.dolOptIsManagerTabLabel = function(text) {
     return ['模组管理', '模组市场', '模组说明', '加载日志'].some(name => label.startsWith(name));
 };
 
+window.dolOptIsCloseButton = function(elementOrText) {
+    if (!elementOrText) return false;
+    let text = '';
+    let onclick = '';
+    if (typeof elementOrText === 'string') {
+        text = elementOrText.trim();
+    } else if (elementOrText && (elementOrText.jquery || elementOrText.nodeType || elementOrText.textContent !== undefined)) {
+        const el = elementOrText.jquery ? elementOrText[0] : elementOrText;
+        text = String(el?.textContent || '').trim();
+        onclick = String(el?.getAttribute?.('onclick') || el?.onclick || '');
+    }
+    if (['close', '关闭', '關閉'].includes(text.toLowerCase())) return true;
+    if (onclick.includes('closeOverlay')) return true;
+    return false;
+};
+
+// 模组管理器顶栏标签初始化（过滤并保留管理 Tab 及移动端左侧关闭按钮）
+window.dolOptInitOverlayTabs = function() {
+    if (typeof $ === 'undefined') return;
+    var tabs = $("#overlayTabs.dol-opt-modloader-tabs");
+    if (!tabs.length) return;
+    var isClose = function($el) {
+        if ($el.hasClass("customOverlayClose")) return true;
+        if (typeof window.dolOptIsCloseButton === 'function') {
+            return window.dolOptIsCloseButton($el);
+        }
+        var txt = $el.text().trim();
+        return txt === 'Close' || txt === '关闭' || txt === '關閉' || ($el.attr('onclick') || '').indexOf('closeOverlay') !== -1;
+    };
+    var core = tabs.children("button").filter(function() {
+        var $this = $(this);
+        if (isClose($this)) {
+            $this.addClass("dol-opt-mobile-close-tab");
+            tabs.addClass("dol-opt-has-mobile-close");
+            return true;
+        }
+        return typeof window.dolOptIsManagerTabLabel === 'function' && window.dolOptIsManagerTabLabel($this.text());
+    });
+    core.addClass("dol-opt-core-tab");
+    if (core.not(".customOverlayClose, .dol-opt-mobile-close-tab").length >= 4) {
+        tabs.addClass("dol-opt-tabs-ready");
+    }
+};
+
 // 重复导入后 getMod() 可能仍返回旧档案，优先取缓存中最后加载的同名模组
 window.dolOptGetModInfo = function(modName) {
     const gui = window.dolOptGetGui();
@@ -425,6 +469,9 @@ window.dolOptHasReadmeContent = function(readme) {
  * @param {Object|string} options 参数对象或提示文字
  * @returns {Promise<boolean>}
  */
+// 活动模态弹窗栈，支持多层弹窗平滑嵌套与层级递增，彻底杜绝子弹窗破坏父弹窗 DOM
+const dolOptModalStack = [];
+
 window.dolOptConfirm = function(options) {
     let title = '提示';
     let message = '';
@@ -437,6 +484,10 @@ window.dolOptConfirm = function(options) {
     let trustedMessageHtml = '';
     let dialogClass = '';
     let requireSelection = false;
+    let confirmDelay = 0;
+
+    let customResult = null;
+    let onRender = null;
 
     if (typeof options === 'string') {
         message = options;
@@ -452,6 +503,9 @@ window.dolOptConfirm = function(options) {
         trustedMessageHtml = typeof options.trustedMessageHtml === 'string' ? options.trustedMessageHtml : '';
         dialogClass = String(options.dialogClass || '').split(/\s+/).filter(name => /^[a-z0-9_-]+$/i.test(name)).join(' ');
         requireSelection = options.requireSelection === true;
+        if (Number(options.confirmDelay) > 0) confirmDelay = Math.ceil(Number(options.confirmDelay));
+        if (typeof options.customResult === 'function') customResult = options.customResult;
+        if (typeof options.onRender === 'function') onRender = options.onRender;
     }
 
     // 针对非 DOM / Node 单元测试环境的安全回退
@@ -463,12 +517,11 @@ window.dolOptConfirm = function(options) {
     }
 
     return new Promise((resolve) => {
-        const old = document.getElementById('dolOptConfirmOverlay');
-        if (old && typeof old.remove === 'function') old.remove();
-
+        const stackLevel = dolOptModalStack.length;
         const overlay = document.createElement('div');
-        overlay.id = 'dolOptConfirmOverlay';
+        overlay.id = stackLevel === 0 ? 'dolOptConfirmOverlay' : `dolOptConfirmOverlay_${stackLevel}`;
         overlay.className = 'dol-opt-modal-backdrop';
+        overlay.style.zIndex = String(100000 + stackLevel * 20);
 
         const dialog = document.createElement('div');
         dialog.className = `dol-opt-modal-dialog${dialogClass ? ` ${dialogClass}` : ''}`;
@@ -485,6 +538,10 @@ window.dolOptConfirm = function(options) {
             </label>
         ` : '';
 
+        const initialConfirmBtnText = confirmDelay > 0
+            ? `${confirmText} (${confirmDelay}s)`
+            : confirmText;
+
         dialog.innerHTML = `
             <div class="dol-opt-modal-header">
                 <span class="${isDanger ? 'red' : 'gold'} dol-opt-modal-title">${window.dolOptEscapeHtml(title)}</span>
@@ -495,7 +552,7 @@ window.dolOptConfirm = function(options) {
                 ${selectHtml}
             </div>
             <div class="dol-opt-modal-footer">
-                <button type="button" class="macro-button ${isDanger ? 'dol-opt-btn-danger' : 'dol-opt-btn-primary'} dol-opt-modal-btn-confirm">${window.dolOptEscapeHtml(confirmText)}</button>
+                <button type="button" class="macro-button ${isDanger ? 'dol-opt-btn-danger' : 'dol-opt-btn-primary'} dol-opt-modal-btn-confirm"${confirmDelay > 0 ? ' disabled' : ''}>${window.dolOptEscapeHtml(initialConfirmBtnText)}</button>
                 ${cancelText ? `<button type="button" class="macro-button dol-opt-modal-btn-cancel">${window.dolOptEscapeHtml(cancelText)}</button>` : ''}
             </div>
         `;
@@ -503,16 +560,84 @@ window.dolOptConfirm = function(options) {
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
 
-        let resolved = false;
-        const select = dialog.querySelector('.dol-opt-modal-select');
+        let delayTimer = null;
+        let isDelaying = confirmDelay > 0;
+        let remainingSeconds = confirmDelay;
+
         const confirmBtn = dialog.querySelector('.dol-opt-modal-btn-confirm');
-        const canConfirm = () => !requireSelection || Boolean(select?.value);
-        const syncConfirmState = () => {
-            if (confirmBtn) confirmBtn.disabled = !canConfirm();
+        const select = dialog.querySelector('.dol-opt-modal-select');
+
+        const canConfirm = () => {
+            if (isDelaying) return false;
+            if (requireSelection && !select?.value) return false;
+            return true;
         };
+
+        const syncConfirmState = () => {
+            if (confirmBtn) {
+                if (isDelaying) {
+                    confirmBtn.disabled = true;
+                } else {
+                    confirmBtn.disabled = !canConfirm();
+                }
+            }
+        };
+
+        if (confirmDelay > 0) {
+            delayTimer = setInterval(() => {
+                remainingSeconds--;
+                if (remainingSeconds <= 0) {
+                    clearInterval(delayTimer);
+                    delayTimer = null;
+                    isDelaying = false;
+                    if (confirmBtn) {
+                        confirmBtn.textContent = confirmText;
+                        syncConfirmState();
+                    }
+                } else if (confirmBtn) {
+                    confirmBtn.textContent = `${confirmText} (${remainingSeconds}s)`;
+                }
+            }, 1000);
+        }
+
+        dialog.dolOptClearDelay = () => {
+            if (delayTimer) {
+                clearInterval(delayTimer);
+                delayTimer = null;
+            }
+            isDelaying = false;
+            syncConfirmState();
+        };
+
+        if (typeof onRender === 'function') {
+            try {
+                onRender(dialog);
+            } catch (err) {
+                console.warn('[dolOptConfirm] onRender 执行异常:', err);
+            }
+        }
+
+        let resolved = false;
+
+        const getConfirmResult = () => {
+            if (typeof customResult === 'function') {
+                return customResult(dialog);
+            }
+            return selectOptions.length ? select?.value : true;
+        };
+
         const closeWith = (result) => {
             if (resolved) return;
             resolved = true;
+            if (delayTimer) {
+                clearInterval(delayTimer);
+                delayTimer = null;
+            }
+            const stackIdx = dolOptModalStack.indexOf(modalEntry);
+            if (stackIdx !== -1) {
+                dolOptModalStack.splice(stackIdx, 1);
+            }
+
             if (typeof document.removeEventListener === 'function') {
                 document.removeEventListener('keydown', handleKeydown);
             }
@@ -524,14 +649,24 @@ window.dolOptConfirm = function(options) {
         };
 
         const handleKeydown = (e) => {
+            // 仅有栈顶活动模态框响应按键
+            if (dolOptModalStack[dolOptModalStack.length - 1] !== modalEntry) return;
+
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closeWith(false);
             } else if (e.key === 'Enter' && canConfirm()) {
                 e.preventDefault();
-                closeWith(selectOptions.length ? select?.value : true);
+                closeWith(getConfirmResult());
             }
         };
+
+        const modalEntry = {
+            overlay,
+            dialog,
+            closeWith
+        };
+        dolOptModalStack.push(modalEntry);
 
         if (typeof document.addEventListener === 'function') {
             document.addEventListener('keydown', handleKeydown);
@@ -539,8 +674,8 @@ window.dolOptConfirm = function(options) {
 
         dialog.querySelector('.dol-opt-modal-close')?.addEventListener('click', () => closeWith(false));
         dialog.querySelector('.dol-opt-modal-btn-cancel')?.addEventListener('click', () => closeWith(false));
-        dialog.querySelector('.dol-opt-modal-btn-confirm')?.addEventListener('click', () => {
-            if (canConfirm()) closeWith(selectOptions.length ? select?.value : true);
+        confirmBtn?.addEventListener('click', () => {
+            if (canConfirm()) closeWith(getConfirmResult());
         });
         select?.addEventListener('change', syncConfirmState);
         syncConfirmState();
@@ -551,8 +686,13 @@ window.dolOptConfirm = function(options) {
             }
         });
 
-        if (confirmBtn && typeof confirmBtn.focus === 'function') {
+        if (confirmBtn && !isDelaying && typeof confirmBtn.focus === 'function') {
             confirmBtn.focus();
+        } else {
+            const cancelBtn = dialog.querySelector('.dol-opt-modal-btn-cancel');
+            if (cancelBtn && typeof cancelBtn.focus === 'function') {
+                cancelBtn.focus();
+            }
         }
     });
 };
@@ -572,6 +712,9 @@ const DOL_OPT_KNOWN_MOD_ALIASES = {
     'ModHub': '模组管理器与市场套件',
     'ModHub模组管理中心': '模组管理器与市场套件',
     'SimpleFramework': '简易框架',
+    'Simple Frameworks': '简易框架',
+    'SimpleFrameworks': '简易框架',
+    'Simple Framework': '简易框架',
     'SCMLSimpleFramework': '简易框架',
     'GuideToMe': '控制NPC嘴部',
     'DoLSims': '模拟人生',
@@ -1541,8 +1684,25 @@ window.dolOptHandleAddMod = async function(fileInput, options = {}) {
         }
 
         // ===== 快捷添加模式：导入后询问是否立即重启游戏生效 =====
-        if (options && (options.askRestart || options.promptReload)) {
+        if (options && (options.askRestart || options.promptReload) && !options.skipReloadOffer) {
+            const isFramework = (newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : [])).some(name => window.dolOptIsFrameworkMod(name)) || window.dolOptIsFrameworkMod(targetDisplayName);
             const label = isBatch ? `${fileCount} 个模组` : (targetDisplayName ? `模组【${targetDisplayName}】` : '模组');
+            if (isFramework) {
+                await window.dolOptOfferReload(`${label}已成功添加并完成配置。`, { isFramework: true });
+                if (options.keepCurrentTab) {
+                    window._dolOptHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+                } else {
+                    window._dolOptHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+                    const switched = window.dolOptSwitchTab ? window.dolOptSwitchTab('模组管理') : false;
+                    if (!switched || document.getElementById('dolOptModManageContainer')) {
+                        if (typeof window.initModManage === 'function') {
+                            await window.initModManage();
+                        }
+                    }
+                }
+                return true;
+            }
+
             const ok = await window.dolOptConfirm({
                 title: '重新载入游戏',
                 message: `${label}已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`,
@@ -1600,11 +1760,18 @@ window.dolOptHandleAddMod = async function(fileInput, options = {}) {
             const readmeNote = readmeCount > 0 ? `（其中 ${readmeCount} 个包含说明文档）` : '';
             window.dolOptShowToast(`已成功导入 ${highlightSet.size || fileCount} 个模组${readmeNote}，已在列表中高亮标出。`, 'success');
 
-            const switched = window.dolOptSwitchTab('模组管理');
-            if (!switched || document.getElementById('dolOptModManageContainer')) {
-                if (typeof window.initModManage === 'function') {
-                    await window.initModManage();
+            if (!options?.keepCurrentTab) {
+                const switched = window.dolOptSwitchTab('模组管理');
+                if (!switched || document.getElementById('dolOptModManageContainer')) {
+                    if (typeof window.initModManage === 'function') {
+                        await window.initModManage();
+                    }
                 }
+            }
+            const shouldOfferReload = (!options || !options.skipReloadOffer) && options?.askRestart !== false && !options?.keepCurrentTab;
+            const hasFramework = Array.from(highlightSet).some(name => window.dolOptIsFrameworkMod(name));
+            if (hasFramework && shouldOfferReload) {
+                await window.dolOptOfferReload(`已成功导入 ${highlightSet.size || fileCount} 个模组（含核心框架）。`, { isFramework: true });
             }
         } else {
             // ===== 单模组导入场景：依是否有 ReadMe 智能分流 =====
@@ -1620,7 +1787,9 @@ window.dolOptHandleAddMod = async function(fileInput, options = {}) {
                 }
             }
 
-            if (hasReadme) {
+            if (options?.keepCurrentTab) {
+                window._dolOptHighlightMods = new Set(targetModName ? [targetModName] : []);
+            } else if (hasReadme) {
                 window._dolOptSelectedMod = targetModName;
                 window.dolOptShowToast(`模组【${targetDisplayName || targetModName}】导入成功，已为您打开说明文档。`, 'success');
                 window.dolOptSwitchTab('模组说明');
@@ -1637,6 +1806,11 @@ window.dolOptHandleAddMod = async function(fileInput, options = {}) {
                         await window.initModManage();
                     }
                 }
+            }
+
+            const shouldOfferReload = (!options || !options.skipReloadOffer) && options?.askRestart !== false && !options?.keepCurrentTab;
+            if (shouldOfferReload && window.dolOptIsFrameworkMod(targetModName || targetDisplayName)) {
+                await window.dolOptOfferReload(`核心框架【${targetDisplayName || targetModName}】已成功导入。`, { isFramework: true });
             }
         }
         return true;
@@ -2595,16 +2769,105 @@ window.dolOptRenderModManageUI = function() {
     }
 };
 
-window.dolOptOfferReload = async function(message = '配置已更新。') {
+// 判断模组是否属于核心框架（如秋枫白桦框架、简易框架等互斥或核心底层框架）
+window.dolOptIsFrameworkMod = function(modName) {
+    if (!modName) return false;
+    const raw = String(modName).trim();
+    if (!raw) return false;
+    const normalize = str => String(str || '').toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
+    const norm = normalize(raw);
+    if (!norm) return false;
+
+    // 1. 优先比对冲突规则组
+    const conflictRules = window.dolModMarket?.KNOWN_MOD_CONFLICT_RULES || [
+        {
+            id: 'maplebirch-vs-simpleframework',
+            conflictingGroups: [
+                {
+                    key: 'maplebirch',
+                    aliases: ['maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework', 'scml-dol-maplebirchframework', 'scmldolmaplebirchframework']
+                },
+                {
+                    key: 'simpleframework',
+                    aliases: ['simpleframework', '简易框架', 'scmlsimpleframework', 'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks']
+                }
+            ]
+        }
+    ];
+
+    for (const rule of conflictRules) {
+        for (const grp of rule.conflictingGroups || []) {
+            const keys = [grp.key, ...(grp.aliases || [])].map(normalize);
+            if (keys.some(k => norm === k || (k.length >= 3 && norm.includes(k)) || (norm.length >= 3 && k.includes(norm)))) {
+                return true;
+            }
+        }
+    }
+
+    // 2. 检查名称字面是否包含 framework 或 框架
+    if (norm.toLowerCase().includes('framework') || raw.includes('框架')) {
+        return true;
+    }
+
+    // 3. 检查 boot.json 信息
+    try {
+        const info = typeof window.dolOptGetModInfo === 'function' ? window.dolOptGetModInfo(modName) : null;
+        const boot = info?.bootJson || window._dolOptDisabledModInfo?.get(norm)?.bootJson;
+        if (boot) {
+            const bootName = normalize(boot.name);
+            if (bootName.includes('framework') || String(boot.name || '').includes('框架')) return true;
+            if (Array.isArray(boot.alias)) {
+                for (const a of boot.alias) {
+                    const normA = normalize(a);
+                    if (normA.includes('framework') || String(a || '').includes('框架')) return true;
+                }
+            }
+        }
+    } catch (_) {}
+
+    return false;
+};
+
+window.dolOptOfferReload = async function(message = '配置已更新。', options = {}) {
+    const isFramework = Boolean(options.isFramework);
+    const title = isFramework ? '重新载入游戏（强烈建议）' : '重新载入游戏';
+    const confirmText = isFramework ? '立即重新载入' : '立即重载';
+    const cancelText = isFramework ? '稍后重载' : '稍后重载';
+
+    let promptMsg = '';
+    let trustedMessageHtml = '';
+
+    if (isFramework) {
+        promptMsg = `${message}\n\n【强烈建议】：检测到底层核心框架状态发生变更。\n核心框架的加载与 ModLoader 运行时状态强相关，强烈建议立即重新载入游戏以刷新系统状态，确保后续模组冲突检测与正常运行！\n\n是否立即重新载入游戏？`;
+        const escape = value => typeof window.dolOptEscapeHtml === 'function' ? window.dolOptEscapeHtml(String(value ?? '')) : String(value ?? '');
+        trustedMessageHtml = `
+            <div style="line-height: 1.5;">${escape(message)}</div>
+            <div class="dol-opt-modal-framework-alert" style="margin-top: 10px; padding: 10px 14px; background: rgba(255, 170, 0, 0.12); border: 1px solid rgba(255, 170, 0, 0.4); border-radius: 4px;">
+                <div class="gold" style="font-weight: bold; margin-bottom: 4px;">强烈建议立即重新载入</div>
+                <div class="grey" style="font-size: 0.9em; line-height: 1.45;">
+                    检测到底层核心框架状态发生变更。核心框架的加载与 ModLoader 运行时状态强相关，立即重启可刷新系统状态，确保后续模组依赖分析与冲突检测功能准确无误。
+                </div>
+            </div>
+            <div class="grey" style="margin-top: 10px; font-size: 0.9em;">是否立即重新载入游戏？</div>
+        `;
+    } else {
+        promptMsg = `${message}\n\n是否立即重新载入游戏以使配置生效？`;
+    }
+
     const ok = await window.dolOptConfirm({
-        title: '重新载入游戏',
-        message: `${message}\n\n是否立即重新载入游戏以使配置生效？`,
-        confirmText: '立即重载',
-        cancelText: '稍后重载',
-        confirmType: 'primary'
+        title,
+        message: promptMsg,
+        trustedMessageHtml: trustedMessageHtml || undefined,
+        confirmText,
+        cancelText,
+        confirmType: isFramework ? 'danger' : 'primary'
     });
-    if (!ok) return;
-    window.dolOptRestartGame();
+    if (!ok) return false;
+    window.dolOptShowToast('正在重新载入游戏...', 'warning');
+    setTimeout(() => {
+        window.dolOptRestartGame();
+    }, 300);
+    return true;
 };
 
 window.dolOptBuildSmartOrder = async function(nodes, gui, dependentsFirst = false) {
@@ -2777,19 +3040,503 @@ window.dolOptMoveSideMod = async function(index, deltaOrPosition) {
     });
 };
 
+// 检测即将启用的模组与当前本地已启用的其它模组是否存在互斥冲突
+window.dolOptCheckEnableConflicts = function(targetModName, activeMods) {
+    if (!targetModName || !Array.isArray(activeMods) || !activeMods.length) return null;
+
+    const conflictRules = window.dolModMarket?.KNOWN_MOD_CONFLICT_RULES || [
+        {
+            id: 'maplebirch-vs-simpleframework',
+            name: '秋枫白桦框架 与 简易框架 互斥',
+            conflictingGroups: [
+                {
+                    key: 'maplebirch',
+                    name: '秋枫白桦框架',
+                    aliases: [
+                        'maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework',
+                        'scml-dol-maplebirchframework', 'scmldolmaplebirchframework',
+                        'MaplebirchLeaf/SCML-DOL-maplebirchframework'
+                    ]
+                },
+                {
+                    key: 'simpleframework',
+                    name: '简易框架',
+                    aliases: [
+                        'simpleframework', '简易框架', 'scmlsimpleframework',
+                        'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks',
+                        'emicoto/SCMLSimpleFramework'
+                    ]
+                }
+            ],
+            reason: '两者底层挂钩机制与核心段落重写逻辑互斥，同时启用可能导致脚本报错、界面错乱或存档损坏。',
+            level: 'danger'
+        }
+    ];
+
+    const normalize = str => String(str || '').toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
+    const stripPrefix = str => String(str || '').replace(/^(?:degrees[-_\s]?of[-_\s]?lewdity[-_\s]?|dol[-_\s]?)/i, '');
+
+    // 核心识别引擎：判断模组名或模组对象归属于哪一个互斥冲突组
+    const resolveModConflictGroup = (modOrName, rule) => {
+        if (!modOrName || !Array.isArray(rule.conflictingGroups) || rule.conflictingGroups.length < 2) return null;
+        const [groupA, groupB] = rule.conflictingGroups;
+        const keysA = [groupA.key, ...(groupA.aliases || [])].map(normalize).filter(Boolean);
+        const keysB = [groupB.key, ...(groupB.aliases || [])].map(normalize).filter(Boolean);
+
+        const rawName = typeof modOrName === 'string' ? modOrName : (modOrName.name || '');
+        const norm = normalize(rawName);
+        const stripped = normalize(stripPrefix(rawName));
+
+        // 1. 直接名称高精比对（Direct Literal Match）：最高优先级，杜绝跨组别名串门
+        const directA = keysA.some(k => norm === k || stripped === k || (k.length >= 4 && (norm.includes(k) || stripped.includes(k))));
+        const directB = keysB.some(k => norm === k || stripped === k || (k.length >= 4 && (norm.includes(k) || stripped.includes(k))));
+
+        if (directA && !directB) return groupA;
+        if (directB && !directA) return groupB;
+        if (directA && directB) {
+            // 若两方同时模糊包含，优先完全相等者
+            if (keysA.some(k => norm === k || stripped === k)) return groupA;
+            if (keysB.some(k => norm === k || stripped === k)) return groupB;
+        }
+
+        // 2. 回退检查 bootJson（严禁使用对手别名与 boot.alias）
+        const info = window.dolOptGetModInfo?.(rawName);
+        const disabledInfo = window._dolOptDisabledModInfo?.get(rawName.trim().toLowerCase()) || window._dolOptDisabledModInfo?.get(norm);
+        const boot = info?.bootJson || disabledInfo?.bootJson;
+        if (boot) {
+            const bootName = boot.name ? normalize(boot.name) : '';
+            const bootStripped = boot.name ? normalize(stripPrefix(boot.name)) : '';
+            const bootA = keysA.some(k => bootName === k || bootStripped === k || (k.length >= 4 && (bootName.includes(k) || bootStripped.includes(k))));
+            const bootB = keysB.some(k => bootName === k || bootStripped === k || (k.length >= 4 && (bootName.includes(k) || bootStripped.includes(k))));
+            if (bootA && !bootB) return groupA;
+            if (bootB && !bootA) return groupB;
+        }
+
+        return null;
+    };
+
+    // 获取防污染的友好中文名称
+    const getCleanDisplayName = (modName, group) => {
+        if (!group) return modName;
+        // 如果确定是简易框架组，强制统一展示其标准中文名，杜绝被 ModLoader 别名解析污染为秋枫白桦
+        if (group.key === 'simpleframework') return group.name || '简易框架';
+        if (group.key === 'maplebirch') return group.name || '秋枫白桦框架';
+
+        const subtext = window.dolOptGetModSubtext(modName, window.dolOptGetModInfo?.(modName), false, true);
+        return subtext || group.name || modName;
+    };
+
+    for (const rule of conflictRules) {
+        if (!Array.isArray(rule.conflictingGroups) || rule.conflictingGroups.length < 2) continue;
+        const [groupA, groupB] = rule.conflictingGroups;
+
+        const targetGroup = resolveModConflictGroup(targetModName, rule);
+        if (!targetGroup) continue;
+
+        const opponentGroup = (targetGroup === groupA) ? groupB : groupA;
+
+        for (const active of activeMods) {
+            const activeName = typeof active === 'string' ? active : active?.name;
+            if (!activeName || activeName === targetModName) continue;
+
+            const activeGroup = resolveModConflictGroup(activeName, rule);
+            if (activeGroup === opponentGroup) {
+                return {
+                    ruleId: rule.id,
+                    targetDisplayName: getCleanDisplayName(targetModName, targetGroup),
+                    conflictDisplayName: getCleanDisplayName(activeName, opponentGroup),
+                    targetModName,
+                    conflictModName: activeName,
+                    targetRawName: targetModName,
+                    conflictRawName: activeName,
+                    reason: rule.reason
+                };
+            }
+        }
+    }
+
+    return null;
+};
+
+// 查找本地依赖于指定模组的其它模组列表（用于删除模组或禁用框架时的影响评估）
+window.dolOptFindDependentMods = async function(targetModName) {
+    if (!targetModName) return [];
+    const state = window._dolOptModState;
+    const allMods = state?.sideMods || [];
+
+    const normalize = str => String(str || '').toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
+    const stripPrefix = str => String(str || '').replace(/^(?:degrees[-_\s]?of[-_\s]?lewdity[-_\s]?|dol[-_\s]?)/i, '');
+
+    // 冲突规则定义
+    const conflictRules = window.dolModMarket?.KNOWN_MOD_CONFLICT_RULES || [
+        {
+            id: 'maplebirch-vs-simpleframework',
+            conflictingGroups: [
+                {
+                    key: 'maplebirch',
+                    name: '秋枫白桦框架',
+                    aliases: ['maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework', 'scml-dol-maplebirchframework', 'scmldolmaplebirchframework']
+                },
+                {
+                    key: 'simpleframework',
+                    name: '简易框架',
+                    aliases: ['simpleframework', '简易框架', 'scmlsimpleframework', 'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks']
+                }
+            ]
+        }
+    ];
+
+    // 尝试获取目标模组自身的 bootJson
+    const targetModInfo = window.dolOptGetModInfo(targetModName);
+    const targetBoot = targetModInfo?.bootJson || window._dolOptDisabledModInfo?.get(normalize(targetModName))?.bootJson;
+
+    // 1. 判定目标模组匹配到的冲突组与对手冲突组
+    const isNameMatchingGroup = (name, grp) => {
+        if (!name) return false;
+        const norm = normalize(name);
+        const stripped = normalize(stripPrefix(name));
+        const grpKeys = [grp.key, ...(grp.aliases || [])].map(normalize);
+        return grpKeys.some(k => norm === k || stripped === k || (k.length >= 4 && (norm.includes(k) || (stripped && stripped.includes(k)))));
+    };
+
+    let matchingGroup = null;
+    let matchedRule = null;
+    for (const rule of conflictRules) {
+        for (const grp of rule.conflictingGroups || []) {
+            if (isNameMatchingGroup(targetModName, grp) || (targetBoot?.name && isNameMatchingGroup(targetBoot.name, grp))) {
+                matchingGroup = grp;
+                matchedRule = rule;
+                break;
+            }
+        }
+        if (matchingGroup) break;
+    }
+
+    // 2. 收集对手组别名，防止互斥组别名交叉污染导致误诊
+    const opponentKeySet = new Set();
+    if (matchedRule && matchingGroup) {
+        for (const grp of matchedRule.conflictingGroups || []) {
+            if (grp !== matchingGroup) {
+                [grp.key, ...(grp.aliases || [])].map(normalize).forEach(k => opponentKeySet.add(k));
+            }
+        }
+    }
+
+    const isOpponentKey = (norm) => {
+        if (!norm) return false;
+        if (opponentKeySet.has(norm)) return true;
+        for (const opp of opponentKeySet) {
+            if (opp.length >= 4 && (norm === opp || norm.includes(opp) || opp.includes(norm))) return true;
+        }
+        return false;
+    };
+
+    // 3. 构建目标键集合（排除对手组所有标识）
+    const targetKeySet = new Set();
+    const addKey = (name) => {
+        if (!name) return;
+        const norm = normalize(name);
+        if (!norm || isOpponentKey(norm)) return;
+        targetKeySet.add(norm);
+        const stripped = normalize(stripPrefix(name));
+        if (stripped && stripped.length >= 3 && !isOpponentKey(stripped)) {
+            targetKeySet.add(stripped);
+        }
+    };
+
+    addKey(targetModName);
+
+    if (targetBoot) {
+        if (targetBoot.name) addKey(targetBoot.name);
+        if (Array.isArray(targetBoot.alias)) targetBoot.alias.forEach(addKey);
+        if (typeof targetBoot.nickName === 'string') addKey(targetBoot.nickName);
+        else if (typeof targetBoot.nickName === 'object' && targetBoot.nickName) {
+            Object.values(targetBoot.nickName).forEach(addKey);
+        }
+    }
+
+    // 尝试从内置别名字典补充
+    const normTarget = normalize(targetModName);
+    for (const [k, v] of Object.entries(DOL_OPT_KNOWN_MOD_ALIASES)) {
+        if (normalize(k) === normTarget || normalize(v) === normTarget) {
+            addKey(k);
+            addKey(v);
+        }
+    }
+
+    // 若属于冲突组，仅追加该同盟组的别名
+    if (matchingGroup) {
+        [matchingGroup.key, ...(matchingGroup.aliases || [])].forEach(addKey);
+    }
+
+    const matchesTarget = (name) => {
+        if (!name) return false;
+        const norm = normalize(name);
+        const stripped = normalize(stripPrefix(name));
+
+        // 关键防线：若依赖项明确指向对手冲突组，绝不视为依赖本目标模组
+        if (isOpponentKey(norm) || (stripped && isOpponentKey(stripped))) {
+            return false;
+        }
+
+        if (targetKeySet.has(norm) || (stripped && targetKeySet.has(stripped))) return true;
+        for (const t of targetKeySet) {
+            if (t.length >= 4 && (norm.includes(t) || (stripped && stripped.includes(t)))) return true;
+        }
+        return false;
+    };
+
+    const isSelf = (name, boot) => {
+        if (matchesTarget(name)) return true;
+        if (boot?.name && matchesTarget(boot.name)) return true;
+        return false;
+    };
+
+    const affected = [];
+    const seen = new Set();
+
+    for (const item of allMods) {
+        const modInfo = window.dolOptGetModInfo(item.name);
+        const boot = modInfo?.bootJson || window._dolOptDisabledModInfo.get(item.name.toLowerCase())?.bootJson || {};
+        if (isSelf(item.name, boot)) continue;
+
+        const deps = [
+            ...(Array.isArray(boot.dependenceInfo) ? boot.dependenceInfo : []),
+            ...(Array.isArray(boot.addonPlugin) ? boot.addonPlugin : []),
+            ...(Array.isArray(boot.dependencies) ? boot.dependencies : []),
+            ...(Array.isArray(boot.depends) ? boot.depends : [])
+        ];
+
+        let hasDep = false;
+        for (const dep of deps) {
+            const depName = typeof dep === 'string' ? dep : (dep.modName || dep.name || dep.id);
+            if (matchesTarget(depName)) {
+                hasDep = true;
+                break;
+            }
+        }
+
+        if (hasDep) {
+            const normKey = normalize(item.name);
+            if (!seen.has(normKey)) {
+                seen.add(normKey);
+                const subtext = window.dolOptGetModSubtext(item.name, { bootJson: boot }, false, true);
+                const displayName = subtext || boot.name || item.name;
+                affected.push({
+                    name: displayName,
+                    rawName: item.name,
+                    version: boot.version || '',
+                    isEnabled: !!item.enabled
+                });
+            }
+        }
+    }
+
+    return affected;
+};
+
 // 旁加载模组启用/禁用就地切换（保持原有排序位置绝对不变）
-window.dolOptToggleSideMod = async function(modName, enable) {
+window.dolOptToggleSideMod = async function(modName, enable, options = {}) {
+    const state = window._dolOptModState;
+    if (!state) return false;
+    window.dolOptEnsureModStateSync(state);
+
+    const item = state.sideMods.find(m => m.name === modName);
+    if (!item) return false;
+
+    const targetEnable = enable !== undefined ? !!enable : !item.enabled;
+    if (item.enabled === targetEnable) return false;
+
+    // 当即将启用模组时，进行本地已知冲突检测
+    if (targetEnable) {
+        const conflict = window.dolOptCheckEnableConflicts(modName, state.sideMods.filter(m => m.enabled && m.name !== modName));
+        if (conflict) {
+            const proceed = await window.dolOptConfirm({
+                title: '模组冲突风险确认',
+                message: `检测到即将启用的模组与当前已启用的模组存在已知兼容性冲突：\n\n· 即将启用：【${conflict.targetDisplayName}】\n· 当前已启用冲突模组：【${conflict.conflictDisplayName}】\n\n原因：${conflict.reason}\n\n两者底层挂钩逻辑互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。\n\n是否确认继续启用？`,
+                trustedMessageHtml: `
+                    <div class="dol-opt-modal-conflict-intro">检测到即将启用的模组与当前已启用的模组存在已知兼容性冲突：</div>
+                    <div class="dol-opt-modal-conflict-alert-box" style="margin: 12px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
+                        <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
+                            · 即将启用：【${window.dolOptEscapeHtml(conflict.targetDisplayName)}】<br>
+                            · 当前已启用冲突模组：【${window.dolOptEscapeHtml(conflict.conflictDisplayName)}】
+                        </div>
+                        <div class="grey" style="font-size: 0.9em; line-height: 1.4;">
+                            ${window.dolOptEscapeHtml(conflict.reason)}
+                        </div>
+                        <div class="dol-opt-conflict-action-row" style="margin-top: 8px;">
+                            <button type="button" class="macro-button dol-opt-conflict-disable-btn" id="dolOptModalConflictDisableBtn" data-conflict-raw="${window.dolOptEscapeHtml(conflict.conflictModName)}" data-conflict-name="${window.dolOptEscapeHtml(conflict.conflictDisplayName)}">
+                                快捷禁用【${window.dolOptEscapeHtml(conflict.conflictDisplayName)}】
+                            </button>
+                        </div>
+                    </div>
+                    <div class="dol-opt-modal-conflict-question grey">两者底层挂钩逻辑互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。<br>是否确认继续启用？</div>
+                `,
+                confirmText: '继续启用',
+                cancelText: '暂不启用',
+                confirmType: 'danger',
+                confirmDelay: 5,
+                onRender: (dialog) => {
+                    const disableBtn = dialog.querySelector('#dolOptModalConflictDisableBtn');
+                    if (!disableBtn) return;
+
+                    disableBtn.onclick = async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+
+                        const rawName = conflict.conflictModName;
+                        const displayName = conflict.conflictDisplayName || rawName;
+                        if (!rawName) return;
+
+                        const escape = value => typeof window.dolOptEscapeHtml === 'function' ? window.dolOptEscapeHtml(String(value ?? '')) : String(value ?? '');
+                        const affectedMods = typeof window.dolOptFindDependentMods === 'function'
+                            ? await window.dolOptFindDependentMods(rawName)
+                            : [];
+
+                        let confirmProceed = false;
+                        if (affectedMods.length > 0) {
+                            const modItemsHtml = affectedMods.map(m => `
+                                <div class="dol-opt-modal-affected-item">
+                                    · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}
+                                </div>
+                            `).join('');
+                            const modLinesText = affectedMods.map(m => `· 【${m.name}】${m.version ? ` (${m.version})` : ''}`).join('\n');
+
+                            confirmProceed = await window.dolOptConfirm({
+                                title: `确认快捷禁用【${displayName}】？`,
+                                message: `禁用【${displayName}】后，以下依赖该框架的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n是否仍然确认禁用？`,
+                                trustedMessageHtml: `
+                                    <div class="dol-opt-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该框架的模组可能会受到影响或无法正常运行：</div>
+                                    <div class="dol-opt-modal-affected-box">
+                                        ${modItemsHtml}
+                                    </div>
+                                    <div class="grey dol-opt-modal-question" style="margin-top:10px;">是否仍然确认禁用该冲突框架？</div>
+                                `,
+                                confirmText: '确认禁用',
+                                cancelText: '暂不禁用',
+                                confirmType: 'danger'
+                            });
+                        } else {
+                            confirmProceed = await window.dolOptConfirm({
+                                title: `确认快捷禁用【${displayName}】？`,
+                                message: `确定要禁用【${displayName}】吗？\n禁用后该框架将暂停加载，本次冲突风险将被排除。`,
+                                trustedMessageHtml: `
+                                    <div>确定要禁用 <span class="gold">【${escape(displayName)}】</span> 吗？</div>
+                                    <div class="grey" style="margin-top:6px;">禁用后该框架将暂停加载，本次冲突风险将被排除。</div>
+                                `,
+                                confirmText: '确认禁用',
+                                cancelText: '取消',
+                                confirmType: 'warning'
+                            });
+                        }
+
+                        if (!confirmProceed) return;
+
+                        disableBtn.disabled = true;
+                        disableBtn.textContent = '正在禁用...';
+
+                        try {
+                            const conflictItem = state.sideMods.find(m => m.name === rawName);
+                            if (conflictItem) {
+                                conflictItem.enabled = false;
+                                window.dolOptEnsureModStateSync(state);
+                                await window.dolOptSaveModManageState(false);
+                            }
+
+                            if (typeof window.dolOptShowToast === 'function') {
+                                window.dolOptShowToast(`已快捷禁用【${displayName}】，冲突已排除`, 'success');
+                            }
+
+                            if (typeof dialog.dolOptClearDelay === 'function') {
+                                dialog.dolOptClearDelay();
+                            }
+
+                            const alertBox = dialog.querySelector('.dol-opt-modal-conflict-alert-box');
+                            if (alertBox) {
+                                alertBox.className = 'dol-opt-modal-conflict-alert-box is-resolved';
+                                alertBox.style.background = '';
+                                alertBox.style.border = '';
+                                alertBox.innerHTML = `
+                                    <div style="font-weight: bold; color: #4ade80; margin-bottom: 6px;">
+                                        · 即将启用：【${escape(conflict.targetDisplayName)}】<br>
+                                        · 冲突模组：【${escape(conflict.conflictDisplayName)}】<span style="color: #4ade80; font-size: 0.85em; font-weight: normal;">（已快捷禁用 · 风险已排除）</span>
+                                    </div>
+                                    <div class="grey" style="font-size: 0.9em; line-height: 1.4;">
+                                        互斥冲突已排除，可安全启用【${escape(conflict.targetDisplayName)}】。
+                                    </div>
+                                `;
+                            }
+
+                            const titleEl = dialog.querySelector('.dol-opt-modal-title');
+                            if (titleEl) {
+                                titleEl.className = 'gold dol-opt-modal-title';
+                                titleEl.textContent = '冲突已排除 · 确认启用';
+                            }
+
+                            const questionEl = dialog.querySelector('.dol-opt-modal-conflict-question');
+                            if (questionEl) {
+                                questionEl.className = 'dol-opt-modal-conflict-question green';
+                                questionEl.textContent = '冲突模组已成功禁用，本次启用无冲突风险。点击下方按钮即可完成启用。';
+                            }
+
+                            const confirmBtn = dialog.querySelector('.dol-opt-modal-btn-confirm');
+                            if (confirmBtn) {
+                                confirmBtn.className = confirmBtn.className.replace(/\bdol-opt-btn-danger\b/, 'dol-opt-btn-primary');
+                                confirmBtn.disabled = false;
+                                confirmBtn.textContent = '确认启用';
+                            }
+                        } catch (err) {
+                            console.error('[dolOptToggleSideMod] 快捷禁用冲突模组失败:', err);
+                            disableBtn.disabled = false;
+                            disableBtn.textContent = `快捷禁用【${escape(displayName)}】`;
+                        }
+                    };
+                }
+            });
+            if (!proceed) return false;
+        }
+    }
+
+    // 当即将禁用模组时，进行下游依赖影响排查
+    if (!targetEnable && !options.skipConfirm) {
+        const affectedMods = typeof window.dolOptFindDependentMods === 'function'
+            ? await window.dolOptFindDependentMods(modName)
+            : [];
+        if (affectedMods.length > 0) {
+            const modInfo = window.dolOptGetModInfo(modName);
+            const subtext = window.dolOptGetModSubtext(modName, modInfo, false, true);
+            const displayName = subtext || modName;
+            const isFramework = typeof window.dolOptIsFrameworkMod === 'function' && window.dolOptIsFrameworkMod(modName);
+            const targetTypeLabel = isFramework ? '框架' : '模组';
+
+            const escape = value => typeof window.dolOptEscapeHtml === 'function' ? window.dolOptEscapeHtml(String(value ?? '')) : String(value ?? '');
+            const modItemsHtml = affectedMods.map(m => `
+                <div class="dol-opt-modal-affected-item">
+                    · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}${m.isEnabled ? '' : ' <span class="grey">[已禁用]</span>'}
+                </div>
+            `).join('');
+            const modLinesText = affectedMods.map(m => `· 【${m.name}】${m.version ? ` (${m.version})` : ''}${m.isEnabled ? '' : ' [已禁用]'}`).join('\n');
+
+            const confirmProceed = await window.dolOptConfirm({
+                title: `确认禁用【${displayName}】？`,
+                message: `禁用【${displayName}】后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n是否仍然确认禁用？`,
+                trustedMessageHtml: `
+                    <div class="dol-opt-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：</div>
+                    <div class="dol-opt-modal-affected-box">
+                        ${modItemsHtml}
+                    </div>
+                    <div class="grey dol-opt-modal-question" style="margin-top:10px;">是否仍然确认禁用该${targetTypeLabel}？</div>
+                `,
+                confirmText: '确认禁用',
+                cancelText: '暂不禁用',
+                confirmType: 'danger'
+            });
+
+            if (!confirmProceed) return false;
+        }
+    }
+
     return window.dolOptRunManagerAction(async () => {
-        const state = window._dolOptModState;
-        if (!state) return false;
-        window.dolOptEnsureModStateSync(state);
-
-        const item = state.sideMods.find(m => m.name === modName);
-        if (!item) return false;
-
-        const targetEnable = enable !== undefined ? !!enable : !item.enabled;
-        if (item.enabled === targetEnable) return false;
-
         item.enabled = targetEnable;
         window.dolOptEnsureModStateSync(state);
 
@@ -2800,19 +3547,64 @@ window.dolOptToggleSideMod = async function(modName, enable) {
             await window.dolOptLoadBeautyState();
         }
 
-        window.dolOptShowToast(`模组【${modName}】已${targetEnable ? '启用' : '禁用'}（原排序保持不变）`, 'success');
+        window.dolOptShowToast(`模组【${modName}】已${targetEnable ? '启用' : '禁用'}`, 'success');
+        if (!options.silentOfferReload && window.dolOptIsFrameworkMod(modName)) {
+            const modInfo = window.dolOptGetModInfo(modName);
+            const subtext = window.dolOptGetModSubtext(modName, modInfo, false, true);
+            const modDisplayName = subtext ? `${modName}（${subtext}）` : modName;
+            window.dolOptOfferReload(`核心框架【${modDisplayName}】已${targetEnable ? '启用' : '禁用'}。`, { isFramework: true });
+        }
+        return true;
     });
 };
 
 // 永久删除旁加载模组
 window.dolOptDeleteSideMod = async function(modName) {
-    const confirmed = await window.dolOptConfirm({
-        title: '确认删除模组',
-        message: `确定要删除模组【${modName}】吗？\n删除后该模组将从浏览器存储中彻底移除，不可恢复。`,
-        confirmText: '确认删除',
-        cancelText: '取消',
-        confirmType: 'danger'
-    });
+    const affectedMods = await window.dolOptFindDependentMods(modName);
+    const modInfo = window.dolOptGetModInfo(modName);
+    const subtext = window.dolOptGetModSubtext(modName, modInfo, false, true);
+    const modDisplayName = subtext ? `${modName}（${subtext}）` : modName;
+
+    let confirmed = false;
+    if (affectedMods.length > 0) {
+        const affectedListHtml = affectedMods.map(m => {
+            const ver = m.version ? ` (${window.dolOptEscapeHtml(m.version)})` : '';
+            const status = m.isEnabled ? '' : ' <span class="grey">[已禁用]</span>';
+            return `<div>· <span class="gold">${window.dolOptEscapeHtml(m.name)}</span>${ver}${status}</div>`;
+        }).join('');
+        const affectedListText = affectedMods.map(m => `· ${m.name}${m.version ? ` (${m.version})` : ''}${m.isEnabled ? '' : ' [已禁用]'}`).join('\n');
+
+        const trustedMessageHtml = `
+            <div class="dol-opt-modal-conflict-intro">确定要彻底删除模组【<span class="gold">${window.dolOptEscapeHtml(modDisplayName)}</span>】吗？</div>
+            <div class="dol-opt-modal-conflict-alert-box" style="margin: 12px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
+                <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
+                    警告：检测到以下模组依赖于该模组/框架，删除后可能会受到严重影响或无法正常运行：
+                </div>
+                <div style="max-height: 140px; overflow-y: auto; font-size: 0.9em; line-height: 1.6;">
+                    ${affectedListHtml}
+                </div>
+            </div>
+            <div class="grey" style="font-size: 0.9em; margin-top: 8px;">删除后该模组将从浏览器存储中彻底移除，不可恢复。是否仍要删除？</div>
+        `;
+
+        confirmed = await window.dolOptConfirm({
+            title: '确认删除模组（存在依赖警告）',
+            message: `确定要彻底删除模组【${modDisplayName}】吗？\n\n警告：以下模组依赖于该模组/框架，删除后可能无法正常运行：\n${affectedListText}\n\n删除后该模组将从浏览器存储中彻底移除，不可恢复。是否确认删除？`,
+            trustedMessageHtml,
+            confirmText: '确认删除',
+            cancelText: '取消',
+            confirmType: 'danger',
+            confirmDelay: 5
+        });
+    } else {
+        confirmed = await window.dolOptConfirm({
+            title: '确认删除模组',
+            message: `确定要删除模组【${modName}】吗？\n删除后该模组将从浏览器存储中彻底移除，不可恢复。`,
+            confirmText: '确认删除',
+            cancelText: '取消',
+            confirmType: 'danger'
+        });
+    }
     if (!confirmed) return;
 
     const saved = await window.dolOptRunManagerAction(async () => {
@@ -2834,7 +3626,8 @@ window.dolOptDeleteSideMod = async function(modName) {
     });
     if (saved) {
         window.dolOptShowToast(`已删除模组【${modName}】，重新载入后生效`, 'warning');
-        window.dolOptOfferReload(`模组【${modName}】已从模组列表中删除。`);
+        const isFramework = window.dolOptIsFrameworkMod(modName);
+        window.dolOptOfferReload(`模组【${modDisplayName || modName}】已从模组列表中删除。`, { isFramework });
     }
     return saved;
 };
