@@ -21,7 +21,7 @@
 
 ### 漏洞修复
 
-1. **原版优化图像包占用与依赖解耦修复**：修复与「原版优化」(DolOptimization) 一起安装时原版优化图像无法正常显示的问题（感谢社区贡献者 @anlin.studio 提交 PR 修复）。
+1. **原版优化图像包占用与依赖解耦修复**：修复与「原版优化」(DolOptimization) 一起安装时原版优化图像无法正常显示的问题（感谢社区贡献者 ANLIN.STUDIO 提交 PR 修复）。
    - 彻底移除 `src/boot.json` 中遗留的 `BeautySelectorAddon` 图像插件配置（`(请确保启用此图像包) 原版优化 DolOptimization`），杜绝无图包的 ModHub 抢占原版优化图像包注册槽位；
    - 移除 `dependenceInfo` 中对 `BeautySelectorAddon` 和 `maplebirch` 的非必要强依赖，仅保留核心 `TweeReplacer` 依赖，实现与原版优化的彻底解耦与零冲突并存。
 2. **已安装模组未被模组市场正确识别修复**：修复 `GuideToMe`（对应市场【控制NPC嘴部】）、`DoLSims`（对应市场【模拟人生】）、`Wraith'sReflection`（对应市场【怨灵的倒影】）等模组在本地安装后，模组市场仍显示为未安装、按钮仍显示为【下载安装】的问题。
