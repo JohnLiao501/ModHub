@@ -69,6 +69,12 @@
             match: (name, repo) => name === 'sydneybarestudymod' || repo === 'dolsydneybarestudymod',
             isUpToDate: (localVer, remoteVer) =>
                 compareVersions(localVer, '0.1') >= 0 && /^v?1\.5(?:$|[-+_])/i.test(String(remoteVer).trim())
+        },
+        {
+            // 织境空间系列模组: 作者已移除 GitHub 仓库 (404)，且 Wiki 词条录入的料理扩展历史版本 (0.4.19) 虚高且无可用发布
+            name: '织境空间',
+            match: (name, repo) => name.includes('织境') || (repo && repo.includes('wovenrealm')),
+            isUpToDate: (localVer, remoteVer) => true // 本地只要已安装即视为已是最新，绝不误报更新
         }
     ];
 
@@ -145,7 +151,25 @@
         'baileysofficee': ['贝利办公室剧情扩展', '贝利办公室'],
         'extrarecipestudy': ['额外菜谱研习'],
         'gameoriginalimagepack': ['原版高清图像资源包'],
-        'honestmarkets': ['诚实市场模组', '诚实市场']
+        'honestmarkets': ['诚实市场模组', '诚实市场'],
+        'guidetome': ['控制npc嘴部', '控制嘴部', '引导嘴部', 'dolguidetome'],
+        '控制npc嘴部': ['guidetome', 'dolguidetome'],
+        'dolsims': ['模拟人生', 'degreesoflewditydolsims', 'sims'],
+        '模拟人生': ['dolsims', 'degreesoflewditydolsims', 'sims'],
+        'wraithsreflection': ['怨灵的倒影', '幽灵倒影', '怨灵倒影', 'wraithreflection'],
+        '怨灵的倒影': ['wraithsreflection', 'wraithreflection'],
+        'nobusharassmentmod': ['公交车防骚扰', 'nobusharassment'],
+        '公交车防骚扰': ['nobusharassmentmod', 'nobusharassment'],
+        'modhub': ['modhub模组管理中心', 'modhub模组管理', 'modhub模组管理器'],
+        'modhub模组管理中心': ['modhub', 'modhub模组管理'],
+        'simpleframework': ['简易框架', 'scmlsimpleframework'],
+        '简易框架': ['simpleframework', 'scmlsimpleframework'],
+        'fishinglife': ['钓鱼人生', 'dolmodfishinglife'],
+        '钓鱼人生': ['fishinglife', 'dolmodfishinglife'],
+        'cattery': ['猫咖出租屋', 'degreesoflewditycattery'],
+        '猫咖出租屋': ['cattery', 'degreesoflewditycattery'],
+        'evilcockroach': ['邪恶蟑螂', '邪恶蟑螂桌宠', 'evilcockroachmod'],
+        '邪恶蟑螂（桌宠）': ['evilcockroach', 'evilcockroachmod']
     };
 
     const MARKET_CATEGORIES = [
@@ -183,6 +207,20 @@
         whitneyexpansion: ['Ayusai31/WhitneyExpansion'],
         modi18n: ['Lyoko-Jeremie/Degrees-of-Lewdity_Mod_i18nMod'],
         '模拟人生': ['MissedHeart/Degrees-of-Lewdity-DolSims'],
+        'dolsims': ['MissedHeart/Degrees-of-Lewdity-DolSims'],
+        '控制NPC嘴部': ['Ayndpa/DOL-GuideToMe'],
+        'guidetome': ['Ayndpa/DOL-GuideToMe'],
+        '怨灵的倒影': ['Water2311/WraithsReflection'],
+        'wraithsreflection': ['Water2311/WraithsReflection'],
+        '公交车防骚扰': ['Ayndpa/NoBusHarassmentMod'],
+        'nobusharassmentmod': ['Ayndpa/NoBusHarassmentMod'],
+        '简易框架': ['emicoto/SCMLSimpleFramework'],
+        'simpleframework': ['emicoto/SCMLSimpleFramework'],
+        '钓鱼人生': ['Future-R/DOLMOD-FishingLife'],
+        'fishinglife': ['Future-R/DOLMOD-FishingLife'],
+        'ModHub': ['JohnLiao501/ModHub'],
+        'modhub': ['JohnLiao501/ModHub'],
+        'ModHub模组管理中心': ['JohnLiao501/ModHub'],
         '猫咖出租屋': ['Maomaoi/Degrees-of-Lewdity-Cattery'],
         '邪恶蟑螂（桌宠）': ['LooopSpiner/Evil-Cockroach-Mod'],
         '电视': ['Lethivia/DoL-mod-tv'],
@@ -589,6 +627,8 @@
                 const otherUrl = otherUrls[0] || null;
 
                 const classification = deriveClassification(name, description);
+                const repoKey = extractRepoKey(githubUrl);
+                const isDead = Boolean(isDeadRepo(repoKey) || isDeadRepo(githubUrl));
 
                 mods.push({
                     name,
@@ -599,9 +639,11 @@
                     description: description || '暂无说明',
                     author: author || '未知作者',
                     version: version || '',
+                    versionSource: 'wiki',
                     updateDate: date || '',
                     category: classification.category,
-                    tags: classification.tags
+                    tags: classification.tags,
+                    _isDeadRepo: isDead
                 });
             }
         }
@@ -788,6 +830,16 @@
                     err.code = 'RATE_LIMITED';
                     throw err;
                 }
+                if (listRes.status === 404) {
+                    const deadKey = `${repo.owner}/${repo.repo}`.toLowerCase();
+                    markRepoAsDead(deadKey);
+                    if (mod) mod._isDeadRepo = true;
+                    invalidateDeadRepoMods(deadKey);
+                    const err = new Error('该模组的 GitHub 仓库已被作者移除或不存在 (404)');
+                    err.code = 'REPO_NOT_FOUND';
+                    err.status = 404;
+                    throw err;
+                }
                 if (!listRes.ok) throw new Error(`GitHub 访问异常: ${listRes.status}`);
                 const list = await listRes.json();
                 if (!Array.isArray(list) || !list.length) throw new Error('该仓库未发布 Release');
@@ -797,7 +849,13 @@
             } else {
                 releaseData = await latestRes.json();
             }
+            const currentRepoKey = `${repo.owner}/${repo.repo}`.toLowerCase();
+            unmarkRepoAsDead(currentRepoKey);
+            if (mod) mod._isDeadRepo = false;
         } catch (fetchErr) {
+            if (fetchErr?.code === 'REPO_NOT_FOUND' || fetchErr?.status === 404) {
+                throw fetchErr;
+            }
             const staleCache = readLocalCache(cacheKey, Infinity, true);
             if (staleCache?.assets && staleCache.assets.length > 0) {
                 console.warn('[DolOptimization] GitHub API 直连受限，回退使用最近成功缓存的 Release 数据:', fetchErr);
@@ -1018,13 +1076,31 @@
 
     // ==================== 本地模组状态比对 ====================
 
-    /** 归一化字符串：小写，去除空格、标点、短横线、下划线、括号等 */
+    /** 归一化字符串：小写，去除空格、标点、短横线、下划线、括号、单双引号等 */
     function normalizeKey(str) {
         if (!str) return '';
         return cleanText(str)
             .toLowerCase()
-            .replace(/[()（）\[\]【】_—\-—.\s]/g, '')
+            .replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '')
             .trim();
+    }
+
+    /** 剥离 DoL 生态常见仓库/技术名前缀与后缀，提取核心标识（纯正则单次执行，绝无死循环风险） */
+    function stripDoLPrefix(str) {
+        if (!str) return '';
+        let s = normalizeKey(str);
+        if (s.length < 3) return s;
+        // 剥离 DoL 生态常见前缀
+        s = s.replace(/^(?:degreesoflewdity|degreeslewdity|scmldol|scml|dolmod|dol)/i, '');
+        // 若剩余部分以 dol 开头（例如 Degrees-of-Lewdity-DolSims 剥离后变为 dolsims），再次剥离 dol
+        if (s.length >= 6 && /^dol/i.test(s)) {
+            s = s.slice(3);
+        }
+        // 剥离模组常见后缀（保留核心词长度 >= 3）
+        if (s.length > 5) {
+            s = s.replace(/(?:addon|expansion|mod|plugin)$/i, '');
+        }
+        return s.length >= 2 ? s : normalizeKey(str);
     }
 
     /** 提取中文/英文词块（长度 >= 2） */
@@ -1053,6 +1129,107 @@
 
     function extractRepoKey(url) {
         return parseGithubRepo(url)?.key || '';
+    }
+
+    const DEAD_REPOS_STORAGE_KEY = 'dol_opt_market_dead_repos_v1';
+    // 已确凿验证被作者彻底删除（HTTP 404）的 GitHub 仓库
+    const KNOWN_DEAD_REPOSITORIES = new Set([
+        'kanna-hanabi/wovenrealm',
+        'kanna-hanabi/wovenrealmui'
+    ]);
+    // 经核实正常活跃的仓库白名单（包含短横线单字符仓库名，防止误诊，并自动清洗本地可能存留的误诊记录）
+    const KNOWN_ACTIVE_REPOSITORIES = new Set([
+        'dawalizhang/-',
+        'lingyu230514/-'
+    ]);
+
+    function getDeadRepos() {
+        try {
+            const stored = JSON.parse(localStorage.getItem(DEAD_REPOS_STORAGE_KEY) || '[]');
+            let list = Array.isArray(stored) ? stored.map(s => String(s).toLowerCase().trim()) : [];
+            // 误诊自愈清洗：若历史存储中误包含了活跃仓库，即时清除
+            const cleanedList = list.filter(repo => !KNOWN_ACTIVE_REPOSITORIES.has(repo));
+            if (cleanedList.length !== list.length) {
+                try {
+                    localStorage.setItem(DEAD_REPOS_STORAGE_KEY, JSON.stringify(cleanedList));
+                } catch (_) {}
+                list = cleanedList;
+            }
+            KNOWN_DEAD_REPOSITORIES.forEach(repo => {
+                if (!list.includes(repo)) list.push(repo);
+            });
+            return list;
+        } catch {
+            return Array.from(KNOWN_DEAD_REPOSITORIES);
+        }
+    }
+
+    function markRepoAsDead(repoKeyOrUrl) {
+        if (!repoKeyOrUrl) return;
+        const key = extractRepoKey(repoKeyOrUrl) || (String(repoKeyOrUrl).includes('/') ? String(repoKeyOrUrl).trim().toLowerCase() : '');
+        if (!key) return;
+        const norm = key.toLowerCase();
+        // 绝不将白名单中的活跃仓库标记为失效
+        if (KNOWN_ACTIVE_REPOSITORIES.has(norm)) return;
+        try {
+            const list = getDeadRepos();
+            if (!list.includes(norm)) {
+                list.push(norm);
+                localStorage.setItem(DEAD_REPOS_STORAGE_KEY, JSON.stringify(list));
+            }
+        } catch (_) {}
+    }
+
+    function unmarkRepoAsDead(repoKeyOrUrl) {
+        if (!repoKeyOrUrl) return;
+        const key = extractRepoKey(repoKeyOrUrl) || (String(repoKeyOrUrl).includes('/') ? String(repoKeyOrUrl).trim().toLowerCase() : '');
+        if (!key) return;
+        const norm = key.toLowerCase();
+        try {
+            const list = getDeadRepos().filter(r => r !== norm && !KNOWN_DEAD_REPOSITORIES.has(r));
+            localStorage.setItem(DEAD_REPOS_STORAGE_KEY, JSON.stringify(list));
+        } catch (_) {}
+    }
+
+    function isDeadRepo(repoKeyOrUrl, mod) {
+        if (mod && mod._isDeadRepo) return true;
+        const targetUrl = repoKeyOrUrl || mod?.githubUrl || '';
+        if (!targetUrl && (!mod || !mod.name)) return false;
+        const key = extractRepoKey(targetUrl) || (String(targetUrl).includes('/') ? String(targetUrl).trim().toLowerCase() : '');
+        if (key && KNOWN_ACTIVE_REPOSITORIES.has(key.toLowerCase())) {
+            return false;
+        }
+        if (key && getDeadRepos().includes(key.toLowerCase())) return true;
+        // 作者璐子已知全系模组仓库失效保护（织境空间全系扩展）
+        if (mod && (mod.author === '璐子' || (typeof mod.author === 'string' && mod.author.includes('璐子')))) {
+            const hasDeadKeyword = /wovenrealm|织境/i.test(String(mod.name || '')) || /wovenrealm/i.test(String(targetUrl || ''));
+            if (hasDeadKeyword) return true;
+        }
+        return false;
+    }
+
+    /** 当某个仓库被检测为已失效或 404 时，即时纠偏当前内存中所有引用该仓库的模组状态并触发界面重绘 */
+    function invalidateDeadRepoMods(repoKeyOrUrl) {
+        markRepoAsDead(repoKeyOrUrl);
+        if (!Array.isArray(marketModList) || !marketModList.length) return;
+        const profiles = getLocalInstalledProfiles();
+        let changed = false;
+        for (const mod of marketModList) {
+            const modRepoKey = extractRepoKey(mod.githubUrl);
+            if (isDeadRepo(modRepoKey, mod) || isDeadRepo(mod.githubUrl, mod)) {
+                mod._isDeadRepo = true;
+                const newStatus = checkModInstallStatus(mod, profiles);
+                if (mod._status !== newStatus) {
+                    mod._status = newStatus;
+                    changed = true;
+                }
+            }
+        }
+        if (changed && typeof renderMarketCards === 'function') {
+            try {
+                renderMarketCards();
+            } catch (_) {}
+        }
     }
 
     /** 将远程身份字典合并进内置别名库，内置数据继续作为离线兜底 */
@@ -1152,8 +1329,11 @@
                 hasAuthoritativeClassification ? mod.category : null,
                 hasAuthoritativeClassification ? mod.tags : null
             );
+            const repoKey = extractRepoKey(mod.githubUrl) || (mod.repo ? String(mod.repo).toLowerCase() : '');
+            const isDead = Boolean(isDeadRepo(repoKey) || isDeadRepo(mod.githubUrl));
             return {
                 ...mod,
+                _isDeadRepo: isDead,
                 name: cleanModTitle(mod.name || mod.wikiName) || mod.wikiName || '未命名模组',
                 githubUrls: Array.isArray(mod.githubUrls)
                     ? mod.githubUrls
@@ -1244,11 +1424,21 @@
             // 1. 模组技术标识名
             displayNames.add(modName);
             repos.add(normalizeKey(modName));
+            const techCore = stripDoLPrefix(modName);
+            if (techCore && techCore.length >= 3) {
+                repos.add(techCore);
+                displayNames.add(techCore);
+            }
 
             // 2. boot.json 的 name 字段
             if (boot.name) {
                 displayNames.add(boot.name);
                 repos.add(normalizeKey(boot.name));
+                const nameCore = stripDoLPrefix(boot.name);
+                if (nameCore && nameCore.length >= 3) {
+                    repos.add(nameCore);
+                    displayNames.add(nameCore);
+                }
             }
 
             // 3. boot.json 的 nickName 字段（支持中英文多语言展开）
@@ -1264,9 +1454,9 @@
                 }
             }
 
-            // 4. 调用模组管理器的友好副标题解析方法 (dolOptGetModSubtext)
+            // 4. 调用模组管理器的友好副标题解析方法 (dolOptGetModSubtext，显式禁用市场反查避免循环递归)
             if (typeof window.dolOptGetModSubtext === 'function') {
-                const subtext = window.dolOptGetModSubtext(modName, resolvedMod || modRef || { bootJson: boot });
+                const subtext = window.dolOptGetModSubtext(modName, resolvedMod || modRef || { bootJson: boot }, false, true);
                 if (subtext && typeof subtext === 'string') {
                     displayNames.add(subtext.trim());
                 }
@@ -1276,18 +1466,27 @@
             if (boot.repository) {
                 const repoUrl = typeof boot.repository === 'string' ? boot.repository : boot.repository.url;
                 const repo = extractRepoName(repoUrl);
-                if (repo) repos.add(repo);
+                if (repo) {
+                    repos.add(repo);
+                    const repoCore = stripDoLPrefix(repo);
+                    if (repoCore && repoCore.length >= 3) repos.add(repoCore);
+                }
                 const repositoryKey = extractRepoKey(repoUrl);
                 if (repositoryKey) repositoryKeys.add(repositoryKey);
             }
 
             // 6. 查阅社区知名模组全能别名库，扩充中文与仓库标识
             for (const name of Array.from(displayNames)) {
-                const aliases = DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normalizeKey(name)] || [];
+                const norm = normalizeKey(name);
+                const aliases = DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm] || [];
                 aliases.forEach(alias => {
                     displayNames.add(alias);
                     repos.add(normalizeKey(alias));
+                    const ac = stripDoLPrefix(alias);
+                    if (ac && ac.length >= 3) repos.add(ac);
                 });
+                const knownRepos = DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[norm] || [];
+                knownRepos.forEach(k => repositoryKeys.add(k));
             }
 
             const cleanNames = Array.from(displayNames).map(cleanModTitle).filter(Boolean);
@@ -1377,12 +1576,17 @@
                     DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normK].forEach(repo => repositoryKeys.add(String(repo).toLowerCase()));
                 }
                 const clean = Array.from(disp).map(cleanModTitle).filter(Boolean);
+                const allRepos = new Set(Array.from(repos).filter(Boolean));
+                allRepos.forEach(r => {
+                    const c = stripDoLPrefix(r);
+                    if (c && c.length >= 3) allRepos.add(c);
+                });
                 profileList.push({
                     name: v?.name || k,
                     version: v?.version || '',
                     displayNames: clean,
                     normalizedNames: clean.map(normalizeKey),
-                    repos: Array.from(repos).filter(Boolean),
+                    repos: Array.from(allRepos),
                     repositoryKeys: Array.from(repositoryKeys)
                 });
             }
@@ -1391,15 +1595,28 @@
         if (Array.isArray(profileList)) {
             profileList = profileList.map(p => {
                 if (p.normalizedNames && p.displayNames && p.repos) {
-                    return { ...p, repositoryKeys: (p.repositoryKeys || []).map(key => String(key).toLowerCase()) };
+                    const allRepos = new Set(p.repos);
+                    allRepos.forEach(r => {
+                        const c = stripDoLPrefix(r);
+                        if (c && c.length >= 3) allRepos.add(c);
+                    });
+                    return {
+                        ...p,
+                        repos: Array.from(allRepos),
+                        repositoryKeys: (p.repositoryKeys || []).map(key => String(key).toLowerCase())
+                    };
                 }
                 const disp = new Set(p.displayNames || p.keys || [p.name]);
                 const repos = new Set(p.repos || (p.keys ? p.keys.map(normalizeKey) : [normalizeKey(p.name)]));
                 const normN = normalizeKey(p.name);
+                const nCore = stripDoLPrefix(p.name);
+                if (nCore && nCore.length >= 3) repos.add(nCore);
                 if (DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normN]) {
                     DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normN].forEach(a => {
                         disp.add(a);
                         repos.add(normalizeKey(a));
+                        const ac = stripDoLPrefix(a);
+                        if (ac && ac.length >= 3) repos.add(ac);
                     });
                 }
                 const repositoryKeys = new Set((p.repositoryKeys || []).map(key => String(key).toLowerCase()));
@@ -1407,12 +1624,17 @@
                     DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normN].forEach(repo => repositoryKeys.add(String(repo).toLowerCase()));
                 }
                 const clean = Array.from(disp).map(cleanModTitle).filter(Boolean);
+                const allRepos = new Set(Array.from(repos).filter(Boolean));
+                allRepos.forEach(r => {
+                    const c = stripDoLPrefix(r);
+                    if (c && c.length >= 3) allRepos.add(c);
+                });
                 return {
                     name: p.name,
                     version: p.version || '',
                     displayNames: clean,
                     normalizedNames: clean.map(normalizeKey),
-                    repos: Array.from(repos).filter(Boolean),
+                    repos: Array.from(allRepos),
                     repositoryKeys: Array.from(repositoryKeys)
                 };
             });
@@ -1450,7 +1672,11 @@
 
             // 2. 仓库名精确匹配 (Score 90-95)
             if (score < 90 && marketRepo) {
-                const repoMatch = (marketRepo === normTech) || (p.repos && p.repos.includes(marketRepo));
+                const marketRepoCore = stripDoLPrefix(marketRepo);
+                const techCore = stripDoLPrefix(normTech);
+                const isCoreMatch = marketRepoCore && marketRepoCore.length >= 3 && !GENERIC_STOP_WORDS.has(marketRepoCore) &&
+                    (marketRepoCore === normTech || marketRepoCore === techCore || (p.repos && p.repos.some(r => stripDoLPrefix(r) === marketRepoCore)));
+                const repoMatch = (marketRepo === normTech) || (p.repos && p.repos.includes(marketRepo)) || isCoreMatch;
                 if (repoMatch) {
                     if (marketSubs.length > 0) {
                         // 市场模组包含具体子扩展（如场景互动扩展），要求本地模组必须也含有该子模块关键词
@@ -1502,25 +1728,44 @@
             }
 
             // 5. 跨语言语义长词双向包含匹配 (Score 82)
-            if (score < 80 && marketNorm.length >= 4) {
+            if (score < 80 && marketNorm.length >= 3) {
                 for (const pNorm of p.normalizedNames) {
-                    if (pNorm.length >= 4 && !GENERIC_STOP_WORDS.has(pNorm) && !GENERIC_STOP_WORDS.has(marketNorm)) {
-                        const isContained = marketNorm.includes(pNorm) || pNorm.includes(marketNorm);
-                        if (isContained) {
-                            if (marketSubs.length > 0) {
-                                const subMatched = p.normalizedNames.some(pn =>
-                                    marketSubsNorm.some(s => s.length >= 2 && pn.includes(s))
-                                );
-                                if (subMatched) {
-                                    score = 82;
-                                    break;
-                                }
-                            } else {
-                                const isProfileSubAddon = ['addon', 'cooking', 'ui', 'plugin'].some(s => normTech.includes(s));
-                                if (!isProfileSubAddon) {
-                                    score = 82;
-                                    break;
-                                }
+                    if (!pNorm || pNorm.length < 3) continue;
+                    if (GENERIC_STOP_WORDS.has(pNorm) || GENERIC_STOP_WORDS.has(marketNorm)) continue;
+
+                    const isMarketChinese = /[\u4e00-\u9fa5]/.test(marketNorm);
+                    const isPChinese = /[\u4e00-\u9fa5]/.test(pNorm);
+                    const hasChinese = isMarketChinese || isPChinese;
+
+                    const shortStr = marketNorm.length <= pNorm.length ? marketNorm : pNorm;
+                    const longStr = marketNorm.length > pNorm.length ? marketNorm : pNorm;
+
+                    // 纯 ASCII（英文/数字）环境防局部字母拼接假阳性：
+                    // 严禁短于 8 字符的纯英文字串作为子串跨词匹配（避免如 doli 误撞 modloaderdolimageloaderhook 等），且覆盖率须 >= 80%
+                    if (!hasChinese) {
+                        if (shortStr.length < 8) continue;
+                        if ((shortStr.length / longStr.length) < 0.8) continue;
+                    } else {
+                        // 中文语义环境下，短串有效长度至少为 3，且覆盖率须 >= 40%
+                        if (shortStr.length < 3) continue;
+                        if ((shortStr.length / longStr.length) < 0.4) continue;
+                    }
+
+                    const isContained = longStr.includes(shortStr);
+                    if (isContained) {
+                        if (marketSubs.length > 0) {
+                            const subMatched = p.normalizedNames.some(pn =>
+                                marketSubsNorm.some(s => s.length >= 2 && pn.includes(s))
+                            );
+                            if (subMatched) {
+                                score = 82;
+                                break;
+                            }
+                        } else {
+                            const isProfileSubAddon = ['addon', 'cooking', 'ui', 'plugin'].some(s => normTech.includes(s));
+                            if (!isProfileSubAddon) {
+                                score = 82;
+                                break;
                             }
                         }
                     }
@@ -1539,6 +1784,10 @@
         mod._matchedScore = matchedProfile ? bestScore : 0;
 
         if (!matchedProfile) {
+            const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
+            if (isDead) {
+                return mod.otherUrl ? 'external_only' : 'unavailable';
+            }
             if (!mod.githubUrl && !mod.otherUrl) return 'unavailable';
             if (!mod.githubUrl && mod.otherUrl) return 'external_only';
             return 'not_installed';
@@ -1564,6 +1813,26 @@
             // 2. 常规语义化版本比较；只有忽略记录实际挡住更新时才显示“已忽略”
             const cmp = compareVersions(remoteVer, localVer);
             if (cmp > 0) {
+                // 检查仓库是否已知失效（已被作者移除 404）
+                const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
+                if (isDead) {
+                    return 'up_to_date';
+                }
+
+                // 检查是否有真实可用的更新发布源：
+                // 若模组来自 release-index 统一索引，但 releaseUrl 为空且版本来源为 'wiki'，
+                // 说明远程未检测到 GitHub Release（仓库被删或未发 Release），版本仅为 Wiki 历史人工文本，不可作为更新依据
+                const hasAuthoritativeRelease = Boolean(
+                    mod.releaseUrl ||
+                    mod.versionSource === 'github' ||
+                    mod.downloadUrl ||
+                    (Array.isArray(mod.assets) && mod.assets.length > 0)
+                );
+
+                if (!hasAuthoritativeRelease && mod.versionSource === 'wiki') {
+                    return 'up_to_date';
+                }
+
                 const ignoredMap = getIgnoredUpdates();
                 const ignoredVer = ignoredMap[mod.name] || (matchedProfile.name ? ignoredMap[matchedProfile.name] : null);
                 if (ignoredVer && (ignoredVer === 'ignored' || compareVersions(remoteVer, ignoredVer) <= 0)) {
@@ -1822,6 +2091,14 @@
             if (releaseInfo.version) targetVersion = releaseInfo.version;
         } catch (err) {
             console.warn('[DolOptimization] 读取 Release 失败，尝试回退', err);
+            if (err?.code === 'REPO_NOT_FOUND' || err?.status === 404 || mod._isDeadRepo || isDeadRepo(mod.githubUrl)) {
+                reportProgress(null, '模组仓库已被作者移除', 'error');
+                if (typeof window.dolOptAlert === 'function') {
+                    await window.dolOptAlert('该模组的 GitHub 仓库已被作者移除或不存在 (404)，无法下载更新。\n\n已自动更新本地模组状态为无需更新。', '模组仓库已失效');
+                }
+                if (typeof renderMarketCards === 'function') renderMarketCards();
+                return false;
+            }
         }
 
         if (releaseInfo?.requiresManualSelection) {
@@ -2311,7 +2588,7 @@
         for (const mod of source) {
             const candidate = { ...mod };
             checkModInstallStatus(candidate, [localProfile]);
-            if (candidate._matchedLocal && candidate._matchedScore >= 90) {
+            if (candidate._matchedLocal && candidate._matchedScore >= 80) {
                 let score = candidate._matchedScore || 80;
                 const modRepoKey = extractRepoKey(candidate.githubUrl);
                 const normName = normalizeKey(modName);
@@ -2326,6 +2603,42 @@
             }
         }
         return bestCandidate;
+    }
+
+    /**
+     * 纯同步、只读、无重入副作用的模组简介静态查询方法
+     * 仅供管理页渲染展示使用，严禁调用 getLocalInstalledProfiles 或 checkModInstallStatus
+     */
+    function getStaticMarketModSubtext(modName) {
+        if (!modName) return '';
+        const norm = normalizeKey(modName);
+        if (!norm) return '';
+        const list = marketModList.length ? marketModList : (readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true) || []);
+        if (!Array.isArray(list) || !list.length) return '';
+
+        const core = stripDoLPrefix(modName);
+        for (const m of list) {
+            const mNorm = normalizeKey(m.name);
+            const mRepo = extractRepoName(m.githubUrl);
+            const mRepoCore = stripDoLPrefix(mRepo);
+            const isMatch = (mNorm === norm) ||
+                (mRepo && mRepo === norm) ||
+                (core.length >= 3 && mRepoCore.length >= 3 && core === mRepoCore) ||
+                (DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm] && DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm].includes(mNorm));
+            if (isMatch) {
+                if (m.name && m.name !== modName && /[\u4e00-\u9fa5]/.test(m.name)) {
+                    return m.name;
+                }
+                const d = m.desc || m.description;
+                if (d && typeof d === 'string') {
+                    let clean = d.replace(/[\r\n\t]+/g, ' ').trim();
+                    clean = clean.replace(/^(?:包含|提供|支持|增加|新增|用于)[：:]\s*/, '');
+                    if (clean.length > 28) clean = clean.slice(0, 26) + '...';
+                    if (clean) return clean;
+                }
+            }
+        }
+        return '';
     }
 
     function isStatsFilterActive(filter) {
@@ -2431,11 +2744,23 @@
             // 状态徽章与主操作按钮
             let badgeHtml = '';
             let actionBtnHtml = '';
-            const isUpdatable = mod._status === 'update_available';
+            const marketRepoKey = extractRepoKey(mod.githubUrl);
+            const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
+            const isUpdatable = mod._status === 'update_available' && !isDead;
             const isIgnored = !!mod._isIgnored;
             const isPermanentlyIgnored = mod._ignoredVersion === 'ignored';
 
-            if (isUpdatable) {
+            if (isDead) {
+                // 源已失效：统一采用红色标签醒目提示
+                badgeHtml = `<span class="dol-opt-market-badge badge-dead-repo">源已失效</span>`;
+                if (mod._status === 'up_to_date' || mod._matchedLocal) {
+                    actionBtnHtml = `<button type="button" class="macro-button dol-opt-btn-secondary" disabled>已安装</button>`;
+                } else if (mod.otherUrl) {
+                    actionBtnHtml = `<button type="button" class="macro-button dol-opt-btn-secondary btn-market-external" data-mod-index="${modIndex}">外部主页</button>`;
+                } else {
+                    actionBtnHtml = `<button type="button" class="macro-button dol-opt-btn-secondary" disabled>暂无下载</button>`;
+                }
+            } else if (isUpdatable) {
                 badgeHtml = `<span class="dol-opt-market-badge badge-update">发现新版</span>`;
                 actionBtnHtml = `<button type="button" class="macro-button dol-opt-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="一键更新">一键更新</button>`;
             } else if (mod._status === 'up_to_date') {
@@ -2652,6 +2977,14 @@
                 if (planController?.signal.aborted || error?.name === 'AbortError') {
                     resetDownloadProgress(mod.name);
                     window.dolOptShowToast(`已取消【${mod.name}】的安装包清单读取`, 'info');
+                    return false;
+                }
+                resetDownloadProgress(mod.name);
+                if (error?.code === 'REPO_NOT_FOUND' || error?.status === 404 || mod._isDeadRepo || isDeadRepo(mod.githubUrl)) {
+                    if (typeof window.dolOptAlert === 'function') {
+                        await window.dolOptAlert('该模组的 GitHub 仓库已被作者移除或不存在 (404)，无法下载更新。\n\n已自动更新本地模组状态为无需更新。', '模组仓库已失效');
+                    }
+                    if (typeof renderMarketCards === 'function') renderMarketCards();
                     return false;
                 }
                 console.warn('[DolOptimization] 预读取安装包清单失败，将在安装时重试', error);
@@ -3158,7 +3491,14 @@
         applyIdentityCatalog,
         loadIdentityCatalog,
         MARKET_CATEGORIES,
-        KNOWN_MOD_MARKET_ALIASES: DOL_OPT_KNOWN_MOD_MARKET_ALIASES
+        KNOWN_MOD_MARKET_ALIASES: DOL_OPT_KNOWN_MOD_MARKET_ALIASES,
+        isDeadRepo,
+        markRepoAsDead,
+        unmarkRepoAsDead,
+        getDeadRepos,
+        KNOWN_DEAD_REPOSITORIES,
+        KNOWN_ACTIVE_REPOSITORIES,
+        getStaticMarketModSubtext
     };
 
 })();

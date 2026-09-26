@@ -32,7 +32,12 @@ def pack_mod():
                 rel_path = os.path.relpath(full_path, src_dir).replace('\\', '/')
                 if should_exclude(rel_path):
                     continue
-                zf.write(full_path, arcname=rel_path)
+                if rel_path.endswith('.twee'):
+                    with open(full_path, 'r', encoding='utf-8') as tf:
+                        twee_content = tf.read().replace('\r\n', '\n')
+                    zf.writestr(rel_path, twee_content.encode('utf-8'))
+                else:
+                    zf.write(full_path, arcname=rel_path)
 
     print(f'Pack complete: {release_target} ({os.path.getsize(release_target)} bytes)')
 

@@ -1,0 +1,2 @@
+# 强制 twee 文件始终使用 Unix LF 换行，防止给游戏打补丁时混入 CRLF 导致其他模组文本匹配失败
+*.twee text eol=lf

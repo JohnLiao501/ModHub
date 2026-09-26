@@ -569,6 +569,16 @@ window.dolOptAlert = function(message, title = '提示') {
 
 // 常见常用模组友好对照表（针对作者未在 boot.json 声明中文别名的主流 Mod）
 const DOL_OPT_KNOWN_MOD_ALIASES = {
+    'ModHub': '模组管理器与市场套件',
+    'ModHub模组管理中心': '模组管理器与市场套件',
+    'SimpleFramework': '简易框架',
+    'SCMLSimpleFramework': '简易框架',
+    'GuideToMe': '控制NPC嘴部',
+    'DoLSims': '模拟人生',
+    'Wraith\'sReflection': '怨灵的倒影',
+    'WraithsReflection': '怨灵的倒影',
+    'NoBusHarassmentMod': '公交车防骚扰',
+    'NoBusHarassment': '公交车防骚扰',
     'ModI18N': '游戏中文汉化补丁',
     'AutoClean': '自动清洁身体污垢',
     'AutoClothesRepair': '衣物破损自动修补',
@@ -580,6 +590,7 @@ const DOL_OPT_KNOWN_MOD_ALIASES = {
     'GameOriginalImagePack': '原版高清图像资源包',
     'WardrobeIncrementalExpansion': '大大大衣柜容量扩展',
     'Sydney.Bare.Study.Mod': '悉尼无拘自习扩展',
+    'Sydney Bare Study Mod': '悉尼无拘自习扩展',
     'WhitneyExpansion': '惠特尼剧情扩充',
     'WhitneyExpansion_': '惠特尼剧情扩充',
     'ExtraRecipeStudy': '额外菜谱研习',
@@ -594,7 +605,6 @@ const DOL_OPT_KNOWN_MOD_ALIASES = {
     'Dynamicest': '极致动态数值提醒',
     'maplebirch': '秋枫白桦框架',
     'WovenRealmCookingAddon': '织境空间-料理扩展',
-    'Sydney Bare Study Mod': '悉尼无拘自习扩展',
     'DOLI': '智能 Agent 与 AI 剧情',
     'DOLArcadeExpansion': '游戏厅游玩扩充',
     'DoLQuestAssistant': '任务与指引助手',
@@ -602,6 +612,29 @@ const DOL_OPT_KNOWN_MOD_ALIASES = {
     'SimpleModManager': '简易模组管理器',
     'FeatsUnlocker': '成就快速解锁工具',
     'SafeSaves': '存档防损坏保护',
+    'Cattery': '猫咖出租屋',
+    'Degrees-of-Lewdity-Cattery': '猫咖出租屋',
+    'FishingLife': '钓鱼人生',
+    'DOLMOD-FishingLife': '钓鱼人生',
+    'In-The-Eden-After-Sunset': '日落伊甸园',
+    'Eden-Visuals-Mod': '伊甸互动头像',
+    'Evil-Cockroach-Mod': '邪恶蟑螂（桌宠）',
+    'EvilCockroach': '邪恶蟑螂（桌宠）',
+    'CombatStatusDisplay': '战斗状态显示',
+    'ARedSecret': '赤红的秘密',
+    'Chimera-s-Blessing': '奇美拉的祝福',
+    'Free-Speech-Attitudes': '自由对话态度',
+    'NeoUIPatch': 'NeoUI 界面补丁',
+    'dol-neoui-patch': 'NeoUI 界面补丁',
+    'Degrees-of-Lewdity_strangeGarden': '万物皆可种农场',
+    'Degrees-of-Lewdity_Bailey_rent_mod': '贝利疯狂爆PC金币',
+    'Degrees-of-Lewdity_Cheat_Extended': '作弊拓展',
+    'Remy_love_mod': '雷米恋爱',
+    'LongerCombat': '更长遭遇战/言灵作弊集',
+    'Sena-s-Sydney-Dialogue-Events-Expansion': '悉尼对话&剧情拓展',
+    'DOL-Terra-Expanding-Modd': '泰拉瑞亚拓展',
+    'Bunny-TransformationCN': '变身兔兔',
+    'Degrees-of-Lewdity-Eden-Fence-Rescue-Fixed': '农场救援恢复'
 };
 
 // 内置核心系统模组的中文职能说明
@@ -615,8 +648,24 @@ const DOL_OPT_BUILTIN_MOD_ALIASES = {
     'CheckGameVersion': '游戏版本兼容校验插件',
 };
 
+// 辅助归一化查找别名（不区分大小写、下划线、标点与单双引号）
+function dolOptFindKnownAlias(name, isBuiltin = false) {
+    if (!name) return '';
+    const dict = isBuiltin ? DOL_OPT_BUILTIN_MOD_ALIASES : DOL_OPT_KNOWN_MOD_ALIASES;
+    if (dict[name]) return dict[name];
+    const norm = String(name).toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
+    if (!norm) return '';
+    for (const [k, v] of Object.entries(dict)) {
+        const kNorm = String(k).toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
+        if (kNorm === norm) return v;
+    }
+    return '';
+}
+
+let _dolOptSubtextLock = false;
+
 // 提取模组智能友好副标题（别名 / 简介 / 职能）
-window.dolOptGetModSubtext = function(modName, modInfo, isBuiltin = false) {
+window.dolOptGetModSubtext = function(modName, modInfo, isBuiltin = false, skipMarket = false) {
     const boot = modInfo?.bootJson;
     let nick = '';
 
@@ -645,16 +694,40 @@ window.dolOptGetModSubtext = function(modName, modInfo, isBuiltin = false) {
         }
     }
 
-    // 3. 查阅内置已知模组库
+    // 3. 查阅内置已知模组库（支持大小写与标点容错，O(1) 绝对安全无副作用）
     if (!nick || nick === modName) {
-        if (isBuiltin && DOL_OPT_BUILTIN_MOD_ALIASES[modName]) {
-            nick = DOL_OPT_BUILTIN_MOD_ALIASES[modName];
-        } else if (DOL_OPT_KNOWN_MOD_ALIASES[modName]) {
-            nick = DOL_OPT_KNOWN_MOD_ALIASES[modName];
+        const known = dolOptFindKnownAlias(modName, isBuiltin);
+        if (known) nick = known;
+    }
+
+    // 4. 若仍无有效副标题且非内置模组，尝试从模组市场只读缓存中安全获取（严格防重入与递归阻断）
+    if ((!nick || nick === modName) && !isBuiltin && !skipMarket && !_dolOptSubtextLock && window.dolModMarket) {
+        _dolOptSubtextLock = true;
+        try {
+            if (typeof window.dolModMarket.getStaticMarketModSubtext === 'function') {
+                const marketText = window.dolModMarket.getStaticMarketModSubtext(modName);
+                if (marketText) nick = marketText;
+            }
+            if ((!nick || nick === modName) && typeof window.dolModMarket.findMarketModByLocalName === 'function') {
+                const marketMod = window.dolModMarket.findMarketModByLocalName(modName);
+                if (marketMod) {
+                    if (marketMod.name && marketMod.name !== modName && /[\u4e00-\u9fa5]/.test(marketMod.name)) {
+                        nick = marketMod.name;
+                    } else if (marketMod.desc || marketMod.description) {
+                        let d = String(marketMod.desc || marketMod.description).replace(/[\r\n\t]+/g, ' ').trim();
+                        d = d.replace(/^(?:包含|提供|支持|增加|新增|用于)[：:]\s*/, '');
+                        if (d.length > 28) d = d.slice(0, 26) + '...';
+                        if (d) nick = d;
+                    }
+                }
+            }
+        } catch (_) {
+        } finally {
+            _dolOptSubtextLock = false;
         }
     }
 
-    // 4. 若为内置核心模组仍无名称，兜底为“系统核心”
+    // 5. 若为内置核心模组仍无名称，兜底为“系统核心”
     if (!nick && isBuiltin) {
         nick = '系统核心';
     }
@@ -2330,8 +2403,8 @@ window.dolOptRenderModManageUI = function() {
                 <div class="dol-opt-header-actions">
                     <button id="dolOptImportModBtn" class="macro-button dol-opt-btn-primary" type="button" title="从本地选择或直接拖拽 Zip 模组文件导入" onclick="window.dolOptTriggerImport()">导入模组</button>
                     <button id="dolOptRestartGameBtn" class="macro-button dol-opt-btn-primary" type="button" title="重新载入游戏以使最新模组和美化配置生效" onclick="window.dolOptRestartGame()">重新载入游戏</button>
-                    <button class="macro-button" type="button" title="在原版管理器修改后，重新读取列表与模组资料" onclick="window.initModManage(true)">刷新列表</button>
                     <button id="dolOptSmartSortAllBtn" class="macro-button dol-opt-btn-primary" type="button" title="根据明确依赖，同时整理已安装模组的加载顺序和美化包的覆盖顺序" onclick="window.dolOptSmartSortAll()">智能整理模组与美化顺序</button>
+                    <button id="dolOptRefreshListBtn" class="macro-button dol-opt-btn-primary" type="button" title="在原版管理器修改后，重新读取列表与模组资料" onclick="window.initModManage(true)">刷新列表</button>
                 </div>
             </div>
         </div>
@@ -3648,6 +3721,87 @@ const DOL_OPT_ERROR_PATTERNS = [
         solution: '请查看报错模组的说明文档（ReadMe），下载并启用对应的前置框架模组（如 Simple Framework 等）。'
     },
     {
+        id: 'twee-patch-mismatch',
+        title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
+        keywords: ['cannot find findstring', 'cannot find findregex', 'tweereplacer'],
+        resolve: line => {
+            // 针对统计行: [TweeReplacer] do_patch() done: [某模组] okCount:[75] errorCount:[1]
+            if (line.includes('do_patch() done:')) {
+                const countMatch = line.match(/errorCount:\[(\d+)\]/);
+                const okMatch = line.match(/okCount:\[(\d+)\]/);
+                if (countMatch && parseInt(countMatch[1], 10) > 0) {
+                    const modM = line.match(/done:\s*\[([^\]]+)\]/);
+                    const rawModName = modM ? modM[1].trim() : '';
+                    const friendlyName = dolOptFindKnownAlias(rawModName);
+                    const modLabel = friendlyName && friendlyName !== rawModName ? `${friendlyName} (${rawModName})` : (rawModName || '模组');
+                    const okCount = okMatch ? okMatch[1] : '';
+
+                    let desc = `模组【${modLabel}】在应用 TweeReplacer 补丁时有 ${countMatch[1]} 处未能匹配。`;
+                    if (okCount) {
+                        desc += `（该模组其余 ${okCount} 处补丁均已成功生效）。`;
+                    }
+                    desc += '通常因为与其他模组修改了同一处文本、或当前游戏本体/汉化版本的用词存在出入。';
+
+                    return {
+                        id: 'twee-patch-mismatch',
+                        title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
+                        desc: desc,
+                        solution: '①【不必担心】若游戏能正常进入，这通常仅影响个别次要分支或入口文本，绝大部分功能已成功生效，可放心游玩；② 可在【模组管理】中点击【智能整理模组与美化顺序】让基础框架与汉化模组优先加载；③ 点击上方“定位首处错误”可查看具体未匹配的段落与文本。'
+                    };
+                }
+                return null;
+            }
+
+            // 针对 cannot find findString / findRegex 具体行
+            const match = line.match(/cannot find (?:findString|findRegex):\s*\[([^\]]+)\].*?in:\s*\[([^\]]+)\]/i);
+            const rawModName = match ? match[1].trim() : '';
+            const passageName = match ? match[2].trim() : '';
+
+            const friendlyName = dolOptFindKnownAlias(rawModName);
+            const modLabel = friendlyName && friendlyName !== rawModName ? `${friendlyName} (${rawModName})` : (rawModName || '模组');
+
+            // 提取查找的目标文本与段落特征（剥离前置 cannot find 前缀避免误匹配模组名）
+            const afterCannot = line.replace(/cannot find (?:findString|findRegex):\s*\[[^\]]+\]/i, '');
+            const findMatch = afterCannot.match(/find(?:String|Regex):\s*\[([\s\S]*?)\]\s*in:/i);
+            const findTarget = findMatch ? findMatch[1].trim() : '';
+            const isChineseSnippet = /[\u4e00-\u9fa5]/.test(findTarget);
+
+            let desc = '';
+            let solution = '';
+
+            const isWraithTemple = (rawModName.includes('Wraith') || modLabel.includes('怨灵')) &&
+                (passageName.includes('Temple Jordan') || findTarget.includes('Temple Chastity') || findTarget.includes('贞操带'));
+
+            const isDolOptUiEntry = (rawModName.includes('原版优化') || rawModName.toLowerCase().includes('doloptimization')) ||
+                (passageName.includes('Widgets Clothing Caption') || passageName.includes('StoryCaption'));
+
+            if (isWraithTemple) {
+                desc = `模组【${modLabel}】尝试对神庙段落【Temple Jordan】打补丁寻找选项文本时未能匹配。成因解析：该模组基于特定中文汉化环境制作，而当前游戏本体底层段落为英文原版（或当前汉化版本用词存在出入）。该处仅用于在神庙修士处添加询问银海螺的次要选项，模组绝大部分核心剧情（象牙怨灵恋爱、偷还项链、专属特质与约会等）均已正常加载生效。`;
+                solution = '①【不必担心】若游戏能正常进入，这完全不会影响怨灵恋爱核心剧情与存档安全，可放心继续游玩；② 若您安装了独立的汉化模组，可在【模组管理】中点击【智能整理模组与美化顺序】，确保汉化模组优先于剧情模组生效；③ 此提示属于第三方模组写死特定汉化用词引发的正常现象，通常无需处理。';
+            } else if (isDolOptUiEntry) {
+                desc = `模组【${modLabel}】与【ModHub】同时对游戏界面段落【${passageName}】的管理器入口进行了改写，后加载模组未能匹配到原文本。由于您已安装 ModHub，原版优化自带的提示入口本就无需显示。`;
+                solution = '①【不必担心】这完全不会影响游戏核心剧情与角色数值，可正常游玩；② 建议在【模组管理】中点击【智能整理模组与美化顺序】优化模组加载次序。';
+            } else if (isChineseSnippet && passageName) {
+                const previewSnippet = findTarget.length > 24 ? findTarget.slice(0, 24) + '...' : findTarget;
+                desc = `模组【${modLabel}】在尝试对段落【${passageName}】打补丁时未能匹配成功。成因解析：模组在代码中硬编码了特定汉化版本的中文文本（如“${previewSnippet}”），因当前游戏本体或汉化版本的词句、空格或换行不同而未能匹配。`;
+                solution = '①【不必担心】若游戏能正常进入，通常仅影响该处的局部剧情分支，绝大部分功能已成功生效，可放心游玩；② 建议在【模组管理】中使用【智能整理模组与美化顺序】让汉化模组优先加载；③ 若遇到特定场景异常，可关注模组作者发布的最新适配版本。';
+            } else if (rawModName && passageName) {
+                desc = `模组【${modLabel}】尝试对游戏段落【${passageName}】打补丁时，未能找到指定的原版匹配文本。常见原因：① 补丁冲突：多个模组修改了同一处段落（排在前面的模组先改写了文本或换行，导致后加载模组匹配失败）；② 该模组版本未完全适配当前游戏本体文本。`;
+                solution = '① 若游戏能正常游玩，通常绝大部分功能已成功生效，可放心继续游戏；② 尝试在【模组管理】中使用【智能整理模组与美化顺序】，让关键基础框架优先加载；③ 若调整顺序后仍报错且影响游玩，请检查报错模组是否与当前游戏版本兼容。';
+            } else {
+                desc = 'TweeReplacer 补丁尝试改写游戏段落时未能找到指定的原版匹配文本。通常因为多个模组修改同一处文本产生冲突，或模组版本未适配当前游戏。';
+                solution = '① 若游戏能正常游玩，通常绝大部分功能已成功生效；② 尝试在【模组管理】中调整模组加载顺序（推荐使用【智能整理模组与美化顺序】）；③ 若持续影响游玩，请检查报错模组与当前游戏版本的兼容性。';
+            }
+
+            return {
+                id: 'twee-patch-mismatch',
+                title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
+                desc,
+                solution
+            };
+        }
+    },
+    {
         id: 'patch-conflict',
         title: '模组补丁冲突或文本不匹配',
         keywords: ['patchmodtogame', 'replacepatcher', 'replace target', 'replace error', 'patch failed', 'duplicate', 'already exists'],
@@ -3964,13 +4118,15 @@ window.dolOptAnalyzeLogs = function(rawContent) {
         const modRegexes = [
             /(?:mod|id|Mod|MOD)\s*\[([^\]]+)\]/g,
             /(?:modName|mod_name|mod)[\s:=]+([A-Za-z0-9_\-\u4e00-\u9fa5]+)/g,
-            /on mod\[([^\]]+)\]/g
+            /on mod\[([^\]]+)\]/g,
+            /(?:findString|findRegex|done):\s*\[([^\]]+)\]/g,
+            /\[(TweeReplacer)\]/g
         ];
         modRegexes.forEach(reg => {
             let m;
             while ((m = reg.exec(cleanMsg)) !== null) {
                 const candidate = m[1].trim();
-                if (candidate && candidate.length > 1 && !['info', 'warn', 'error', 'null', 'undefined'].includes(candidate.toLowerCase())) {
+                if (candidate && candidate.length > 1 && !candidate.startsWith('<') && !['info', 'warn', 'error', 'null', 'undefined'].includes(candidate.toLowerCase())) {
                     foundModsInLine.add(candidate);
                 }
             }
@@ -3980,7 +4136,7 @@ window.dolOptAnalyzeLogs = function(rawContent) {
             if (cleanMsg.includes(known)) foundModsInLine.add(known);
         }
 
-        // 提取文件名
+        // 提取文件名与段落名
         const foundFilesInLine = new Set();
         const fileRegex = /([a-zA-Z0-9_\-\u4e00-\u9fa5./\\]+\.(?:js|twee|json|png|gif|css|zip|html))/gi;
         let fm;
@@ -3988,6 +4144,14 @@ window.dolOptAnalyzeLogs = function(rawContent) {
             const fileName = fm[1].trim();
             if (!fileName.startsWith('http') && !fileName.endsWith('.com')) {
                 foundFilesInLine.add(fileName);
+            }
+        }
+        const passageRegex = /(?:in|passage):\s*\[([^\]]+)\]/gi;
+        let pm;
+        while ((pm = passageRegex.exec(cleanMsg)) !== null) {
+            const passageName = pm[1].trim();
+            if (passageName && !['info', 'warn', 'error'].includes(passageName.toLowerCase())) {
+                foundFilesInLine.add(passageName);
             }
         }
 
@@ -4070,27 +4234,35 @@ window.dolOptRenderLogDiagnosis = function(analysis) {
             <div class="dol-opt-diag-row">
                 <span class="grey diag-label">报错关联模组：</span>
                 <div class="diag-badges">
-                    ${analysis.errorMods.map(modName => `
-                        <button type="button" class="dol-opt-diag-badge mod-badge" data-log-search="${window.dolOptEscapeHtml(modName)}" title="点击在日志中筛选此模组">
-                            [模组] ${window.dolOptEscapeHtml(modName)}
-                        </button>
-                    `).join('')}
+                    ${analysis.errorMods.map(modName => {
+                        const friendly = dolOptFindKnownAlias(modName);
+                        const label = friendly && friendly !== modName ? `${friendly} (${modName})` : modName;
+                        return `
+                            <button type="button" class="dol-opt-diag-badge mod-badge" data-log-search="${window.dolOptEscapeHtml(modName)}" title="点击在日志中筛选此模组">
+                                [模组] ${window.dolOptEscapeHtml(label)}
+                            </button>
+                        `;
+                    }).join('')}
                 </div>
             </div>
         `;
     }
 
-    // 报错关联文件徽章
+    // 报错关联文件/段落徽章
     if (analysis.errorFiles.length > 0) {
         html += `
             <div class="dol-opt-diag-row">
-                <span class="grey diag-label">报错关联文件：</span>
+                <span class="grey diag-label">报错关联文件/段落：</span>
                 <div class="diag-badges">
-                    ${analysis.errorFiles.map(fileName => `
-                        <button type="button" class="dol-opt-diag-badge file-badge" data-log-search="${window.dolOptEscapeHtml(fileName)}" title="点击在日志中筛选此文件">
-                            [文件] ${window.dolOptEscapeHtml(fileName)}
-                        </button>
-                    `).join('')}
+                    ${analysis.errorFiles.map(fileName => {
+                        const isFile = /\.(?:js|twee|json|png|gif|css|zip|html)$/i.test(fileName);
+                        const tag = isFile ? '[文件]' : '[段落]';
+                        return `
+                            <button type="button" class="dol-opt-diag-badge file-badge" data-log-search="${window.dolOptEscapeHtml(fileName)}" title="点击在日志中筛选此${isFile ? '文件' : '段落'}">
+                                ${tag} ${window.dolOptEscapeHtml(fileName)}
+                            </button>
+                        `;
+                    }).join('')}
                 </div>
             </div>
         `;

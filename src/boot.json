@@ -1,6 +1,8 @@
 {
     "name": "ModHub",
     "version": "1.0.1",
+    "nickName": "模组管理器与市场套件",
+    "description": "DoL 原生暗黑风格模组管理与市场套件",
     "styleFileList": [
         "stylesheet/modloader-optimization.css"
     ],
