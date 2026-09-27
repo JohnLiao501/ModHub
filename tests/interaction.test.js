@@ -15,8 +15,11 @@ module.exports = async function() {
         const repository = 'https://github.com/ModHubTests/Readme';
         const sourceUrl = `${repository}/blob/main/README.md`;
         const downloadUrl = 'https://raw.githubusercontent.com/ModHubTests/Readme/main/README.md';
-        sb.modHubGetGui = () => ({ getModTReadMe: async () => localReadme });
-        sb.modHubGetModInfo = () => ({ bootJson: { name: '说明测试', version: '2.3.4', author: '<测试者>' } });
+        sb.modHubGetGui = () => ({ getModTReadMe: async () => { throw new Error('不得调用旧 GUI 读取可选说明'); } });
+        sb.modHubGetModInfo = () => ({
+            bootJson: { name: '说明测试', version: '2.3.4', author: '<测试者>', additionFile: ['README.md'] },
+            zip: { file: () => ({ async: async () => localReadme }) },
+        });
         sb.modHubMarket.findMarketModByLocalName = () => ({ githubUrl: repository });
         sb.modHubMarket.fetchGithubReadme = async url => {
             remoteReads++;
@@ -37,7 +40,7 @@ module.exports = async function() {
         assert.equal(remoteReads, 2, '两种空说明均执行线上回退');
         sb.modHubMarket.fetchGithubReadme = async () => { throw new Error('测试离线'); };
         await sb.modHubLoadReadme('说明测试');
-        assert.ok(body.innerHTML.includes('此模组没有说明文档。') && body.innerHTML.includes('2.3.4'), '线上读取失败后仍展示本地模组元数据');
+        assert.ok(body.innerHTML.includes('说明文档暂时无法读取') && body.innerHTML.includes('2.3.4'), '线上读取失败后仍展示本地模组元数据并区分读取失败与文档不存在');
         assert.ok(!body.innerHTML.includes('读取文档失败'), '网络故障不能中断整份说明视图');
 
         const markdown = sb.modHubRenderMarkdown([
@@ -51,6 +54,8 @@ module.exports = async function() {
         assert.ok(markdown.includes('&lt;script&gt;') && !markdown.includes('<script>'), '远程原始 HTML 必须转义');
         assert.ok(markdown.includes('&lt;行内代码&gt;') && markdown.includes('&lt;代码块&gt;'), '代码保护仍使用跨模块转义工具');
         assert.ok(markdown.includes('data:image/svg+xml;utf8,'), '静态徽章必须通过模块内颜色常量生成离线 SVG');
+        const badge = sb.modHubRenderMarkdown('![状态](https://img.shields.io/badge/ModHub-ready-blue)');
+        assert.ok(!badge.includes('data-remote-image-url'), '已经离线生成的徽章不得再次请求外网');
         assert.ok(markdown.includes('<img ') && !markdown.includes('onerror='), '远程图片标签必须净化后保留');
         assert.ok(markdown.includes(`${repository}/blob/main/guide.md`), 'Markdown 相对链接解析保持有效');
 
@@ -64,6 +69,129 @@ module.exports = async function() {
         sb.modHubGetModInfo = () => ({ zip });
         await sb.modHubSetupReadmeImages(body, '说明测试');
         assert.equal(image.src, 'data:image/png;base64,aW1hZ2U=', '本地图片应跨模块解析为 Base64，无需网络');
+        assert.equal(body._listeners.error.length, 1, '反复切换说明不得累积图片错误监听');
+    }
+
+    // 空声明、其他附加文件和已释放包都属于无本地说明，不能调用会输出整份模组的旧 GUI。
+    {
+        const sb = loadManager({ console: { error() {}, warn() {} } });
+        let guiReads = 0, zipReads = 0;
+        let additionFile;
+        const reader = {
+            getModInfo: () => ({ name: '说明测试' }),
+            getZipFile: () => ({ file: path => path === 'docs/ReadMe.zh.md' ? { async: async () => '# 包内说明' } : null }),
+            get zip() { throw new Error('不得触发已释放包的 zip getter'); },
+        };
+        sb.modHubGetGui = () => ({
+            gModUtils: { getModZip: () => { zipReads++; return reader; } },
+            getModTReadMe: () => { guiReads++; throw new Error('旧 GUI 不应调用'); },
+        });
+        sb.modHubGetModInfo = () => ({ bootJson: { name: '说明测试', additionFile } });
+        for (const files of [undefined, null, [], {}, 'README.md', [null, 1, {}, 'LICENSE']]) {
+            additionFile = files;
+            assert.equal(await sb.modHubReadLocalReadme('说明测试'), null);
+        }
+        assert.equal(zipReads, 0, '无说明声明时也无需查找包体');
+        additionFile = ['docs/ReadMe.zh.md'];
+        assert.equal(await sb.modHubReadLocalReadme('说明测试'), '# 包内说明', '说明应支持子目录与大小写变体');
+        reader.getModInfo = () => ({ bootJson: { name: '另一模组' } });
+        assert.equal(await sb.modHubReadLocalReadme('说明测试'), null, '别名重定向不得读取其他模组的说明');
+        reader.getModInfo = () => ({ name: '说明测试' });
+        reader.getZipFile = () => null;
+        assert.equal(await sb.modHubReadLocalReadme('说明测试'), null, '包体释放后不能再调用带报错副作用的 getter');
+        assert.equal(guiReads, 0);
+        assert.equal(sb._modHubStartupErrors.length, 0, '可选说明缺失不得污染启动日志');
+    }
+
+    // 慢请求失败或完成时，不能覆盖后来选择的说明；本地读取失败仍可在线回退。
+    {
+        const sb = createBaseSandbox({ console: { error() {}, warn() {} } });
+        loadScripts(sb);
+        const body = createStubElement();
+        sb.document.getElementById = () => body;
+        sb.modHubGetModInfo = name => ({ bootJson: { name, repository: `https://github.com/ModHubTests/${name}` } });
+        sb.modHubMarket.findMarketModByLocalName = () => null;
+        sb.modHubMarket.loadMarketData = async () => [];
+        sb.modHubReadLocalReadme = async () => { throw new Error('说明解压失败'); };
+        let finishFirst, startedFirst;
+        const started = new Promise(resolve => { startedFirst = resolve; });
+        sb.modHubMarket.fetchGithubReadme = url => url.endsWith('/First')
+            ? new Promise(resolve => { finishFirst = resolve; startedFirst(); })
+            : Promise.resolve({ markdown: '# 当前说明', isStale: true });
+        const first = sb.modHubLoadReadme('First');
+        await started;
+        await sb.modHubLoadReadme('Second');
+        const current = body.innerHTML;
+        assert.ok(current.includes('当前说明') && current.includes('上次成功读取'), '本地失败后从 boot 仓库回退且标明过期缓存');
+        finishFirst({ markdown: '# 已过时的选择' });
+        await first;
+        assert.equal(body.innerHTML, current, '迟到的请求不能覆盖当前选择');
+        assert.equal(sb._modHubStartupErrors.length, 0);
+    }
+
+    // 旧说明的本地图片解码完成后，不得再查询或处理后来文档里的远程图片。
+    {
+        const sb = loadManager({ console: { error() {}, warn() {}, log() {} } });
+        let finishImage, current = true, remoteReads = 0;
+        const pendingImage = new Promise(resolve => { finishImage = resolve; });
+        const zip = {
+            file: path => path === 'slow.png' ? { async: () => pendingImage } : null,
+            files: { 'logo.png': { dir: false, async: async () => 'OLD_MOD_IMAGE' } },
+        };
+        sb.modHubGetModInfo = () => ({ zip });
+        sb.fetch = async () => { remoteReads++; throw new Error('旧文档不得继续请求图片'); };
+        const body = createStubElement();
+        const oldImage = createStubElement('img');
+        oldImage.getAttribute = () => 'slow.png';
+        const newImage = createStubElement('img');
+        newImage.src = '新文档原图';
+        newImage.dataset.originalSrc = 'https://example.test/logo.png';
+        newImage.getAttribute = () => 'https://example.test/logo.png';
+        let remoteImages = [];
+        body.querySelectorAll = selector => selector === 'img[data-local-mod-path]' ? [oldImage] : remoteImages;
+        const previous = sb.modHubSetupReadmeImages(body, '旧模组', () => current);
+        await new Promise(setImmediate);
+        current = false;
+        remoteImages = [newImage];
+        finishImage('OLD_LOCAL_IMAGE');
+        await previous;
+        assert.equal(newImage.src, '新文档原图', '旧 Zip 不得污染新说明的同名图片');
+        assert.equal(oldImage.src, undefined, '失效文档的延迟解码不得继续更新图片');
+        assert.equal(remoteReads, 0, '切换模组后旧任务不得开始新的网络请求');
+    }
+
+    // 图片拒绝和受控超时都只降级为占位，不能污染启动错误；旧浏览器也须结束等待。
+    for (const timeout of [false, true]) {
+        const sb = loadManager({ console: { error() {}, warn() {}, log() {} } });
+        const body = createStubElement();
+        const image = createStubElement('img');
+        let fallbackCount = 0, rejectFetch;
+        image.dataset.originalSrc = 'https://example.test/image.png';
+        image.getAttribute = () => 'https://example.test/image.png';
+        image.replaceWith = () => { fallbackCount++; };
+        body.querySelectorAll = selector => selector === 'img[data-remote-image-url]' ? [image] : [];
+        sb.modHubGetModInfo = () => null;
+        sb.modHubGetGui = () => null;
+        sb.AbortController = undefined;
+        const timers = [];
+        let cleared = 0;
+        sb.setTimeout = (callback, delay) => { assert.equal(delay, 8000); timers.push(callback); return timers.length; };
+        sb.clearTimeout = () => { cleared++; };
+        sb.fetch = () => timeout ? new Promise((_, reject) => { rejectFetch = reject; }) : Promise.reject(new TypeError('Failed to fetch'));
+        const pending = sb.modHubSetupReadmeImages(body, '图片测试');
+        if (timeout) {
+            await new Promise(setImmediate);
+            assert.equal(timers.length, 1, '缺少 AbortController 时图片仍须安装超时计时器');
+            timers[0]();
+        }
+        await pending;
+        if (timeout) {
+            rejectFetch(new Error('超时后底层请求才失败'));
+            await new Promise(setImmediate);
+        }
+        assert.equal(fallbackCount, 1, '图片失败只能替换一次占位');
+        assert.equal(sb._modHubStartupErrors.length, 0, '图片网络故障不得升级为加载错误');
+        assert.equal(cleared, 1, '图片完成或失败都必须清理超时计时器');
     }
 
     // 美化模块沿用主文件的操作锁与失败恢复，并保留可选 Addon 的降级行为。

@@ -56,7 +56,9 @@ if (typeof window !== 'undefined' && !window._modHubGlobalErrorHooked) {
         const origConsoleError = console.error;
         console.error = function(...args) {
             try {
-                const text = args.map(modHubFormatError).join(' ');
+                // 仅用消息和异常判断级别，模组档案中的 logError 等字段不是报错。
+                const text = args.filter(value => typeof value === 'string' || typeof value?.message === 'string')
+                    .map(modHubFormatError).join(' ');
                 const textLower = text.toLowerCase();
                 // 忽略预期内良性降级或无害提示，避免无错误时误报弹窗
                 const isBenign = !text ||
@@ -73,7 +75,7 @@ if (typeof window !== 'undefined' && !window._modHubGlobalErrorHooked) {
                     text.includes('Error') ||
                     text.includes('Exception')
                 )) {
-                    window._modHubStartupErrors.push(`[控制台报错] ${text}`);
+                    window._modHubStartupErrors.push(`[控制台报错] ${args.map(modHubFormatError).join(' ')}`);
                     window._modHubHasDetectedStartupError = true;
                     window._modHubPendingAutoOpenErrorLog = true;
                     if (typeof window.modHubCheckAndAutoOpenErrorLog === 'function' && typeof window.modHubIsGameStartupReady === 'function' && window.modHubIsGameStartupReady()) {
@@ -1333,10 +1335,10 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
 
             // 统计包含 ReadMe 的模组数量
             let readmeCount = 0;
-            if (typeof gui.getModTReadMe === 'function') {
+            if (typeof window.modHubReadLocalReadme === 'function') {
                 for (const name of highlightSet) {
                     try {
-                        const r = await gui.getModTReadMe(name);
+                        const r = await window.modHubReadLocalReadme(name);
                         if (window.modHubHasReadmeContent(r)) {
                             readmeCount++;
                         }
@@ -1363,9 +1365,9 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
         } else {
             // ===== 单模组导入场景：依是否有 ReadMe 智能分流 =====
             let hasReadme = false;
-            if (targetModName && typeof gui.getModTReadMe === 'function') {
+            if (targetModName && typeof window.modHubReadLocalReadme === 'function') {
                 try {
-                    const readme = await gui.getModTReadMe(targetModName);
+                    const readme = await window.modHubReadLocalReadme(targetModName);
                     if (window.modHubHasReadmeContent(readme)) {
                         hasReadme = true;
                     }

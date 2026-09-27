@@ -3,6 +3,8 @@
  * 共享接口由 modhub-manager.js 提供；市场服务在打开说明时读取。
  */
 
+let modHubReadmeRequestId = 0;
+
 // Shields.io 颜色映射表
 const MODHUB_SHIELDS_COLORS = {
     brightgreen: '#4c1',
@@ -186,7 +188,7 @@ window.modHubRenderMarkdown = function(md, options = {}) {
         const isLocal = !proxyUrl && !/^https?:\/\//i.test(renderedSrc) && !isDataUrl;
         const localAttr = isLocal ? ` data-local-mod-path="${window.modHubEscapeHtml(originalSrc)}"` : '';
         const remoteUrl = proxyUrl || (/^https?:\/\//i.test(originalSrc) ? originalSrc : '');
-        const remoteAttr = remoteUrl ? ` data-remote-image-url="${window.modHubEscapeHtml(remoteUrl)}"` : '';
+        const remoteAttr = !isDataUrl && remoteUrl ? ` data-remote-image-url="${window.modHubEscapeHtml(remoteUrl)}"` : '';
         const fallbackAttr = isBadge ? ' data-fallback="badge"' : (isLocal ? '' : ' data-fallback="image"');
         const imgClass = isBadge ? 'modhub-readme-image modhub-readme-badge' : 'modhub-readme-image';
         const initialSrc = isDataUrl ? renderedSrc : emptyImage;
@@ -301,6 +303,38 @@ window.modHubRenderMarkdown = function(md, options = {}) {
 /* =========================================================================
  * 4. Mod ReadMe 文档浏览器 (ReadMe Viewer)
  * ========================================================================= */
+// 直接读取声明的本地说明，避免旧 GUI 把可选文件缺失打印为整份模组错误。
+function modHubGetReadmeZip(modName) {
+    const mod = window.modHubGetModInfo(modName);
+    const localZip = typeof mod?.getZipFile === 'function' ? mod.getZipFile() : mod?.zip;
+    if (localZip) return localZip;
+    const utils = window.modHubGetGui()?.gModUtils;
+    const cache = utils?.getModLoader?.()?.getModCacheArray?.()
+        || window.modSC2DataManager?.getModLoader?.()?.getModCacheArray?.() || [];
+    const key = String(modName).trim().toLowerCase();
+    const cached = Array.from(cache).reverse().find(item =>
+        String(item?.mod?.bootJson?.name || item?.mod?.name || '').trim().toLowerCase() === key);
+    const reader = cached?.zip || utils?.getModZip?.(modName);
+    const readerMod = typeof reader?.getModInfo === 'function' ? reader.getModInfo() : reader?.modInfo;
+    if (readerMod && String(readerMod.bootJson?.name || readerMod.name || '').trim().toLowerCase() !== key) return null;
+    // ModLoader 的 zip getter 会在包体释放后报错；getZipFile 可安全返回空值。
+    return typeof reader?.getZipFile === 'function' ? reader.getZipFile() : reader?.zip;
+}
+
+window.modHubReadLocalReadme = async function(modName) {
+    const mod = window.modHubGetModInfo(modName);
+    const files = mod?.bootJson?.additionFile;
+    if (!Array.isArray(files)) return null;
+    const readmePath = files.find(path => typeof path === 'string' && /(?:^|\/)readme/i.test(path));
+    if (!readmePath) return null;
+    const zip = modHubGetReadmeZip(modName);
+    if (typeof zip?.file === 'function') {
+        const file = zip.file(readmePath);
+        return file && !file.dir && typeof file.async === 'function' ? file.async('string') : null;
+    }
+    return null;
+};
+
 window.initModReadMe = async function() {
     const container = document.getElementById('modHubReadmeContainer');
     if (!container) return;
@@ -464,7 +498,7 @@ window.modHubFindZipImageEntry = function(zip, rawPath) {
 };
 
 // 为 ReadMe 视图中的图片设置本地 Zip 资源解析与加载失败容灾兜底
-window.modHubSetupReadmeImages = async function(container, modName) {
+window.modHubSetupReadmeImages = async function(container, modName, isCurrent = () => true) {
     if (!container || typeof container.querySelectorAll !== 'function') return;
 
     const replaceWithFallback = img => {
@@ -496,19 +530,23 @@ window.modHubSetupReadmeImages = async function(container, modName) {
     };
 
     // 捕获阶段可覆盖浏览器 CSP 与普通网络错误。
-    container.addEventListener('error', event => {
-        const img = event.target;
-        if (img?.tagName === 'IMG') replaceWithFallback(img);
-    }, true);
+    if (!container._modHubReadmeImageErrorHandler) {
+        container._modHubReadmeImageErrorHandler = event => {
+            const img = event.target;
+            if (img?.tagName === 'IMG') replaceWithFallback(img);
+        };
+        container.addEventListener('error', container._modHubReadmeImageErrorHandler, true);
+    }
 
-    const modInfo = window.modHubGetModInfo(modName);
-    const zip = modInfo?.zip || (typeof modInfo?.getZipFile === 'function' ? modInfo.getZipFile() : null);
+    const zip = modHubGetReadmeZip(modName);
 
     // 1. 解析模组内置相对路径图片（转为合规 data: Base64 URL 彻底消除 CSP 与 404 限制）
     const localImgs = container.querySelectorAll('img[data-local-mod-path]');
-    if (localImgs && localImgs.length > 0 && zip) {
+    const remoteImgs = container.querySelectorAll('img[data-remote-image-url]');
+    if (localImgs && localImgs.length > 0) {
         try {
             for (const img of localImgs) {
+                if (!isCurrent()) return;
                 const rawPath = img.getAttribute('data-local-mod-path');
                 if (!rawPath) continue;
 
@@ -534,6 +572,7 @@ window.modHubSetupReadmeImages = async function(container, modName) {
                             }
                         }
 
+                        if (!isCurrent()) return;
                         if (dataUrl) {
                             img.src = dataUrl;
                             img.removeAttribute('data-local-mod-path');
@@ -541,6 +580,7 @@ window.modHubSetupReadmeImages = async function(container, modName) {
                             replaceWithFallback(img);
                         }
                     } catch (err) {
+                        if (!isCurrent()) return;
                         console.warn('[ModHub] 解码模组内置图片失败:', rawPath, err);
                         replaceWithFallback(img);
                     }
@@ -554,8 +594,10 @@ window.modHubSetupReadmeImages = async function(container, modName) {
     }
 
     // 2. 远程图片：优先尝试本地 Zip 容灾匹配，次选 Worker 代理转 data: URL，最后优雅降级
-    const remoteImgs = container.querySelectorAll('img[data-remote-image-url]');
     for (const img of remoteImgs) {
+        if (!isCurrent()) return;
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        let timeoutId;
         try {
             const originalSrc = img.dataset.originalSrc || '';
             // 2.1 检查本地 Zip 是否自带同名资源（秒开且免疫外网断联）
@@ -565,6 +607,7 @@ window.modHubSetupReadmeImages = async function(container, modName) {
                     try {
                         const mime = window.modHubGetMimeTypeByExt(localMatch.path || originalSrc);
                         const base64 = await localMatch.entry.async('base64');
+                        if (!isCurrent()) return;
                         if (base64) {
                             img.src = `data:${mime};base64,${base64}`;
                             img.removeAttribute('data-remote-image-url');
@@ -575,22 +618,37 @@ window.modHubSetupReadmeImages = async function(container, modName) {
             }
 
             // 2.2 请求 Worker 代理接口或远程原图并转为 CSP 允许的 data: URL
+            if (!isCurrent()) return;
             const remoteUrl = img.getAttribute('data-remote-image-url');
             if (!remoteUrl) throw new Error('缺少远程图片加载地址');
-            const response = await fetch(remoteUrl);
-            if (!response.ok) throw new Error(`HTTP ${response.status}`);
-            const blob = await response.blob();
-            const dataUrl = await new Promise((resolve, reject) => {
-                const reader = new FileReader();
-                reader.onload = () => resolve(reader.result);
-                reader.onerror = () => reject(reader.error || new Error('图片读取失败'));
-                reader.readAsDataURL(blob);
-            });
+            const dataUrl = await Promise.race([
+                (async () => {
+                    const response = await fetch(remoteUrl, controller ? { signal: controller.signal } : undefined);
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const blob = await response.blob();
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(reader.result);
+                        reader.onerror = () => reject(reader.error || new Error('图片读取失败'));
+                        reader.readAsDataURL(blob);
+                    });
+                })(),
+                new Promise((_, reject) => {
+                    timeoutId = setTimeout(() => {
+                        reject(new Error('说明图片读取超时'));
+                        controller?.abort();
+                    }, 8000);
+                })
+            ]);
+            if (!isCurrent()) return;
             img.src = dataUrl;
             img.removeAttribute('data-remote-image-url');
         } catch (err) {
+            if (!isCurrent()) return;
             console.warn('[ModHub] README 网络图片代理失败:', img.dataset.originalSrc, err);
             replaceWithFallback(img);
+        } finally {
+            clearTimeout(timeoutId);
         }
     }
 };
@@ -599,14 +657,20 @@ window.modHubLoadReadme = async function(modName) {
     const bodyEl = document.getElementById('modHubReadmeBody');
     if (!bodyEl) return;
 
-    const gui = window.modHubGetGui();
+    const requestId = ++modHubReadmeRequestId;
+    const isCurrent = () => requestId === modHubReadmeRequestId && document.getElementById('modHubReadmeBody') === bodyEl;
     bodyEl.innerHTML = '<div class="mod-empty grey">正在读取文档...</div>';
 
     try {
         let readme = null;
-        if (gui && typeof gui.getModTReadMe === 'function') {
-            readme = await gui.getModTReadMe(modName);
+        let readmeUnavailable = false;
+        try {
+            readme = await window.modHubReadLocalReadme(modName);
+        } catch (error) {
+            readmeUnavailable = true;
+            console.warn('[ModHub] 本地说明读取失败，尝试在线说明:', modName, error);
         }
+        if (!isCurrent()) return;
 
         const modInfo = window.modHubGetModInfo(modName);
         const boot = modInfo?.bootJson || {};
@@ -627,13 +691,16 @@ window.modHubLoadReadme = async function(modName) {
         const category = marketInfo?.primaryCategory || marketInfo?.category || '';
         const hasLocalReadme = window.modHubHasReadmeContent(readme);
         let githubReadme = null;
-        if (!hasLocalReadme && marketInfo?.githubUrl && window.modHubMarket?.fetchGithubReadme) {
+        if (!isCurrent()) return;
+        if (!hasLocalReadme && repositoryUrl && window.modHubMarket?.fetchGithubReadme) {
             try {
-                githubReadme = await window.modHubMarket.fetchGithubReadme(marketInfo.githubUrl);
+                githubReadme = await window.modHubMarket.fetchGithubReadme(repositoryUrl);
             } catch (err) {
+                readmeUnavailable = true;
                 console.warn('[ModHub] GitHub README 获取失败:', err);
             }
         }
+        if (!isCurrent()) return;
         const effectiveReadme = hasLocalReadme ? readme : githubReadme?.markdown;
 
         let marketHtml = '';
@@ -664,6 +731,7 @@ window.modHubLoadReadme = async function(modName) {
         if (window.modHubHasReadmeContent(effectiveReadme)) {
             if (githubReadme) {
                 contentHtml += `<p class="grey modhub-readme-source">以下说明来自 <a class="modhub-readme-link" href="${window.modHubEscapeHtml(githubReadme.sourceUrl || repositoryUrl)}" target="_blank" rel="noopener noreferrer">GitHub 仓库 README</a>。</p>`;
+                if (githubReadme.isStale) contentHtml += '<p class="grey">网络暂不可用，显示上次成功读取的说明，内容可能不是最新版本。</p>';
             }
             contentHtml += `<div class="modhub-markdown-view">${window.modHubRenderMarkdown(effectiveReadme, {
                 modName,
@@ -700,7 +768,7 @@ window.modHubLoadReadme = async function(modName) {
         } else {
             contentHtml += `
                 <div class="modhub-meta-view">
-                    <p class="modhub-readme-empty">此模组没有说明文档。</p>
+                    <p class="modhub-readme-empty">${readmeUnavailable ? '说明文档暂时无法读取，请检查网络后重新选择此模组重试。' : '此模组没有说明文档。'}</p>
                     ${!marketHtml ? '<p class="grey">当前仅能显示模组自身的 boot.json 信息。</p>' : ''}
                     <div class="modhub-meta-grid">
                         <div class="childItem meta-item">
@@ -733,8 +801,9 @@ window.modHubLoadReadme = async function(modName) {
         }
 
         bodyEl.innerHTML = contentHtml;
-        window.modHubSetupReadmeImages(bodyEl, modName);
+        await window.modHubSetupReadmeImages(bodyEl, modName, isCurrent);
     } catch (e) {
+        if (!isCurrent()) return;
         console.error('[ModHub] 读取 ReadMe 失败', e);
         bodyEl.innerHTML = `<div class="mod-empty red">读取文档失败：${window.modHubEscapeHtml(e.message)}</div>`;
     }

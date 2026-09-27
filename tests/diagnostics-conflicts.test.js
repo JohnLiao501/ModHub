@@ -104,6 +104,38 @@ module.exports = async function() {
         assert.equal(forwarded.length, 7, '不同堆栈格式不得影响原日志转发');
     }
 
+    // 模组附加档案里的函数、依赖和补丁字段不得制造控制台启动报错。
+    {
+        const forwarded = [];
+        const manager = loadManager({ console: { error(...args) { forwarded.push(args); } } });
+        const modInfo = {
+            name: '说明测试',
+            cache: { error: ['(revive:eval)', '(s) => c.logError(s)'] },
+            bootJson: {
+                additionFile: [],
+                dependenceInfo: [{ modName: 'TweeReplacer' }],
+                addonPlugin: [{ modName: 'ReplacePatcher', replaceFile: 'example.twee' }],
+            },
+        };
+        const details = ['说明测试', modInfo, []];
+        manager.console.error('getModReadMe() (!additionFile || isArray(additionFile) && additionFile.length == 0)', details);
+        manager.console.error('读取可选说明', modInfo);
+        const analysis = manager.modHubAnalyzeLogs(manager.modHubGetRawModLoaderLogs());
+        assert.equal(manager._modHubStartupErrors.length, 0, '说明缺失和附加档案不得因 logError 字段误记为启动异常');
+        assert.equal(Boolean(manager._modHubPendingAutoOpenErrorLog), false, '说明缺失不得自动打开加载日志');
+        assert.equal(analysis.errorCount, 0, '说明缺失不得制造加载错误');
+        assert.equal(analysis.matchedIssues.length, 0, '模组档案不得制造依赖和补丁冲突诊断');
+        assert.equal(forwarded[0][1], details, '未捕获的说明提示仍原样转发控制台');
+
+        manager.console.error('getModReadMe() failed', new TypeError('Failed to fetch'), modInfo);
+        assert.equal(manager._modHubStartupErrors.length, 1, '真实 ReadMe 网络异常仍必须捕获');
+        assert.ok(manager._modHubStartupErrors[0].includes('TypeError: Failed to fetch'), '真实异常必须保留类型和消息');
+        assert.ok(manager._modHubStartupErrors[0].includes('example.twee'), '真实异常必须保留附加档案以供排查');
+        manager.console.error('Error: 启动脚本失败', { source: 'modList.json' });
+        assert.equal(manager._modHubStartupErrors.length, 2, '附加上下文的良性关键词不得掩盖真实错误');
+        assert.equal(forwarded.length, 4, '说明提示和真实错误均应只转发一次');
+    }
+
     // 13.4 全局异步与脚本异常保留类型、堆栈和后备位置
     {
         const events = new Map();

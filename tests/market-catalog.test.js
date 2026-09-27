@@ -76,6 +76,95 @@ module.exports = async function() {
         assert.deepEqual(requestedUrls, Array.from(market.RELEASE_INDEX_MIRRORS), '主镜像失效后必须继续尝试备用镜像');
     }
 
+    // README 在线线路失败后使用官方 API 或最后成功缓存，不能无限等待网络。
+    {
+        const sb = loadMarket();
+        sb.atob = atob;
+        sb.TextDecoder = TextDecoder;
+        const market = sb.modHubMarket;
+        const repository = 'https://github.com/Owner/Readme';
+        const cacheKey = 'modhub_market_readme_v1_owner/readme';
+        const markdown = '# 中文说明\n\n离线时仍可阅读。';
+        const payload = {
+            markdown, sourceUrl: `${repository}/blob/main/docs/README.md`,
+            downloadUrl: 'https://raw.githubusercontent.com/Owner/Readme/main/docs/README.md'
+        };
+        const requests = [];
+        sb.fetch = async url => {
+            requests.push(url);
+            return { ok: true, status: 200, json: async () => payload };
+        };
+        assert.equal(await market.fetchGithubReadme('https://example.test/Owner/Readme'), null, '非 GitHub 仓库不得触发请求');
+        assert.equal((await market.fetchGithubReadme(repository)).markdown, markdown);
+        assert.equal(new URL(requests[0]).origin, market.RELEASE_WORKER_API_BASE, 'README 只能使用已实现该路由的服务，不能假定网站镜像提供代理');
+        assert.equal((await market.fetchGithubReadme(repository.toLowerCase())).fromCache, true, '同仓库大小写不同也应复用成功缓存');
+        assert.equal(requests.length, 1, '有效缓存期间重复点选不得重复联网');
+
+        const previous = { data: payload, timestamp: 1 };
+        sb.localStorage.setItem(cacheKey, JSON.stringify(previous));
+        sb.fetch = async url => { requests.push(url); throw new Error('模拟直连离线'); };
+        const offline = await market.fetchGithubReadme(repository);
+        assert.equal(offline.markdown, markdown);
+        assert.equal(offline.isStale, true, '两条线路均失败后须标明最后成功缓存');
+        assert.equal(JSON.parse(sb.localStorage.getItem(cacheKey)).timestamp, 1, '离线读取不能把旧缓存伪装为新文档');
+        assert.equal(requests.at(-1), 'https://api.github.com/repos/Owner/Readme/readme', '代理不可达后必须尝试官方 API');
+
+        sb.fetch = async (url, options) => {
+            if (!url.startsWith('https://api.github.com/')) throw new Error('模拟 workers.dev 不可达');
+            assert.equal(options.headers.Accept, 'application/vnd.github+json');
+            return { ok: true, status: 200, json: async () => ({
+                encoding: 'base64', content: Buffer.from(markdown).toString('base64'),
+                html_url: payload.sourceUrl, download_url: payload.downloadUrl
+            }) };
+        };
+        const direct = await market.fetchGithubReadme(repository);
+        assert.equal(direct.markdown, markdown, '官方 API 的 Base64 必须按 UTF-8 解码中文');
+        assert.equal(direct.sourceUrl, payload.sourceUrl);
+        assert.equal(direct.downloadUrl, payload.downloadUrl, '必须保留 README 真实路径供相对图片解析');
+        assert.notEqual(direct.isStale, true, '直连成功必须替换过期缓存');
+
+        sb.localStorage.removeItem(cacheKey);
+        sb.fetch = async url => ({ ok: true, status: 200, json: async () => url.startsWith('https://api.github.com/') ? {
+            encoding: 'base64', content: Buffer.from(markdown).toString('base64'),
+            html_url: 'https://github.com/Other/Repo/blob/main/README.md',
+            download_url: 'https://raw.githubusercontent.com/Other/Repo/main/README.md'
+        } : {} });
+        const safeSources = await market.fetchGithubReadme(repository);
+        assert.equal(safeSources.sourceUrl, repository, 'API 不得把说明来源指向其他仓库');
+        assert.equal(safeSources.downloadUrl, '', 'API 不得把相对图片基址指向其他仓库');
+
+        sb.localStorage.setItem(cacheKey, JSON.stringify(previous));
+        sb.fetch = async () => ({ ok: false, status: 404 });
+        assert.equal(await market.fetchGithubReadme(repository), null, '明确不存在的 README 不应被过期缓存冒充');
+        sb.localStorage.removeItem(cacheKey);
+        sb.fetch = async () => { throw new Error('模拟完全离线'); };
+        await assert.rejects(market.fetchGithubReadme(repository), /模拟完全离线/, '无缓存时保留失败状态，交由说明页提示');
+
+        // 无 AbortController 的旧浏览器、响应体挂起都必须在两次受控超时后结束。
+        for (const waitingForBody of [false, true]) {
+            const timers = [];
+            let cleared = 0, aborted = 0;
+            sb.AbortController = waitingForBody ? class {
+                signal = {};
+                abort() { aborted++; }
+            } : undefined;
+            sb.setTimeout = (callback, delay) => { assert.equal(delay, 8000); timers.push(callback); return timers.length; };
+            sb.clearTimeout = () => { cleared++; };
+            sb.fetch = async () => waitingForBody
+                ? { ok: true, status: 200, json: () => new Promise(() => {}) }
+                : new Promise(() => {});
+            const pending = assert.rejects(market.fetchGithubReadme(repository), /获取超时/);
+            for (let source = 0; source < 2; source++) {
+                await new Promise(setImmediate);
+                assert.equal(timers.length, source + 1, '每条请求线路都必须安装超时计时器');
+                timers[source]();
+            }
+            await pending;
+            assert.equal(cleared, 2, '无论超时还是失败都必须清理两条线路的计时器');
+            assert.equal(aborted, waitingForBody ? 2 : 0, '支持 AbortController 时还必须中断实际请求');
+        }
+    }
+
     // 统一索引已更新时，安装预检与下载共用的 Release 缓存不能选择旧安装包
     {
         const sb = loadMarket();

@@ -29,6 +29,8 @@
     const IDENTITY_CACHE_KEY = 'modhub_market_identities_v3';
     const IDENTITY_FETCH_TIMEOUT_MS = 8000;
     const README_FETCH_TIMEOUT_MS = 8000;
+    const MODHUB_README_CACHE_PREFIX = 'modhub_market_readme_v1_';
+    const MODHUB_README_CACHE_TTL = 6 * 60 * 60 * 1000;
     const RELEASE_CACHE_PREFIX = 'modhub_market_rel_v2_';
     const RELEASE_CACHE_TTL = 6 * 60 * 60 * 1000; // 6 小时
     const IGNORE_STORAGE_KEY = 'modhub_market_ignored_updates_v1';
@@ -824,19 +826,67 @@
         const repo = parseGithubRepo(repositoryUrl);
         const endpoint = getReleaseWorkerUrl('/readme');
         if (!repo || !endpoint) return null;
+        const cacheKey = MODHUB_README_CACHE_PREFIX + repo.key;
+        const hasMarkdown = data => typeof data?.markdown === 'string' && Boolean(data.markdown.trim());
+        const cached = readLocalCache(cacheKey, MODHUB_README_CACHE_TTL);
+        if (hasMarkdown(cached)) return { ...cached, fromCache: true };
         const url = new URL(endpoint);
         url.searchParams.set('repo', repo.key);
-        const controller = typeof AbortController === 'function' ? new AbortController() : null;
-        const timeoutId = controller ? setTimeout(() => controller.abort(), README_FETCH_TIMEOUT_MS) : null;
-        try {
-            const response = await fetch(url.toString(), controller ? { signal: controller.signal } : undefined);
-            if (response.status === 404) return null;
-            if (!response.ok) throw new Error(`GitHub README 获取失败: ${response.status}`);
-            const data = await response.json();
-            return typeof data?.markdown === 'string' && data.markdown.trim() ? data : null;
-        } finally {
-            if (timeoutId !== null) clearTimeout(timeoutId);
+        const sources = [url.toString(), `https://api.github.com/repos/${encodeURIComponent(repo.owner)}/${encodeURIComponent(repo.repo)}/readme`];
+        let lastError;
+        for (const [index, source] of sources.entries()) {
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            let timeoutId;
+            try {
+                // 每条线路的超时覆盖响应体读取；缺少 AbortController 时仍须结束等待。
+                const data = await Promise.race([
+                    (async () => {
+                        const response = await fetch(source, {
+                            ...(controller ? { signal: controller.signal } : {}),
+                            ...(index ? { headers: { Accept: 'application/vnd.github+json' } } : {})
+                        });
+                        if (response.status === 404) return null;
+                        if (!response.ok) throw new Error(`GitHub README 获取失败: ${response.status}`);
+                        let payload = await response.json();
+                        if (index) {
+                            if (payload?.encoding !== 'base64' || typeof payload.content !== 'string') {
+                                throw new Error('GitHub README 返回格式异常');
+                            }
+                            const bytes = Uint8Array.from(atob(payload.content.replace(/\s/g, '')), char => char.charCodeAt(0));
+                            if (bytes.length > 1024 * 1024) throw new Error('GitHub README 超过大小限制');
+                            const markdown = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+                            const getSourceUrl = (value, hostname) => {
+                                try {
+                                    const parsed = new URL(value);
+                                    return parsed.protocol === 'https:' && parsed.hostname === hostname && !parsed.username && !parsed.password
+                                        && parsed.pathname.split('/').slice(1, 3).join('/').toLowerCase() === repo.key ? parsed.href : '';
+                                } catch { return ''; }
+                            };
+                            payload = { markdown, repo: repo.key,
+                                sourceUrl: getSourceUrl(payload.html_url, 'github.com') || `https://github.com/${repo.owner}/${repo.repo}`,
+                                downloadUrl: getSourceUrl(payload.download_url, 'raw.githubusercontent.com') };
+                        }
+                        if (!hasMarkdown(payload)) throw new Error('GitHub README 返回格式异常');
+                        return payload;
+                    })(),
+                    new Promise((_, reject) => {
+                        timeoutId = setTimeout(() => {
+                            reject(new Error('GitHub README 获取超时'));
+                            controller?.abort();
+                        }, README_FETCH_TIMEOUT_MS);
+                    })
+                ]);
+                if (data) writeLocalCache(cacheKey, data);
+                return data;
+            } catch (error) {
+                lastError = error;
+            } finally {
+                clearTimeout(timeoutId);
+            }
         }
+        const previous = readLocalCache(cacheKey, MODHUB_README_CACHE_TTL, true);
+        if (hasMarkdown(previous)) return { ...previous, fromCache: true, isStale: true };
+        throw lastError;
     }
 
     function getReadmeImageProxyUrl(repositoryUrl, imageUrl) {
