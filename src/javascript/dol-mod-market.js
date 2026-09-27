@@ -810,7 +810,8 @@
         const gameVersion = window.StartConfig?.version || '';
         if (useCache) {
             const cached = readLocalCache(cacheKey, RELEASE_CACHE_TTL);
-            if (cached?.assetPlanVersion === 2 && cached.assetPlanGameVersion === gameVersion) {
+            if (cached?.assetPlanVersion === 2 && cached.assetPlanGameVersion === gameVersion
+                && (!mod.version || compareVersions(cached.version, mod.version) >= 0)) {
                 return { ...cached, fromCache: true };
             }
         }
@@ -862,7 +863,8 @@
                 throw fetchErr;
             }
             const staleCache = readLocalCache(cacheKey, Infinity, true);
-            if (staleCache?.assets && staleCache.assets.length > 0) {
+            if (staleCache?.assets && staleCache.assets.length > 0
+                && (!mod.version || compareVersions(staleCache.version, mod.version) >= 0)) {
                 console.warn('[DolOptimization] GitHub API 直连受限，回退使用最近成功缓存的 Release 数据:', fetchErr);
                 return { ...staleCache, fromCache: true, isStale: true };
             }
@@ -1454,7 +1456,7 @@
                 ? setTimeout(() => controller.abort(), IDENTITY_FETCH_TIMEOUT_MS)
                 : null;
             try {
-                const res = await fetch(url, controller ? { signal: controller.signal } : undefined);
+                const res = await fetch(url, { cache: 'no-cache', signal: controller?.signal });
                 if (!res.ok) throw new Error(`自动版本索引返回状态码: ${res.status}`);
                 const mods = normalizeReleaseIndex(await res.json());
                 activeReleaseWorkerBaseUrl = url;

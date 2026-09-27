@@ -531,6 +531,78 @@ function createMockController(initial = {}) {
         // 与市场内部 normalizeKey 等效的键归一化
         const firstKey = String(first.bootNames[0]).toLowerCase().replace(/[()（）\[\]【】_—\-—.\s]/g, '').trim();
         assert.ok(market.KNOWN_MOD_MARKET_ALIASES[firstKey], `应用后必须能通过 bootName 键「${firstKey}」检索到别名映射`);
+
+        // 10.5 目录与版本独立刷新仍兼容 v1，且保留 Wiki 元数据与权威版本字段
+        const indexedMod = {
+            ...catalog.mods.find(mod => mod.id === 'modhub'),
+            identityId: 'modhub', wikiName: 'ModHub模组管理中心',
+            githubUrl: 'https://github.com/JohnLiao501/ModHub',
+            githubUrls: ['https://github.com/JohnLiao501/ModHub', 'https://github.com/NEEDMEET/ModHub'],
+            wikiVersion: '1.0.1', wikiDate: '2026-09-26',
+            version: '1.0.2', versionSource: 'github', updateDate: '2026-09-27',
+            releaseUrl: 'https://github.com/JohnLiao501/ModHub/releases/tag/v1.0.2'
+        };
+        const splitIndex = {
+            schemaVersion: 1, catalogUpdatedAt: '2026-09-27T00:02:00.000Z',
+            generatedAt: '2026-09-27T00:05:00.000Z', identities: catalog.mods, mods: [indexedMod]
+        };
+        const [normalizedMod] = market.normalizeReleaseIndex(splitIndex);
+        for (const field of ['id', 'identityId', 'wikiVersion', 'wikiDate', 'version', 'versionSource', 'updateDate', 'releaseUrl', 'category']) {
+            assert.equal(normalizedMod[field], indexedMod[field], `独立刷新索引必须保留 ${field}`);
+        }
+        assert.deepEqual(Array.from(normalizedMod.githubUrls), indexedMod.githubUrls, '必须保留 Wiki 原始仓库链接集合');
+        assert.deepEqual(Array.from(normalizedMod.bootNames), indexedMod.bootNames, '独立刷新不得丢失模组身份名称');
+        assert.equal(splitIndex.catalogUpdatedAt, '2026-09-27T00:02:00.000Z', '归一化不得改写目录刷新时间');
+
+        // 10.6 手动刷新绕过列表缓存，并重新验证各镜像的 HTTP 缓存
+        const oldMod = { name: 'ModHub', version: '1.0.1', githubUrl: 'https://github.com/JohnLiao501/ModHub' };
+        sb.localStorage.setItem('dol_opt_market_wiki_v5', JSON.stringify({ data: [oldMod], timestamp: Date.now() }));
+        assert.equal((await market.loadMarketData())[0].version, '1.0.1', '普通加载应保留已有列表缓存');
+        const requestedUrls = [];
+        sb.fetch = async (url, options) => {
+            requestedUrls.push(url);
+            assert.equal(options.cache, 'no-cache', '索引请求必须重新验证 HTTP 缓存');
+            if (url === market.RELEASE_INDEX_MIRRORS[0]) return { ok: false, status: 503 };
+            return { ok: true, json: async () => ({ schemaVersion: 1, mods: [{ ...oldMod, version: '1.0.2' }] }) };
+        };
+        assert.equal((await market.loadMarketData(true))[0].version, '1.0.2', '手动刷新必须取代内存和本地的旧版本列表');
+        assert.deepEqual(requestedUrls, Array.from(market.RELEASE_INDEX_MIRRORS), '主镜像失效后必须继续尝试备用镜像');
+    }
+
+    // 统一索引已更新时，安装预检与下载共用的 Release 缓存不能选择旧安装包
+    {
+        const sb = loadMarket();
+        const market = sb.dolModMarket;
+        const mod = { name: 'ModHub', version: '1.0.2', githubUrl: 'https://github.com/JohnLiao501/ModHub' };
+        const cacheKey = 'dol_opt_market_rel_v2_JohnLiao501_ModHub';
+        const cache = {
+            version: '1.0.1', assetPlanVersion: 2, assetPlanGameVersion: '',
+            assets: [{ name: 'ModHub-v1.0.1.zip', downloadUrl: `${mod.githubUrl}/releases/download/v1.0.1/ModHub-v1.0.1.zip` }]
+        };
+        const writeCache = version => sb.localStorage.setItem(cacheKey, JSON.stringify({ data: { ...cache, version }, timestamp: Date.now() }));
+        writeCache('1.0.1');
+        let requestCount = 0;
+        sb.fetch = async () => {
+            requestCount++;
+            return { ok: true, status: 200, json: async () => ({
+                tag_name: 'v1.0.2', name: 'v1.0.2', assets: [{
+                    name: 'ModHub-v1.0.2.zip',
+                    browser_download_url: `${mod.githubUrl}/releases/download/v1.0.2/ModHub-v1.0.2.zip`
+                }]
+            }) };
+        };
+        const release = await market.fetchModRelease(mod);
+        assert.equal(release.version, '1.0.2', '低于市场版本的 Release 缓存必须被重新获取');
+        assert.equal(requestCount, 1, '跳过旧缓存后必须请求 GitHub');
+        assert.ok(release.assetUrl.endsWith('/ModHub-v1.0.2.zip'), '安装包地址必须来自新 Release');
+        assert.equal((await market.fetchModRelease(mod)).fromCache, true, '不低于市场版本的缓存仍可复用');
+        assert.equal(requestCount, 1, '可用缓存不得产生额外请求');
+
+        sb.fetch = async () => { throw new Error('模拟 GitHub 离线'); };
+        writeCache('1.0.1');
+        await assert.rejects(market.fetchModRelease(mod), /模拟 GitHub 离线/, 'GitHub 失败时也不得回退到低于市场版本的安装包');
+        writeCache('1.0.2');
+        assert.equal((await market.fetchModRelease(mod, { useCache: false })).isStale, true, '版本满足要求时必须保留网络失败后的缓存回退');
     }
 
     /* =========================================================================
