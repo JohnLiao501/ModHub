@@ -293,6 +293,94 @@
     let currentSortBy = 'date'; // 'date' | 'name'
     let currentSearchText = '';
     let isLoading = false;
+    const batchInstallState = { selecting: false, selected: new Set(), running: false, stopRequested: false, current: '', completed: 0, total: 0 };
+
+    function getMarketModKey(mod) {
+        return String(mod?.identityId || mod?.id || extractRepoKey(mod?.githubUrl) || normalizeKey(mod?.name)).toLowerCase();
+    }
+
+    function isBatchInstallEligible(mod, profiles = getLocalInstalledProfiles()) {
+        return Boolean(mod && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+(?:[/?#]|$)/i.test(mod.githubUrl || '')
+            && !mod._isDeadRepo && !isDeadRepo(mod.githubUrl, mod)
+            && checkModInstallStatus(mod, profiles) === 'not_installed');
+    }
+
+    function getBatchSelectionState() {
+        return { ...batchInstallState, selected: Array.from(batchInstallState.selected) };
+    }
+
+    function toggleBatchSelection(selecting = !batchInstallState.selecting) {
+        if (batchInstallState.running) return;
+        batchInstallState.selecting = Boolean(selecting);
+        if (!batchInstallState.selecting) batchInstallState.selected.clear();
+        renderMarketCards();
+    }
+
+    function setBatchModSelected(key, checked) {
+        if (batchInstallState.running || !batchInstallState.selecting) return;
+        const mod = marketModList.find(item => getMarketModKey(item) === key);
+        if (checked && isBatchInstallEligible(mod)) batchInstallState.selected.add(key);
+        else batchInstallState.selected.delete(key);
+        document.querySelectorAll('.dol-opt-market-select').forEach(input => {
+            input.checked = batchInstallState.selected.has(input.dataset.modKey);
+            input.closest?.('.dol-opt-market-card')?.classList.toggle('is-batch-selected', input.checked);
+        });
+        renderBatchInstallToolbar();
+    }
+
+    function selectAllVisibleMods() {
+        if (batchInstallState.running || !batchInstallState.selecting) return;
+        const profiles = getLocalInstalledProfiles();
+        filterAndSortMods().filter(mod => isBatchInstallEligible(mod, profiles)).forEach(mod => batchInstallState.selected.add(getMarketModKey(mod)));
+        renderMarketCards();
+    }
+
+    function clearBatchSelection() {
+        if (batchInstallState.running) return;
+        batchInstallState.selected.clear();
+        renderMarketCards();
+    }
+
+    function renderBatchInstallToolbar() {
+        const state = batchInstallState;
+        if (!state.running) {
+            const profiles = getLocalInstalledProfiles();
+            const eligibleKeys = new Set(marketModList.filter(mod => isBatchInstallEligible(mod, profiles)).map(getMarketModKey));
+            for (const key of state.selected) if (!eligibleKeys.has(key)) state.selected.delete(key);
+        }
+        document.querySelectorAll('#dolOptMarketBtnRefresh, #dolOptMirrorSelect, .btn-market-install, .btn-market-update, .dol-opt-market-update-all, .dol-opt-market-select').forEach(control => {
+            const mod = marketModList[Number(control.dataset?.modIndex)];
+            control.disabled = state.running || Boolean(mod && activeDownloadControllers.has(mod.name));
+        });
+        const toolbar = document.getElementById('dolOptMarketBatchToolbar');
+        if (!toolbar) return;
+        const escapeHtml = window.dolOptEscapeHtml || (value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]));
+        const focusedId = toolbar.contains?.(document.activeElement) ? document.activeElement?.id : '';
+        toolbar.classList.toggle('is-active', state.selecting || state.running);
+        toolbar.classList.toggle('is-entry', !state.selecting && !state.running);
+        if (state.running) {
+            toolbar.innerHTML = `
+                <div class="dol-opt-batch-status" role="status" aria-live="polite"><strong class="gold">批量安装 ${state.completed}/${state.total}</strong><span>${state.current ? `正在处理：${escapeHtml(state.current)}` : '正在准备安装计划'}</span></div>
+                <progress class="dol-opt-batch-progress" max="${Math.max(1, state.total)}" value="${state.completed}" aria-label="批量安装总进度"></progress>
+                <button id="dolOptBatchStop" type="button" class="macro-button dol-opt-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>`;
+            const stopButton = document.getElementById('dolOptBatchStop');
+            if (stopButton) stopButton.onclick = () => { state.stopRequested = true; renderBatchInstallToolbar(); };
+        } else {
+            toolbar.innerHTML = `
+                <button id="dolOptBatchToggle" type="button" class="macro-button ${state.selecting ? 'dol-opt-btn-secondary' : 'dol-opt-btn-primary dol-opt-batch-entry'}" aria-pressed="${state.selecting}"${state.selecting ? '' : ' aria-describedby="dolOptBatchEntryHint"'}>${state.selecting ? '退出多选' : '批量下载'}</button>
+                ${state.selecting ? '' : '<span id="dolOptBatchEntryHint" class="dol-opt-batch-entry-hint">勾选多个模组，统一下载并安装</span>'}
+                ${state.selecting ? `<span class="dol-opt-batch-count grey" role="status" aria-live="polite">已选 ${state.selected.size} 项，仅选择未安装模组</span>
+                <button id="dolOptBatchSelectAll" type="button" class="macro-button dol-opt-btn-secondary">全选当前筛选</button>
+                <button id="dolOptBatchClear" type="button" class="macro-button dol-opt-btn-secondary" ${state.selected.size ? '' : 'disabled'}>清空选择</button>
+                <button id="dolOptBatchInstall" type="button" class="macro-button dol-opt-btn-primary" ${state.selected.size ? '' : 'disabled'}>下载并安装（${state.selected.size}）</button>` : ''}`;
+            const handlers = { dolOptBatchToggle: () => toggleBatchSelection(), dolOptBatchSelectAll: selectAllVisibleMods, dolOptBatchClear: clearBatchSelection, dolOptBatchInstall: () => installSelectedMods() };
+            Object.entries(handlers).forEach(([id, handler]) => {
+                const button = document.getElementById(id);
+                if (button) button.onclick = handler;
+            });
+        }
+        if (focusedId) document.getElementById(focusedId)?.focus();
+    }
 
     // ==================== 工具函数 ====================
 
@@ -1509,8 +1597,13 @@
             if (!profileKey || seenNames.has(profileKey)) return;
             seenNames.add(profileKey);
 
-            const resolvedMod = window.dolOptGetModInfo?.(modName) || modRef;
-            const boot = resolvedMod?.bootJson || bootJson || modRef?.bootJson || {};
+            let resolvedMod = window.dolOptGetModInfo?.(modName) || modRef;
+            let boot = resolvedMod?.bootJson || bootJson || modRef?.bootJson || {};
+            const actualName = boot.name || resolvedMod?.name;
+            if (actualName && String(actualName).trim().toLowerCase() !== String(modName).trim().toLowerCase()) {
+                resolvedMod = null;
+                boot = {};
+            }
             const version = boot.version || '';
             const displayNames = new Set();
             const repos = new Set();
@@ -1551,7 +1644,7 @@
 
             // 4. 调用模组管理器的友好副标题解析方法 (dolOptGetModSubtext，显式禁用市场反查避免循环递归)
             if (typeof window.dolOptGetModSubtext === 'function') {
-                const subtext = window.dolOptGetModSubtext(modName, resolvedMod || modRef || { bootJson: boot }, false, true);
+                const subtext = window.dolOptGetModSubtext(modName, resolvedMod || { bootJson: boot }, false, true);
                 if (subtext && typeof subtext === 'string') {
                     displayNames.add(subtext.trim());
                 }
@@ -1612,7 +1705,7 @@
             if (gui?.gModUtils?.getModListNameNoAlias) {
                 const names = gui.gModUtils.getModListNameNoAlias() || [];
                 for (const name of names) {
-                    const m = window.dolOptGetModInfo?.(name) || (gui.gModUtils.getMod ? gui.gModUtils.getMod(name) : null);
+                    const m = typeof window.dolOptGetModInfo === 'function' ? window.dolOptGetModInfo(name) : gui.gModUtils.getMod?.(name);
                     addProfile(name, m?.bootJson, m);
                 }
             }
@@ -1627,7 +1720,7 @@
                     ...(state.sideMods ? state.sideMods.map(m => m.name) : [])
                 ];
                 for (const name of allNames) {
-                    const m = window.dolOptGetModInfo?.(name) || (gui?.gModUtils?.getMod ? gui.gModUtils.getMod(name) : null);
+                    const m = typeof window.dolOptGetModInfo === 'function' ? window.dolOptGetModInfo(name) : gui?.gModUtils?.getMod?.(name);
                     addProfile(name, m?.bootJson, m);
                 }
             }
@@ -2032,6 +2125,457 @@
         return { actions, requirements, unavailable, cycles: [...new Set(cycles)] };
     }
 
+    // 批量计划保留依赖边，显式跳过与执行失败分别处理。
+    function buildBatchInstallPlan(targets, mods = marketModList, profiles = getLocalInstalledProfiles(), disabledNames,
+        skippedDependencyKeys = new Set(), releaseInfos = new Map(), excludedKeys = new Map()) {
+        targets = [...new Map((targets || []).map(mod => [getMarketModKey(mod), mod])).values()];
+        const targetKeys = new Set(targets.map(getMarketModKey));
+        const catalog = new Map();
+        [...mods, ...targets].forEach(mod => [mod.id, mod.identityId].filter(Boolean).forEach(id => catalog.set(String(id).toLowerCase(), mod)));
+        const disabled = new Set(Array.from(disabledNames || [
+            ...(window._dolOptModState?.sideDisabled || []),
+            ...(window._dolOptModState?.sideMods || []).filter(mod => !mod.enabled).map(mod => mod.name)
+        ], normalizeKey));
+        const nodes = new Map(), allDependencies = new Map(), dependencies = new Map(), constraints = new Map();
+        const issues = new Map(), requirementsByKey = new Map(), cycles = new Set();
+        const skipped = key => skippedDependencyKeys.has(key) && !targetKeys.has(key);
+        const collect = mod => {
+            const key = getMarketModKey(mod);
+            if (nodes.has(key)) return;
+            checkModInstallStatus(mod, profiles);
+            const local = mod._matchedLocal;
+            const needsEnable = Boolean(local && [local.name, ...(local.displayNames || [])].some(name => disabled.has(normalizeKey(name))));
+            nodes.set(key, { mod, local, needsEnable });
+            const edges = new Set();
+            allDependencies.set(key, edges);
+            for (const dependency of getModDependencies(mod)) {
+                const dep = catalog.get(dependency.id.toLowerCase());
+                if (!dep) {
+                    issues.set(key, `未在市场找到前置【${dependency.id}】`);
+                    continue;
+                }
+                const depKey = getMarketModKey(dep);
+                edges.add(depKey);
+                if (!constraints.has(depKey)) constraints.set(depKey, []);
+                constraints.get(depKey).push({ parent: key, dependency });
+                if (!requirementsByKey.has(depKey)) requirementsByKey.set(depKey, { mod: dep, dependency, requiredBy: [] });
+                collect(dep);
+            }
+        };
+        targets.forEach(collect);
+        const reachableByTarget = new Map(), active = new Set(), order = [], visited = new Set(), visiting = [];
+        const visit = key => {
+            if (visiting.includes(key)) {
+                visiting.slice(visiting.indexOf(key)).forEach(cycleKey => {
+                    cycles.add(nodes.get(cycleKey).mod.name);
+                    issues.set(cycleKey, '检测到循环依赖');
+                });
+                return;
+            }
+            if (visited.has(key)) return;
+            active.add(key);
+            visiting.push(key);
+            const edges = new Set([...allDependencies.get(key) || []].filter(depKey => !skipped(depKey)));
+            dependencies.set(key, edges);
+            edges.forEach(visit);
+            visiting.pop();
+            visited.add(key);
+            order.push(key);
+        };
+        targetKeys.forEach(visit);
+        const collectReachable = (key, graph, seen = new Set()) => {
+            if (seen.has(key)) return seen;
+            seen.add(key);
+            for (const dep of graph.get(key) || []) collectReachable(dep, graph, seen);
+            return seen;
+        };
+        for (const target of targets) {
+            const key = getMarketModKey(target);
+            reachableByTarget.set(key, collectReachable(key, dependencies));
+            for (const dep of collectReachable(key, allDependencies)) {
+                requirementsByKey.get(dep)?.requiredBy.push(target.name);
+            }
+        }
+        // 已失败或结构不完整的分支不再推动共享前置升级，避免连带阻断独立目标。
+        for (const key of active) {
+            const { mod, local } = nodes.get(key);
+            if (excludedKeys.has(key)) issues.set(key, excludedKeys.get(key));
+            if (!local && (!mod.githubUrl || mod._isDeadRepo || isDeadRepo(mod.githubUrl, mod))) issues.set(key, '没有可自动安装的发布包');
+        }
+        const viable = new Set();
+        for (const reachable of reachableByTarget.values()) {
+            if (![...reachable].some(key => issues.has(key))) reachable.forEach(key => viable.add(key));
+        }
+        const proposedActions = [];
+        for (const key of order) {
+            if (!viable.has(key)) continue;
+            const { mod, local, needsEnable } = nodes.get(key);
+            const requirements = (constraints.get(key) || []).filter(item => viable.has(item.parent) && !skipped(key));
+            const remoteVersion = releaseInfos.get(key)?.version || mod.version;
+            const needsUpdate = local && requirements.some(item => !satisfiesVersion(local.version, item.dependency.version));
+            const type = !local ? 'install' : (needsUpdate ? 'update' : '');
+            const finalVersion = type ? remoteVersion : local?.version;
+            const downloadable = mod.githubUrl && !mod._isDeadRepo && !isDeadRepo(mod.githubUrl, mod);
+            if (excludedKeys.has(key)) issues.set(key, excludedKeys.get(key));
+            if (type && !downloadable) issues.set(key, '没有可自动安装的发布包');
+            if (needsUpdate && compareVersions(remoteVersion, local.version) <= 0) issues.set(key, '市场版本无法满足前置要求');
+            if (requirements.some(item => !satisfiesVersion(finalVersion, item.dependency.version))) {
+                issues.set(key, `前置【${mod.name}】的最终版本不满足全部要求：${[...new Set(requirements.map(item => item.dependency.version).filter(Boolean))].join('、')}`);
+            }
+            const role = targetKeys.has(key) ? '目标模组' : '前置依赖';
+            if (type) proposedActions.push({ type, mod, local, role, key, enableAfter: Boolean(needsEnable) });
+            if (!type && needsEnable) {
+                proposedActions.push({ type: 'enable', mod, local, role, key });
+            }
+        }
+        const blocked = new Map();
+        for (const [key, reachable] of reachableByTarget) {
+            const reasons = [...reachable].filter(dep => issues.has(dep)).map(dep => issues.get(dep));
+            if (reasons.length) blocked.set(key, [...new Set(reasons)].join('；'));
+        }
+        const needed = new Set();
+        for (const [key, reachable] of reachableByTarget) if (!blocked.has(key)) reachable.forEach(dep => needed.add(dep));
+        const requirements = [...requirementsByKey].map(([key, req]) => {
+            const { local, needsEnable } = nodes.get(key);
+            return {
+                ...req, key, skipped: skipped(key), isTarget: targetKeys.has(key),
+                satisfied: Boolean(local && !needsEnable && !issues.has(key) && (constraints.get(key) || []).every(item => satisfiesVersion(local.version, item.dependency.version))),
+                requiredBy: [...new Set(req.requiredBy)]
+            };
+        });
+        return {
+            targets, actions: proposedActions.filter(action => needed.has(action.key)), allActions: proposedActions, requirements, blocked, dependencies, nodes,
+            unavailable: [...issues].filter(([key]) => active.has(key)).map(([key, reason]) => ({ mod: nodes.get(key).mod, reason })),
+            cycles: [...cycles]
+        };
+    }
+
+    // 按唯一模组执行；失败向依赖它的任务传播，独立分支继续。
+    async function executeBatchInstallPlan(plan, options = {}) {
+        const results = new Map(), changedMods = new Set();
+        let currentPlan = plan;
+        const refresh = options.refresh || (async () => { await window.dolOptLoadModManageState?.(true); });
+        const install = options.install || (action => {
+            if (options.releaseInfos && !options.releaseInfos.has(action.key)) {
+                action.failureReason = '安装计划已变化，请重新核对安装包';
+                return false;
+            }
+            return downloadAndInstallMod(action.mod, currentMirrorId, {
+            askRestart: false, skipReloadOffer: true, batchMode: true,
+            releaseInfo: options.releaseInfos?.get(action.key),
+            onFailure: reason => { action.failureReason = reason; }
+            });
+        });
+        const enable = options.enable || (action => window.dolOptToggleSideMod?.(action.local.name, true, { silentOfferReload: true }));
+        const isEnabled = action => {
+            const state = window._dolOptModState;
+            const item = state?.sideMods?.find(mod => mod.name === action.local?.name);
+            return item ? item.enabled === true : (state?.sideEnabled || []).includes(action.local?.name);
+        };
+        const setResult = (action, status, reason = '') => results.set(action.key, { status, reason, action });
+        for (const target of plan.targets) {
+            const key = getMarketModKey(target);
+            if (plan.blocked.has(key)) setResult({ key, mod: target, role: '目标模组' }, 'skipped', plan.blocked.get(key));
+        }
+        const failedDependency = (key, seen = new Set()) => {
+            if (seen.has(key)) return null;
+            seen.add(key);
+            for (const dep of currentPlan.dependencies.get(key) || []) {
+                const result = results.get(dep);
+                if (result && result.status !== 'success') return result.action.mod.name;
+                const failed = failedDependency(dep, seen);
+                if (failed) return failed;
+            }
+            return null;
+        };
+        let stopped = false;
+        for (let index = 0; index < plan.actions.length; index++) {
+            let action = plan.actions[index];
+            if (stopped || options.shouldStop?.()) {
+                stopped = true;
+                setResult(action, 'skipped', '已停止后续安装');
+                continue;
+            }
+            options.onProgress?.(action, index, plan.actions.length);
+            try {
+                await refresh();
+                currentPlan = options.getPlan?.() || plan;
+                const currentAction = currentPlan.actions.find(item => item.key === action.key);
+                if (!currentAction) {
+                    setResult(action, 'skipped', currentPlan.blocked.get(action.key) || '已从当前安装计划移除');
+                    continue;
+                }
+                action = currentAction;
+                const dependency = failedDependency(action.key);
+                if (dependency) {
+                    setResult(action, 'skipped', `前置【${dependency}】未完成`);
+                    continue;
+                }
+                if (options.confirm && !await options.confirm(plan, action, results)) {
+                    setResult(action, 'skipped', '已取消冲突风险确认');
+                    stopped = true;
+                    continue;
+                }
+                // 快捷禁用可改变当前动作和依赖边，确认后不能继续执行旧的启用任务。
+                currentPlan = options.getPlan?.() || plan;
+                const confirmedAction = currentPlan.actions.find(item => item.key === action.key);
+                if (!confirmedAction) {
+                    setResult(action, 'skipped', currentPlan.blocked.get(action.key) || '已从当前安装计划移除');
+                    continue;
+                }
+                action = confirmedAction;
+                let ok = action.type === 'enable' ? await enable(action) : await install(action);
+                const reportedChange = ok === true;
+                if (reportedChange && action.type !== 'enable') changedMods.add(action.mod.name);
+                if (action.type === 'enable' || (ok === true && action.enableAfter)) {
+                    await refresh();
+                    if (action.type !== 'enable' && !isEnabled(action)) {
+                        await enable(action);
+                        await refresh();
+                    }
+                    ok = isEnabled(action);
+                    if (ok && reportedChange && action.type === 'enable') changedMods.add(action.mod.name);
+                }
+                if (ok === true) {
+                    setResult(action, 'success');
+                } else {
+                    setResult(action, 'failed', action.failureReason || '操作未完成或已取消');
+                }
+            } catch (error) {
+                setResult(action, 'failed', error?.message || String(error));
+            }
+        }
+        for (const mod of plan.targets) {
+            const key = getMarketModKey(mod);
+            if (!results.has(key)) setResult({ key, mod, role: '目标模组' }, 'skipped', '本地已安装，无需重复安装');
+        }
+        return { results, changedMods };
+    }
+
+    let marketInstallBusy = false;
+    async function runMarketInstallTask(task) {
+        if (marketInstallBusy) {
+            window.dolOptShowToast('已有市场安装任务，请等待完成后再试', 'warning');
+            return false;
+        }
+        marketInstallBusy = true;
+        try { return await task(); }
+        finally { marketInstallBusy = false; }
+    }
+
+    function formatBatchInstallPlanHtml(originalTargets, activeTargets, plan, mirrorId) {
+        const escape = window.dolOptEscapeHtml;
+        const labels = { install: '将安装', update: '将更新', enable: '将启用' };
+        const targets = originalTargets.map(mod => {
+            const key = getMarketModKey(mod), reason = plan.blocked.get(key);
+            const required = getModDependencies(mod).map(dependency => {
+                const entry = marketModList.find(item => [item.id, item.identityId].some(id => String(id || '').toLowerCase() === dependency.id.toLowerCase()));
+                return { key: entry ? getMarketModKey(entry) : dependency.id, text: `${entry?.name || dependency.id}${dependency.version ? `（${dependency.version}）` : ''}` };
+            });
+            for (const req of plan.requirements) {
+                if (req.key !== key && req.requiredBy.includes(mod.name) && !required.some(item => item.key === req.key)) required.push({ key: req.key, text: req.mod.name });
+            }
+            return `<label class="dol-opt-dep-item dol-opt-dep-actionable"><input type="checkbox" class="dol-opt-dep-checkbox" name="dolOptBatchTarget" data-key="${escape(key)}" ${activeTargets.has(key) ? 'checked' : ''}><span class="dol-opt-dep-content"><span class="gold">${escape(mod.name)}</span>${required.length ? `<span class="dol-opt-batch-target-dependencies grey">需要前置：${escape(required.map(item => item.text).join('、'))}</span>` : ''}${reason ? `<span class="red">${escape(reason)}</span>` : ''}</span></label>`;
+        }).join('');
+        const dependencies = plan.requirements.filter(req => !req.isTarget).map(req => {
+            const action = plan.actions.find(item => item.key === req.key);
+            const problem = plan.unavailable.find(item => getMarketModKey(item.mod) === req.key);
+            if (req.satisfied && !req.skipped && !problem) {
+                return `<div class="dol-opt-dep-item dol-opt-dep-satisfied"><span class="dol-opt-dep-bullet green" aria-hidden="true">•</span><span class="dol-opt-dep-content"><span class="dol-opt-dep-name">${escape(req.mod.name)}</span><span class="green">已满足，无需下载</span><span class="grey">影响：${escape(req.requiredBy.join('、'))}</span></span></div>`;
+            }
+            const status = req.skipped ? '自行处理，可能无法运行' : (problem?.reason || (action ? `${labels[action.type]}${action.enableAfter ? '并启用' : ''}` : '随所属目标跳过'));
+            return `<label class="dol-opt-dep-item dol-opt-dep-actionable"><input type="checkbox" class="dol-opt-dep-checkbox" name="dolOptBatchDependency" data-key="${escape(req.key)}" ${req.skipped ? '' : 'checked'}><span class="dol-opt-dep-content"><span class="gold">${escape(req.mod.name)}</span><span class="grey">影响：${escape(req.requiredBy.join('、'))}</span><span class="${req.skipped || problem ? 'red' : 'grey'}">${escape(status)}</span></span></label>`;
+        }).join('');
+        return `${formatConflictWarningHtml(detectModInstallationConflicts(null, plan.actions))}${dependencies ? `<div class="dol-opt-install-dependencies"><strong class="gold">前置依赖（需要处理的项目默认勾选，可取消）</strong>${dependencies}</div>` : ''}<div class="dol-opt-install-dependencies"><strong class="gold">所选目标</strong><div class="dol-opt-batch-target-list" role="group" aria-label="所选目标，可上下滚动" tabindex="0">${targets}</div></div><div class="dol-opt-batch-summary grey"><div>将串行处理 <strong class="gold">${plan.actions.length} 项操作</strong>；不可执行的目标会跳过。</div><div>下载线路：<strong class="gold">${escape(resolveMirrorServer(mirrorId).name)}</strong></div></div>`;
+    }
+
+    function batchConflictKey(conflict) {
+        // 同一对模组从待安装变成本地已安装时，沿用玩家刚确认的风险。
+        return `${conflict.ruleId}:${[conflict.incomingMod.groupName || normalizeKey(conflict.incomingMod.name),
+            conflict.localConflictMod.groupName || normalizeKey(conflict.localConflictMod.name)].sort().join(':')}`;
+    }
+
+    async function installSelectedMods() {
+        return runMarketInstallTask(async () => {
+            const originalTargets = marketModList.filter(mod => batchInstallState.selected.has(getMarketModKey(mod)) && isBatchInstallEligible(mod));
+            if (!originalTargets.length) {
+                window.dolOptShowToast('请先选择尚未安装的模组', 'info');
+                return false;
+            }
+            const mirrorId = currentMirrorId;
+            if (resolveMirrorServer(mirrorId).browserOnly) {
+                await window.dolOptAlert('当前线路仅支持浏览器下载，请切换到加速通道再批量安装。', '当前线路不支持批量安装');
+                return false;
+            }
+            Object.assign(batchInstallState, { running: true, stopRequested: false, completed: 0, total: 0, current: '生成安装计划' });
+            renderMarketCards();
+            const activeTargets = new Set(originalTargets.map(getMarketModKey));
+            const skippedDependencies = new Set(), releaseInfos = new Map(), excluded = new Map(), changedMods = new Set();
+            const getPlan = () => buildBatchInstallPlan(originalTargets.filter(mod => activeTargets.has(getMarketModKey(mod))),
+                marketModList, getLocalInstalledProfiles(), undefined, skippedDependencies, releaseInfos, excluded);
+            const getAffectedTargets = name => [...new Set(getPlan().requirements.filter(req => req.mod._matchedLocal?.name === name).flatMap(req => req.requiredBy))];
+            const onChanged = name => {
+                changedMods.add(name);
+                for (const req of getPlan().requirements) {
+                    if (!req.isTarget && req.mod._matchedLocal?.name === name) skippedDependencies.add(req.key);
+                }
+            };
+            let outcome = null;
+            try {
+                await window.dolOptLoadModManageState?.(true);
+                const prepareDownloads = async downloads => {
+                    batchInstallState.total = downloads.length;
+                    for (const [index, action] of downloads.entries()) {
+                        if (batchInstallState.stopRequested) break;
+                        Object.assign(batchInstallState, { current: `读取【${action.mod.name}】安装包`, completed: index });
+                        renderBatchInstallToolbar();
+                        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+                        if (controller) activeDownloadControllers.set(action.mod.name, controller);
+                        updateDownloadProgress(action.mod.name, null, '正在读取安装包清单...');
+                        try {
+                            let release = await fetchModRelease(action.mod, { useCache: true, signal: controller?.signal });
+                            if (release.requiresManualSelection) {
+                                const choice = await window.dolOptConfirm({
+                                    title: `选择【${action.mod.name}】的安装包`,
+                                    message: `${release.selectionReason || '请选择适合当前游戏的安装包。'}\n取消将跳过此项及依赖它的模组。`,
+                                    selectLabel: '主安装包', selectOptions: getManualAssetOptions(release), selectValue: '',
+                                    requireSelection: true, confirmText: '使用所选包', cancelText: '跳过此项', confirmType: 'primary'
+                                });
+                                release = applyManualAssetSelection(release, choice);
+                                if (!release) throw new Error('已取消安装包选择');
+                            }
+                            if (!getReleaseInstallAssets(release).length) throw new Error('没有可自动安装的发布包，请单独处理');
+                            releaseInfos.set(action.key, release);
+                        } catch (error) {
+                            excluded.set(action.key, error?.name === 'AbortError' ? '已取消安装包读取' : (error?.message || '读取安装包失败'));
+                        } finally {
+                            if (activeDownloadControllers.get(action.mod.name) === controller) activeDownloadControllers.delete(action.mod.name);
+                            resetDownloadProgress(action.mod.name);
+                        }
+                    }
+                };
+                await prepareDownloads(getPlan().allActions.filter(action => action.type !== 'enable'));
+                if (batchInstallState.stopRequested) {
+                    outcome = { results: new Map(originalTargets.map(mod => [getMarketModKey(mod), {
+                        status: 'skipped', reason: '已停止后续安装', action: { mod, role: '目标模组' }
+                    }])) };
+                } else {
+                    batchInstallState.current = '核对安装清单';
+                    renderBatchInstallToolbar();
+                    const planHtml = () => formatBatchInstallPlanHtml(originalTargets, activeTargets, getPlan(), mirrorId);
+                    let pendingPlanChange = null;
+                    const confirmPlan = () => window.dolOptConfirm({
+                        title: '批量安装确认', message: '请核对所选目标、前置依赖和兼容性警告。',
+                        trustedMessageHtml: `<div id="dolOptBatchPlan">${planHtml()}</div>`,
+                        dialogClass: 'dol-opt-install-dialog', confirmText: '开始批量安装', cancelText: '取消', confirmType: 'primary',
+                        onRender: dialog => {
+                            const area = dialog.querySelector('#dolOptBatchPlan');
+                            const render = () => {
+                                const scrollTop = area.querySelector('.dol-opt-batch-target-list')?.scrollTop || 0;
+                                area.innerHTML = planHtml();
+                                const targetList = area.querySelector('.dol-opt-batch-target-list');
+                                if (targetList) targetList.scrollTop = scrollTop;
+                                area.querySelectorAll('input[name="dolOptBatchTarget"], input[name="dolOptBatchDependency"]').forEach(input => {
+                                    input.onchange = () => {
+                                        const set = input.name === 'dolOptBatchTarget' ? activeTargets : skippedDependencies;
+                                        const add = input.name === 'dolOptBatchTarget' ? input.checked : !input.checked;
+                                        if (add) set.add(input.dataset.key); else set.delete(input.dataset.key);
+                                        render();
+                                        Array.from(area.querySelectorAll('input')).find(next => next.name === input.name && next.dataset.key === input.dataset.key)?.focus({ preventScroll: true });
+                                    };
+                                });
+                                area.querySelectorAll('.dol-opt-conflict-disable-btn').forEach(button => {
+                                    button.onclick = async () => {
+                                        if (pendingPlanChange) return;
+                                        button.disabled = true;
+                                        pendingPlanChange = (async () => {
+                                            try {
+                                                if (await disableInstallConflict(button.dataset.conflictRaw, button.dataset.conflictName, getAffectedTargets(button.dataset.conflictRaw))) onChanged(button.dataset.conflictRaw);
+                                            } catch (error) { window.dolOptShowToast(error.message || '快捷禁用失败', 'warning'); }
+                                        })();
+                                        await pendingPlanChange;
+                                        pendingPlanChange = null;
+                                        render();
+                                    };
+                                });
+                            };
+                            render();
+                        }
+                    });
+                    let choice;
+                    while (true) {
+                        choice = await confirmPlan();
+                        if (pendingPlanChange) await pendingPlanChange;
+                        if (!choice || batchInstallState.stopRequested) break;
+                        await window.dolOptLoadModManageState?.(true);
+                        const newDownloads = getPlan().actions.filter(action => action.type !== 'enable'
+                            && !releaseInfos.has(action.key) && !excluded.has(action.key));
+                        if (!newDownloads.length) break;
+                        // 改勾选可能恢复原先受阻的分支，先补齐真实发布信息再让玩家核对。
+                        await prepareDownloads(newDownloads);
+                        batchInstallState.current = '核对更新后的安装清单';
+                        renderBatchInstallToolbar();
+                    }
+                    if (choice && !batchInstallState.stopRequested) {
+                        await window.dolOptLoadModManageState?.(true);
+                        if (await confirmInstallConflicts(() => ({ targetMod: null, actions: getPlan().actions }), { onChanged, getAffectedTargets })) {
+                            const plan = getPlan();
+                            const approved = new Set(detectModInstallationConflicts(null, plan.actions).filter(item => item.localConflictMod.isEnabled).map(batchConflictKey));
+                            const approvedActions = new Set(plan.actions.map(action => `${action.key}:${action.type}`));
+                            outcome = await executeBatchInstallPlan(plan, {
+                                releaseInfos,
+                                getPlan,
+                                shouldStop: () => batchInstallState.stopRequested,
+                                onProgress: (action, index, total) => {
+                                    Object.assign(batchInstallState, { current: action.mod.name, completed: index, total });
+                                    renderBatchInstallToolbar();
+                                },
+                                confirm: async (_plan, action, results) => {
+                                    const remaining = () => {
+                                        const current = getPlan();
+                                        if (current.blocked.has(action.key)) throw new Error(current.blocked.get(action.key));
+                                        const actions = current.actions.filter(item => !results.has(item.key));
+                                        if (actions.some(item => !approvedActions.has(`${item.key}:${item.type}`))) throw new Error('前置状态已改变，请重新生成安装计划');
+                                        return { targetMod: null, actions };
+                                    };
+                                    const conflicts = detectModInstallationConflicts(null, remaining().actions).filter(item => item.localConflictMod.isEnabled);
+                                    if (!conflicts.some(item => !approved.has(batchConflictKey(item)))) return true;
+                                    if (!await confirmInstallConflicts(remaining, { onChanged, getAffectedTargets })) return false;
+                                    detectModInstallationConflicts(null, remaining().actions).forEach(item => approved.add(batchConflictKey(item)));
+                                    return true;
+                                }
+                            });
+                            outcome.changedMods.forEach(name => changedMods.add(name));
+                        }
+                    }
+                }
+            } catch (error) {
+                await window.dolOptAlert(error?.message || String(error), '批量安装未完成');
+            } finally {
+                batchInstallState.running = false;
+                batchInstallState.current = '';
+                batchInstallState.completed = batchInstallState.total;
+                if (outcome) for (const [key, result] of outcome.results) if (result.status === 'success') batchInstallState.selected.delete(key);
+                renderMarketCards();
+            }
+            const targets = outcome ? [...outcome.results.values()].filter(result => result.action.role === '目标模组') : [];
+            const count = status => targets.filter(result => result.status === status).length;
+            const dependencies = outcome ? [...outcome.results.values()].filter(result => result.action.role !== '目标模组') : [];
+            const summary = outcome
+                ? `目标模组：成功 ${count('success')} 个，失败 ${count('failed')} 个，跳过 ${count('skipped')} 个。\n前置处理：成功 ${dependencies.filter(result => result.status === 'success').length} 项，未完成 ${dependencies.filter(result => result.status !== 'success').length} 项。\n\n${[...outcome.results.values()].filter(result => result.status !== 'success').map(result => `· ${result.action.mod.name}：${result.reason}`).join('\n')}`
+                : '批量安装已取消。';
+            if (changedMods.size) {
+                const isFramework = [...changedMods].some(name => window.dolOptIsFrameworkMod?.(name));
+                if (typeof window.dolOptOfferReload === 'function') await window.dolOptOfferReload(summary, { isFramework });
+                else {
+                    const restart = await window.dolOptConfirm({ title: '批量安装结果', message: `${summary}\n\n是否立即重新载入游戏？`, confirmText: '立即重载', cancelText: '稍后重载', confirmType: 'primary' });
+                    if (restart) location.reload();
+                }
+            } else if (outcome) await window.dolOptAlert(summary, '批量安装结果');
+            return outcome || false;
+        });
+    }
+
     // ==================== 模组兼容性与冲突检测 ====================
 
     /** 已知模组冲突与兼容性互斥规则库 */
@@ -2097,7 +2641,9 @@
                 candidates.push(...modOrName.normalizedNames);
             }
             if (modOrName.githubUrl) {
-                candidates.push(modOrName.githubUrl);
+                // 仓库仅匹配完整身份，作者名包含框架名不代表该模组就是框架。
+                const repository = extractRepoKey(modOrName.githubUrl);
+                if (repository && (group.aliases || []).some(alias => String(alias).toLowerCase() === repository)) return true;
             }
         }
 
@@ -2301,21 +2847,29 @@
 
         // 即将引入的候选模组列表
         const incomingItems = [];
+        const incomingByKey = new Map();
+        const incomingLocalKeys = new Map();
+        const modKey = mod => String(mod?.identityId || mod?.id || normalizeKey(mod?.name)).toLowerCase();
+        const addIncoming = (mod, role, actionType, local) => {
+            const key = modKey(mod);
+            if (!mod || !key) return;
+            const localName = local?.name || mod._matchedLocal?.name;
+            if (localName) incomingLocalKeys.set(normalizeKey(localName), key);
+            const existing = incomingByKey.get(key);
+            if (existing) {
+                if (role === '目标模组') existing.role = role;
+                return;
+            }
+            const item = { mod, key, name: mod.name || role, role, actionType };
+            incomingByKey.set(key, item);
+            incomingItems.push(item);
+        };
         if (targetMod) {
-            incomingItems.push({
-                mod: targetMod,
-                name: targetMod.name || '目标模组',
-                role: '目标模组'
-            });
+            addIncoming(targetMod, '目标模组');
         }
         (candidateActions || []).forEach(action => {
             if (action?.mod) {
-                incomingItems.push({
-                    mod: action.mod,
-                    name: action.mod.name || '前置依赖',
-                    role: '前置依赖',
-                    actionType: action.type
-                });
+                addIncoming(action.mod, action.role || '前置依赖', action.type, action.local);
             }
         });
 
@@ -2337,11 +2891,14 @@
 
                 for (const profile of profiles || []) {
                     if (isModMatchingConflictGroup(profile, opponentGroup)) {
+                        const localKey = incomingLocalKeys.get(normalizeKey(profile.name)) || modKey(profile);
+                        // 已在安装集合中的本地项统一由内部互斥检查展示，避免重复或误示可快捷消除。
+                        if (incomingByKey.has(localKey)) continue;
                         const localNames = [profile.name, ...(profile.displayNames || [])];
                         const isLocalDisabled = localNames.some(n => disabled.has(normalizeKey(n)));
                         const isLocalEnabled = !isLocalDisabled;
 
-                        const conflictKey = `${rule.id}:${normalizeKey(incoming.name)}:${normalizeKey(profile.name)}`;
+                        const conflictKey = `${rule.id}:local:${incoming.key}:${localKey}`;
                         if (!seenConflictKeys.has(conflictKey)) {
                             seenConflictKeys.add(conflictKey);
                             const incomingDisplayName = resolveConflictModDisplayName(incoming.mod, matchedIncomingGroup);
@@ -2350,11 +2907,13 @@
                             conflicts.push({
                                 ruleId: rule.id,
                                 incomingMod: {
+                                    key: incoming.key,
                                     name: incomingDisplayName,
                                     role: incoming.role,
                                     groupName: matchedIncomingGroup.name
                                 },
                                 localConflictMod: {
+                                    key: localKey,
                                     name: localDisplayName,
                                     rawName: profile.name,
                                     groupName: opponentGroup.name,
@@ -2380,7 +2939,7 @@
                     const item2MatchesB = isModMatchingConflictGroup(item2.mod, groupB);
 
                     if ((item1MatchesA && item2MatchesB) || (item1MatchesB && item2MatchesA)) {
-                        const conflictKey = `${rule.id}:internal:${normalizeKey(item1.name)}:${normalizeKey(item2.name)}`;
+                        const conflictKey = `${rule.id}:internal:${[item1.key, item2.key].sort().join(':')}`;
                         if (!seenConflictKeys.has(conflictKey)) {
                             seenConflictKeys.add(conflictKey);
                             const item1Group = item1MatchesA ? groupA : groupB;
@@ -2391,11 +2950,13 @@
                             conflicts.push({
                                 ruleId: rule.id,
                                 incomingMod: {
+                                    key: item1.key,
                                     name: item1DisplayName,
                                     role: item1.role,
                                     groupName: item1Group.name
                                 },
                                 localConflictMod: {
+                                    key: item2.key,
                                     name: item2DisplayName,
                                     rawName: item2.name,
                                     groupName: item2Group.name,
@@ -2487,9 +3048,129 @@
         `;
     }
 
+    async function disableInstallConflict(rawName, displayName, pendingTargets = []) {
+        if (!rawName || typeof window.dolOptToggleSideMod !== 'function') return false;
+        await window.dolOptLoadModManageState?.(true);
+        const affectedMods = findDependentModsForConflict(rawName);
+        const affectedText = affectedMods.map(item => `· 【${item.name}】${item.version ? ` (${item.version})` : ''}`).join('\n');
+        const escape = window.dolOptEscapeHtml;
+        const localHtml = affectedMods.map(item => `<div class="dol-opt-modal-affected-item"><strong class="gold">${escape(item.name)}</strong>${item.version ? ` <span class="grey">(${escape(item.version)})</span>` : ''}</div>`).join('');
+        const pendingHtml = pendingTargets.map(name => `<div class="dol-opt-modal-affected-item"><strong class="gold">${escape(name)}</strong></div>`).join('');
+        const confirmed = await window.dolOptConfirm({
+            title: `确认快捷禁用【${displayName}】？`,
+            message: affectedMods.length
+                ? `禁用【${displayName}】后，以下依赖该框架的模组可能会受到影响或无法正常运行：\n\n${affectedText}\n\n是否仍然确认禁用？`
+                : `确定要禁用【${displayName}】吗？\n禁用后会重新检查安装计划。`,
+            trustedMessageHtml: `<div class="dol-opt-modal-intro">将禁用 <strong class="red">【${escape(displayName)}】</strong>。依赖它的模组可能无法正常运行。</div>${localHtml ? `<div class="dol-opt-modal-affected-box"><strong>本地受影响模组（${affectedMods.length}）</strong>${localHtml}</div>` : '<p class="grey">未发现依赖它的本地已启用模组。</p>'}${pendingHtml ? `<div class="dol-opt-modal-affected-box"><strong>本次安装受影响目标（${pendingTargets.length}）</strong>${pendingHtml}</div><p class="grey">本次将取消该前置的自动处理，保持禁用；上述目标需要你自行处理前置后才能正常运行。</p>` : ''}<div class="dol-opt-modal-question grey">禁用后将重新读取本地状态并检查兼容性。是否确认禁用？</div>`,
+            dialogClass: 'dol-opt-install-dialog',
+            confirmText: '确认禁用',
+            cancelText: '暂不禁用',
+            confirmType: affectedMods.length || pendingTargets.length ? 'danger' : 'warning'
+        });
+        if (!confirmed) return false;
+        const result = await window.dolOptToggleSideMod(rawName, false, { silentOfferReload: true, skipConfirm: true });
+        if (result !== true) return false;
+        await window.dolOptLoadModManageState?.(true);
+        const state = window._dolOptModState;
+        const local = state?.sideMods?.find(item => item.name === rawName);
+        const disabled = local ? local.enabled === false : (state?.sideDisabled || []).includes(rawName);
+        if (!disabled) {
+            window.dolOptShowToast(`未能确认【${displayName}】已禁用，请检查模组管理状态`, 'warning');
+            return false;
+        }
+        window.dolOptShowToast(`已快捷禁用【${displayName}】，正在重新检查安装计划`, 'success');
+        return true;
+    }
+
+    /** 单装和批量安装共用；每次读取当前计划，避免快捷禁用后误报冲突消除。 */
+    async function confirmInstallConflicts(getActivePlan, options = {}) {
+        const readConflicts = () => {
+            const plan = getActivePlan();
+            return detectModInstallationConflicts(plan.targetMod, plan.actions);
+        };
+        const activeConflicts = conflicts => conflicts.filter(item => item.localConflictMod?.isIncoming || item.localConflictMod?.isEnabled);
+        const signature = conflicts => activeConflicts(conflicts).map(item => {
+            const incomingKey = item.incomingMod.key || normalizeKey(item.incomingMod.name);
+            const otherKey = item.localConflictMod.key || normalizeKey(item.localConflictMod.rawName);
+            const pair = item.localConflictMod.isIncoming ? [incomingKey, otherKey].sort() : [incomingKey, otherKey];
+            return `${item.ruleId}:${item.localConflictMod.isIncoming ? 'internal' : 'local'}:${pair.join(':')}`;
+        }).sort().join('|');
+
+        while (true) {
+            const initialConflicts = readConflicts();
+            const initialSignature = signature(initialConflicts);
+            if (!initialSignature) return true;
+            let pendingChange = null;
+            let clearedRisk = false;
+            const choice = await window.dolOptConfirm({
+                title: '模组冲突风险确认',
+                message: '检测到本次安装与本地模组或安装项之间存在已知兼容性冲突。同时启用可能导致脚本报错、界面错乱或存档损坏。是否确认继续安装？',
+                trustedMessageHtml: `<div class="dol-opt-install-conflict-review">${formatConflictWarningHtml(initialConflicts)}</div><div class="dol-opt-modal-conflict-question grey">同时启用互斥模组可能导致脚本报错、界面错乱或存档损坏。是否确认继续安装？</div>`,
+                dialogClass: 'dol-opt-install-dialog',
+                confirmText: '继续安装',
+                cancelText: '取消安装',
+                confirmType: 'danger',
+                confirmDelay: 5,
+                onRender: dialog => {
+                    const area = dialog.querySelector('.dol-opt-install-conflict-review');
+                    const render = () => {
+                        const conflicts = readConflicts();
+                        if (area) area.innerHTML = formatConflictWarningHtml(conflicts) || '<div class="green">当前安装计划的已知冲突已排除。</div>';
+                        const hasActive = activeConflicts(conflicts).length > 0;
+                        if (!hasActive) {
+                            clearedRisk = true;
+                            dialog.dolOptClearDelay?.();
+                            const button = dialog.querySelector('.dol-opt-modal-btn-confirm');
+                            if (button) {
+                                button.className = button.className.replace(/\bdol-opt-btn-danger\b/, 'dol-opt-btn-primary');
+                                button.textContent = '确认安装';
+                            }
+                            const question = dialog.querySelector('.dol-opt-modal-conflict-question');
+                            if (question) question.textContent = '当前安装计划的已知冲突已排除，确认后继续安装。';
+                        }
+                        area?.querySelectorAll('.dol-opt-conflict-disable-btn').forEach(button => {
+                            button.onclick = async event => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (pendingChange) return;
+                                const rawName = button.dataset.conflictRaw;
+                                const current = readConflicts().find(item => !item.localConflictMod.isIncoming && item.localConflictMod.isEnabled && item.localConflictMod.rawName === rawName);
+                                if (!current) return render();
+                                button.disabled = true;
+                                const change = (async () => {
+                                    try {
+                                        if (await disableInstallConflict(rawName, current.localConflictMod.name, options.getAffectedTargets?.(rawName))) {
+                                            await options.onChanged?.(rawName);
+                                        }
+                                    } catch (error) {
+                                        console.error('[dolModMarket] 快捷禁用冲突模组失败:', error);
+                                        window.dolOptShowToast('快捷禁用未完成，请检查模组管理器状态', 'warning');
+                                    }
+                                })();
+                                pendingChange = change;
+                                await change;
+                                pendingChange = null;
+                                render();
+                            };
+                        });
+                    };
+                    render();
+                },
+                customResult: () => ({ ready: !pendingChange })
+            });
+            if (pendingChange) await pendingChange;
+            if (!choice) return false;
+            const currentSignature = signature(readConflicts());
+            if (!currentSignature) return true;
+            // 弹窗期间新增或改变的活跃风险必须重新展示并完成倒计时确认。
+            if (!clearedRisk && choice.ready !== false && currentSignature === initialSignature) return true;
+        }
+    }
+
     // ==================== 下载与一键安装 ====================
 
     const activeDownloadControllers = new Map();
+    const downloadProgressState = new Map();
 
     function cancelDownload(modName) {
         const controller = activeDownloadControllers.get(modName);
@@ -2499,6 +3180,7 @@
     }
 
     function updateDownloadProgress(modName, percent, text, state = 'active') {
+        downloadProgressState.set(modName, { percent, text, state });
         const cards = Array.from(document.querySelectorAll?.('.dol-opt-market-card') || []);
         const card = cards.find(item => item.dataset.modName === modName);
         const progress = card?.querySelector('.dol-opt-download-progress');
@@ -2523,7 +3205,7 @@
         label.textContent = text;
         if (cancelButton) cancelButton.hidden = state !== 'active' || !activeDownloadControllers.has(modName);
         if (button) {
-            button.disabled = !['error', 'cancelled'].includes(state);
+            button.disabled = batchInstallState.running || !['error', 'cancelled'].includes(state);
             button.textContent = state === 'installing'
                 ? '正在安装'
                 : (state === 'error'
@@ -2533,6 +3215,7 @@
     }
 
     function resetDownloadProgress(modName) {
+        downloadProgressState.delete(modName);
         const cards = Array.from(document.querySelectorAll?.('.dol-opt-market-card') || []);
         const card = cards.find(item => item.dataset.modName === modName);
         const progress = card?.querySelector('.dol-opt-download-progress');
@@ -2549,7 +3232,7 @@
         if (label) label.textContent = '等待下载';
         if (cancelButton) cancelButton.hidden = true;
         if (button) {
-            button.disabled = false;
+            button.disabled = batchInstallState.running;
             button.textContent = button.dataset.idleText || '下载安装';
         }
     }
@@ -2615,10 +3298,11 @@
 
     async function downloadAndInstallMod(mod, mirrorId = currentMirrorId, options = {}) {
         if (!mod) return false;
+        const failBatch = reason => { options.onFailure?.(reason); return false; };
         const gui = window.dolOptGetGui ? window.dolOptGetGui() : null;
         if (!gui) {
             window.dolOptShowToast('未找到 ModLoader 运行时实例，无法自动安装', 'warning');
-            return false;
+            return failBatch('未找到 ModLoader 运行时实例');
         }
 
         const progressTargetName = options.progressTargetName || mod.name;
@@ -2641,6 +3325,7 @@
             if (releaseInfo.version) targetVersion = releaseInfo.version;
         } catch (err) {
             console.warn('[DolOptimization] 读取 Release 失败，尝试回退', err);
+            if (options.batchMode) return failBatch(err?.message || '读取发布包失败');
             if (err?.code === 'REPO_NOT_FOUND' || err?.status === 404 || mod._isDeadRepo || isDeadRepo(mod.githubUrl)) {
                 reportProgress(null, '模组仓库已被作者移除', 'error');
                 if (typeof window.dolOptAlert === 'function') {
@@ -2652,6 +3337,7 @@
         }
 
         if (releaseInfo?.requiresManualSelection) {
+            if (options.batchMode) return failBatch('需要重新选择兼容安装包');
             reportProgress(null, '需要手动选择兼容安装包', 'error');
             const selectedMirror = resolveMirrorServer(mirrorId);
             const choice = await window.dolOptConfirm({
@@ -2673,6 +3359,7 @@
         }
 
         if (!installAssets.length) {
+            if (options.batchMode) return failBatch('没有可自动安装的发布包');
             reportProgress(null, '未找到可直接下载的安装包', 'error');
             // 没有直接资源包，弹窗引导去网页下载
             const ok = await window.dolOptConfirm({
@@ -2730,7 +3417,7 @@
         };
 
         // GitHub Release 最终下载域不提供 CORS，直连只能交给浏览器下载后手动导入。
-        if (selectedMirror.browserOnly) return startBrowserDownload();
+        if (selectedMirror.browserOnly) return options.batchMode ? failBatch('当前线路只能手动下载') : startBrowserDownload();
 
         window.dolOptShowToast(`正在获取【${mod.name}】的 ${installAssets.length} 个安装包...`, 'warning');
 
@@ -2894,7 +3581,7 @@
             if (typeof window.dolOptWaitManagerIdle === 'function' && !await window.dolOptWaitManagerIdle()) {
                 clearActiveDownload();
                 reportProgress(null, '模组管理器正在保存其他配置，请稍后再试', 'error');
-                return false;
+                return failBatch('模组管理器正忙，请稍后重试');
             }
             if (typeof window.dolOptHandleAddMod === 'function') {
                 const installed = await window.dolOptHandleAddMod(dummyInput.files && dummyInput.files.length > 0 ? dummyInput : fileObjects, {
@@ -2905,11 +3592,11 @@
                     targetModName: mod._matchedLocal?.name || '',
                     displayName: mod.name || ''
                 });
-                if (installed === false) {
+                if (installed === false || (options.batchMode && installed !== true)) {
                     clearActiveDownload();
                     const reason = String(window._dolOptLastInstallError || '').trim();
                     reportProgress(null, reason ? `安装未完成：${reason}` : '安装未完成，请检查管理器提示后重试', 'error');
-                    return false;
+                    return failBatch(reason || '安装未完成');
                 }
             } else if (typeof window.dolOptInstallFilesViaIndexDB === 'function') {
                 await window.dolOptInstallFilesViaIndexDB(fileObjects);
@@ -2947,6 +3634,8 @@
 
             // 安装完毕后刷新市场 UI 状态
             clearActiveDownload();
+            resetDownloadProgress(mod.name);
+            if (progressTargetName !== mod.name) resetDownloadProgress(progressTargetName);
             try {
                 // 强制重读存储中的模组列表，确保刚安装的模组立刻出现在本地档案里
                 if (typeof window.dolOptLoadModManageState === 'function') {
@@ -2969,12 +3658,14 @@
                 resetDownloadProgress(mod.name);
                 if (progressTargetName !== mod.name) resetDownloadProgress(progressTargetName);
                 window.dolOptShowToast(`已取消【${mod.name}】的下载`, 'info');
-                return false;
+                return failBatch('已取消下载');
             }
             const isTooLarge = err?.code === 'FILE_TOO_LARGE';
             const isDigestFailure = ['DIGEST_MISMATCH', 'DIGEST_UNSUPPORTED', 'DIGEST_UNAVAILABLE'].includes(err?.code);
             console.warn('[DolOptimization] 页面内自动安装失败:', err);
             reportProgress(null, isDigestFailure ? '完整性校验失败，已阻止安装' : (isTooLarge ? '安装包较大，可改用浏览器下载' : '自动安装失败，请重试或改用浏览器下载'), 'error');
+
+            if (options.batchMode) return failBatch(err?.message || '下载或安装失败');
 
             if (isDigestFailure) {
                 if (typeof window.dolOptAlert === 'function') {
@@ -3021,12 +3712,14 @@
             if (cached && Array.isArray(cached) && cached.length > 0) {
                 applyIdentityCatalog(cached);
                 marketModList = cached;
+                renderBatchInstallToolbar();
                 return marketModList;
             }
         }
 
         try {
             marketModList = await fetchReleaseIndex();
+            renderBatchInstallToolbar();
             return marketModList;
         } catch (error) {
             console.warn('[DolOptimization] Cloudflare 自动版本索引不可用，尝试本地缓存或 Wiki', error);
@@ -3038,6 +3731,7 @@
             if (stale && Array.isArray(stale) && stale.length > 0) {
                 await identityPromise;
                 marketModList = stale;
+                renderBatchInstallToolbar();
                 return marketModList;
             }
         }
@@ -3061,11 +3755,13 @@
 
             marketModList = parseModsFromHtml(data.parse.text['*']);
             writeLocalCache(WIKI_CACHE_KEY, marketModList);
+            renderBatchInstallToolbar();
             return marketModList;
         } catch (error) {
             const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
             if (stale && Array.isArray(stale) && stale.length > 0) {
                 marketModList = stale;
+                renderBatchInstallToolbar();
                 return marketModList;
             }
             throw error;
@@ -3270,6 +3966,7 @@
 
         renderStatsHeader(marketModList.length, installedCount, updatableCount);
         renderIgnoredFilterLink(ignoredCount);
+        renderBatchInstallToolbar();
 
         // 同步通知外部模组管理环境看板与 Tab 徽标
         if (typeof window.dolOptNotifyUpdateState === 'function') {
@@ -3305,6 +4002,10 @@
             const isUpdatable = mod._status === 'update_available' && !isDead;
             const isIgnored = !!mod._isIgnored;
             const isPermanentlyIgnored = mod._ignoredVersion === 'ignored';
+            const selected = batchInstallState.selected.has(getMarketModKey(mod));
+            const selectionHtml = batchInstallState.selecting && isBatchInstallEligible(mod, profiles)
+                ? `<label class="dol-opt-market-select-label"><input type="checkbox" class="dol-opt-market-select" data-mod-key="${escapeHtml(getMarketModKey(mod))}" aria-label="选择${escapeHtml(mod.name)}" ${selected ? 'checked' : ''} ${batchInstallState.running ? 'disabled' : ''}>选择</label>`
+                : '';
 
             if (isDead) {
                 // 源已失效：统一采用红色标签醒目提示
@@ -3357,8 +4058,9 @@
                     : '');
 
             return `
-                <div class="childItem dol-opt-market-card ${isUpdatable ? 'dol-opt-market-card-updatable' : ''}" data-mod-name="${escapeHtml(mod.name)}" data-mod-index="${modIndex}">
+                <div class="childItem dol-opt-market-card ${isUpdatable ? 'dol-opt-market-card-updatable' : ''} ${selected ? 'is-batch-selected' : ''} ${selectionHtml ? 'is-batch-selectable' : ''}" data-mod-name="${escapeHtml(mod.name)}" data-mod-index="${modIndex}">
                     <div class="dol-opt-market-card-header">
+                        ${selectionHtml}
                         <div class="dol-opt-market-title-wrap">
                             <span class="dol-opt-market-title gold">${escapeHtml(mod.name)}</span>
                             ${badgeHtml}
@@ -3391,10 +4093,21 @@
         }).join('');
 
         container.innerHTML = html;
+        downloadProgressState.forEach((progress, name) => updateDownloadProgress(name, progress.percent, progress.text, progress.state));
 
         // 绑定卡片内按钮事件
+        container.querySelectorAll('.dol-opt-market-select').forEach(input => {
+            input.onchange = () => setBatchModSelected(input.dataset.modKey, input.checked);
+            const card = input.closest('.dol-opt-market-card');
+            if (card) card.onclick = event => {
+                if (input.disabled || batchInstallState.running || event.target.closest('a, button, input, label, select, textarea, summary, [role="button"], [contenteditable]')) return;
+                if (String(window.getSelection?.() || '')) return;
+                input.click();
+            };
+        });
         container.querySelectorAll('.btn-market-install, .btn-market-update').forEach(btn => {
             btn.onclick = async () => {
+                if (batchInstallState.running) return;
                 const targetMod = marketModList[Number(btn.dataset.modIndex)];
                 if (targetMod) {
                     await promptDownloadMirrorAndInstall(targetMod);
@@ -3466,14 +4179,33 @@
             };
         });
 
+        renderBatchInstallToolbar();
         updateToolbarResetBtn();
     }
 
     /** 弹窗开始下载 */
     async function promptDownloadMirrorAndInstall(mod) {
+        return runMarketInstallTask(() => promptDownloadMirrorAndInstallUnlocked(mod));
+    }
+
+    async function promptDownloadMirrorAndInstallUnlocked(mod) {
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
         const externalOnly = !mod.githubUrl && Boolean(mod.otherUrl);
-        const plan = buildDependencyPlan(mod);
+        let plan = buildDependencyPlan(mod);
+        const dependencyKey = item => String(item?.identityId || item?.id || normalizeKey(item?.name)).toLowerCase();
+        const skippedDependencyKeys = new Set();
+        const getActivePlan = () => {
+            plan = buildDependencyPlan(mod);
+            return { targetMod: mod, actions: plan.actions.filter(action => !skippedDependencyKeys.has(dependencyKey(action.mod))) };
+        };
+        const getAffectedTargets = name => {
+            getActivePlan();
+            return plan.requirements.some(req => req.mod._matchedLocal?.name === name) ? [mod.name] : [];
+        };
+        const onConflictDisabled = name => {
+            getActivePlan();
+            plan.requirements.filter(req => req.mod._matchedLocal?.name === name).forEach(req => skippedDependencyKeys.add(dependencyKey(req.mod)));
+        };
         if (plan.unavailable.length || plan.cycles.length) {
             const unavailableLines = plan.unavailable.map(item => {
                 const name = item.mod?.name || item.dependency.id;
@@ -3557,7 +4289,7 @@
             : [];
         const manualAssetOptions = releaseInfo?.requiresManualSelection ? getManualAssetOptions(releaseInfo) : [];
         const selectOptions = manualAssetOptions.length ? manualAssetOptions : companionOptions;
-        const dependencyHtml = formatDependencyListHtml(plan);
+        const dependencyHtml = plan.requirements.length ? `<div id="dolOptInstallDependencyArea">${formatDependencyListHtml(plan)}</div>` : '';
         const initialConflicts = detectModInstallationConflicts(mod, plan.actions);
         const conflictAreaHtml = `<div id="dolOptInstallConflictArea"${initialConflicts.length ? '' : ' style="display:none;"'}>${formatConflictWarningHtml(initialConflicts)}</div>`;
 
@@ -3571,6 +4303,7 @@
                 ? (externalOnly ? `一并处理（${initialActionCount}项依赖）` : `一键安装（含 ${initialActionCount} 项依赖）`)
                 : '开始安装');
 
+        let pendingConflictChange = null;
         const choice = await window.dolOptConfirm({
             title: externalOnly ? `处理【${mod.name}】的前置依赖` : `下载并安装【${mod.name}】`,
             message: actionLines.length
@@ -3586,190 +4319,83 @@
             selectValue: manualAssetOptions.length ? '' : (companionOptions.length ? 'none' : undefined),
             requireSelection: manualAssetOptions.length > 0,
             onRender: (dialog) => {
-                const depCheckboxes = dialog.querySelectorAll('input[name="dolOptDepReq"]');
+                const dependencyArea = dialog.querySelector('#dolOptInstallDependencyArea');
                 const confirmBtn = dialog.querySelector('.dol-opt-modal-btn-confirm');
                 const conflictArea = dialog.querySelector('#dolOptInstallConflictArea');
-
-                const bindConflictActionButtons = () => {
-                    if (!conflictArea) return;
-                    const disableBtns = conflictArea.querySelectorAll('.dol-opt-conflict-disable-btn');
-                    disableBtns.forEach(btn => {
-                        btn.onclick = async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            await handleDisableConflict(btn);
-                        };
-                    });
-                };
-
-                const handleDisableConflict = async (btn) => {
-                    const rawName = btn.dataset.conflictRaw;
-                    const displayName = btn.dataset.conflictName || rawName;
-                    if (!rawName) return;
-
-                    const affectedMods = findDependentModsForConflict(rawName);
-                    const escape = value => typeof window.dolOptEscapeHtml === 'function' ? window.dolOptEscapeHtml(String(value ?? '')) : String(value ?? '');
-
-                    let confirmProceed = false;
-                    if (affectedMods.length > 0) {
-                        const modItemsHtml = affectedMods.map(m => `
-                            <div class="dol-opt-modal-affected-item">
-                                · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}
-                            </div>
-                        `).join('');
-                        const modLinesText = affectedMods.map(m => `· 【${m.name}】${m.version ? ` (${m.version})` : ''}`).join('\n');
-
-                        confirmProceed = await window.dolOptConfirm({
-                            title: `确认快捷禁用【${displayName}】？`,
-                            message: `禁用【${displayName}】后，以下依赖该框架的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n是否仍然确认禁用？`,
-                            trustedMessageHtml: `
-                                <div class="dol-opt-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该框架的模组可能会受到影响或无法正常运行：</div>
-                                <div class="dol-opt-modal-affected-box">
-                                    ${modItemsHtml}
-                                </div>
-                                <div class="grey dol-opt-modal-question" style="margin-top:10px;">是否仍然确认禁用该冲突框架？</div>
-                            `,
-                            confirmText: '确认禁用',
-                            cancelText: '暂不禁用',
-                            confirmType: 'danger'
-                        });
-                    } else {
-                        confirmProceed = await window.dolOptConfirm({
-                            title: `确认快捷禁用【${displayName}】？`,
-                            message: `确定要禁用【${displayName}】吗？\n禁用后该框架将暂停加载，本次安装冲突风险将被排除。`,
-                            trustedMessageHtml: `
-                                <div>确定要禁用 <span class="gold">【${escape(displayName)}】</span> 吗？</div>
-                                <div class="grey" style="margin-top:6px;">禁用后该框架将暂停加载，本次安装冲突风险将被排除（后续可在【模组管理】中随时重新启用）。</div>
-                            `,
-                            confirmText: '确认禁用',
-                            cancelText: '取消',
-                            confirmType: 'warning'
-                        });
-                    }
-
-                    if (!confirmProceed) return;
-
-                    if (typeof window.dolOptToggleSideMod === 'function') {
-                        btn.disabled = true;
-                        btn.textContent = '正在禁用...';
-                        try {
-                            const toggleResult = await window.dolOptToggleSideMod(rawName, false, { silentOfferReload: true, skipConfirm: true });
-                            if (toggleResult !== false) {
-                                if (typeof window.dolOptShowToast === 'function') {
-                                    window.dolOptShowToast(`已快捷禁用【${displayName}】，冲突已排除`, 'success');
-                                }
-                                updateDepUi();
-                            } else {
-                                btn.disabled = false;
-                                btn.textContent = `快捷禁用【${escape(displayName)}】`;
-                            }
-                        } catch (err) {
-                            console.error('[dolModMarket] 快捷禁用冲突模组失败:', err);
-                            btn.disabled = false;
-                            btn.textContent = `快捷禁用【${escape(displayName)}】`;
-                        }
-                    }
-                };
-
                 const updateDepUi = () => {
-                    const checkedReqIndices = new Set();
-                    depCheckboxes.forEach(cb => {
-                        const row = cb.closest('.dol-opt-dep-item');
-                        const statusSpan = row?.querySelector('.dol-opt-dep-status');
-                        const reqIdx = Number(cb.dataset.reqIndex);
-                        if (cb.checked) {
-                            checkedReqIndices.add(reqIdx);
-                            if (statusSpan && statusSpan.dataset.activeText) {
-                                statusSpan.textContent = statusSpan.dataset.activeText;
-                                statusSpan.className = `dol-opt-dep-status ${statusSpan.dataset.activeColor || 'gold'}`;
-                            }
-                            row?.classList.remove('dol-opt-dep-skipped');
-                        } else {
-                            if (statusSpan) {
-                                statusSpan.textContent = statusSpan.dataset.skipText || '跳过处理';
-                                statusSpan.className = 'dol-opt-dep-status grey';
-                            }
+                    const activeActions = getActivePlan().actions;
+                    if (dependencyArea) dependencyArea.innerHTML = formatDependencyListHtml(plan);
+                    dialog.querySelectorAll('input[name="dolOptDepReq"]').forEach(checkbox => {
+                        const requirement = plan.requirements[Number(checkbox.dataset.reqIndex)];
+                        if (!requirement) return;
+                        const key = dependencyKey(requirement.mod);
+                        checkbox.checked = !skippedDependencyKeys.has(key);
+                        if (!checkbox.checked) {
+                            const row = checkbox.closest('.dol-opt-dep-item');
                             row?.classList.add('dol-opt-dep-skipped');
+                            const status = row?.querySelector('.dol-opt-dep-status');
+                            if (status) {
+                                status.textContent = status.dataset.skipText || '跳过处理';
+                                status.className = 'dol-opt-dep-status grey';
+                            }
                         }
+                        checkbox.addEventListener('change', () => {
+                            if (checkbox.checked) skippedDependencyKeys.delete(key);
+                            else skippedDependencyKeys.add(key);
+                            updateDepUi();
+                        });
                     });
-
-                    const activeActions = plan.actions.filter(action =>
-                        plan.requirements.some((req, idx) => (action.mod === req.mod || (Boolean(action.mod?.name) && action.mod.name === req.mod?.name)) && checkedReqIndices.has(idx))
-                    );
-
-                    // 动态冲突检测响应
-                    const currentConflicts = detectModInstallationConflicts(mod, activeActions);
+                    const conflicts = detectModInstallationConflicts(mod, activeActions);
                     if (conflictArea) {
-                        if (currentConflicts.length > 0) {
-                            conflictArea.innerHTML = formatConflictWarningHtml(currentConflicts);
-                            conflictArea.style.display = '';
-                            bindConflictActionButtons();
-                        } else if (initialConflicts.length > 0) {
-                            conflictArea.innerHTML = `
-                                <div class="dol-opt-conflict-cleared green">
-                                    已取消勾选冲突前置模组，本次安装冲突风险已排除。
-                                </div>
-                            `;
-                            conflictArea.style.display = '';
-                        } else {
-                            conflictArea.style.display = 'none';
-                        }
+                        conflictArea.innerHTML = formatConflictWarningHtml(conflicts);
+                        conflictArea.style.display = conflicts.length ? '' : 'none';
+                        conflictArea.querySelectorAll('.dol-opt-conflict-disable-btn').forEach(button => {
+                            button.onclick = async event => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                if (pendingConflictChange) return;
+                                button.disabled = true;
+                                pendingConflictChange = (async () => {
+                                    try {
+                                        if (await disableInstallConflict(button.dataset.conflictRaw, button.dataset.conflictName, getAffectedTargets(button.dataset.conflictRaw))) onConflictDisabled(button.dataset.conflictRaw);
+                                    } catch (error) {
+                                        console.error('[dolModMarket] 快捷禁用冲突模组失败:', error);
+                                        window.dolOptShowToast('快捷禁用未完成，请检查模组管理器状态', 'warning');
+                                    }
+                                })();
+                                await pendingConflictChange;
+                                pendingConflictChange = null;
+                                updateDepUi();
+                            };
+                        });
                     }
-
                     if (confirmBtn && !manualAssetOptions.length) {
-                        const hasActiveEnabledConflict = currentConflicts.some(c => c.localConflictMod?.isEnabled);
-                        if (hasActiveEnabledConflict) {
-                            confirmBtn.className = confirmBtn.className.replace(/\bdol-opt-btn-primary\b/, 'dol-opt-btn-danger');
-                        } else {
-                            confirmBtn.className = confirmBtn.className.replace(/\bdol-opt-btn-danger\b/, 'dol-opt-btn-primary');
-                        }
-
-                        const activeActionCount = activeActions.length;
-                        if (externalOnly) {
-                            confirmBtn.textContent = activeActionCount > 0
-                                ? `一并处理（${activeActionCount}项依赖）`
-                                : '直接打开下载页面';
-                        } else {
-                            confirmBtn.textContent = activeActionCount > 0
-                                ? `一键安装（含 ${activeActionCount} 项依赖）`
-                                : '开始安装';
-                        }
+                        const danger = conflicts.some(item => item.localConflictMod.isIncoming || item.localConflictMod.isEnabled);
+                        confirmBtn.className = confirmBtn.className.replace(/\bdol-opt-btn-(?:primary|danger)\b/, danger ? 'dol-opt-btn-danger' : 'dol-opt-btn-primary');
+                        confirmBtn.textContent = activeActions.length
+                            ? (externalOnly ? `一并处理（${activeActions.length}项依赖）` : `一键安装（含 ${activeActions.length} 项依赖）`)
+                            : (externalOnly ? '直接打开下载页面' : '开始安装');
                     }
                 };
-
-                depCheckboxes.forEach(cb => {
-                    cb.addEventListener('change', updateDepUi);
-                });
-
-                // 初始化冲突区域的快捷操作按钮事件
-                bindConflictActionButtons();
+                updateDepUi();
             },
             customResult: (dialog) => {
-                const allCheckboxes = Array.from(dialog.querySelectorAll('input[name="dolOptDepReq"]'));
-                let selectedReqIndices = null;
-                if (allCheckboxes.length > 0) {
-                    selectedReqIndices = new Set(
-                        allCheckboxes.filter(cb => cb.checked).map(cb => Number(cb.dataset.reqIndex))
-                    );
-                }
                 const selectEl = dialog.querySelector('.dol-opt-modal-select');
                 return {
-                    selectValue: selectOptions.length ? (selectEl?.value || '') : '',
-                    selectedReqIndices
+                    selectValue: selectOptions.length ? (selectEl?.value || '') : ''
                 };
             }
         });
 
+        if (pendingConflictChange) await pendingConflictChange;
         if (!choice) {
             resetDownloadProgress(mod.name);
             return false;
         }
 
         let selectValue = '';
-        let selectedReqIndices = null;
         if (typeof choice === 'object' && choice !== null) {
             selectValue = choice.selectValue;
-            selectedReqIndices = choice.selectedReqIndices;
         } else if (typeof choice === 'string') {
             selectValue = choice;
         }
@@ -3784,178 +4410,14 @@
             }
         }
 
-        const actionsToExecute = selectedReqIndices instanceof Set
-            ? plan.actions.filter(action => plan.requirements.some((req, idx) => (action.mod === req.mod || (Boolean(action.mod?.name) && action.mod.name === req.mod?.name)) && selectedReqIndices.has(idx)))
-            : plan.actions;
-
-        // 冲突风险二次确认拦截（仅当有活跃且本地已启用的冲突时提示）
-        const activeConflicts = detectModInstallationConflicts(mod, actionsToExecute);
-        const enabledConflicts = activeConflicts.filter(c => c.localConflictMod?.isEnabled);
-        if (enabledConflicts.length > 0) {
-            const escape = value => typeof window.dolOptEscapeHtml === 'function' ? window.dolOptEscapeHtml(String(value ?? '')) : String(value ?? '');
-            const conflictLines = enabledConflicts.map(c => `· 【${c.incomingMod.name}】与已启用的【${c.localConflictMod.name}】互斥`).join('\n');
-            const conflictItemsHtml = enabledConflicts.map(c => `
-                <div class="dol-opt-modal-conflict-item" style="display:flex; flex-direction:column; gap:4px;">
-                    <div>
-                        <span class="gold">【${escape(c.incomingMod.name)}】</span>
-                        <span class="grey">与已启用的</span>
-                        <span class="red">【${escape(c.localConflictMod.name)}】</span>
-                        <span class="grey">互斥</span>
-                    </div>
-                    <div class="dol-opt-conflict-action-row" style="margin-top:2px;">
-                        <button type="button" class="macro-button dol-opt-conflict-disable-btn" data-conflict-raw="${escape(c.localConflictMod.rawName)}" data-conflict-name="${escape(c.localConflictMod.name)}">
-                            快捷禁用【${escape(c.localConflictMod.name)}】
-                        </button>
-                    </div>
-                </div>
-            `).join('');
-
-            const conflictReasonsHtml = enabledConflicts.map(c => `
-                <div class="dol-opt-modal-conflict-reason-item">
-                    ${escape(c.reason || '两者底层挂钩机制互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。')}
-                </div>
-            `).join('');
-
-            const trustedMessageHtml = `
-                <div class="dol-opt-modal-conflict-intro">检测到即将安装的模组与本地存在已知兼容性冲突：</div>
-                <div class="dol-opt-modal-conflict-alert-box">
-                    <div class="dol-opt-modal-conflict-list">
-                        ${conflictItemsHtml}
-                    </div>
-                    <div class="dol-opt-modal-conflict-warning red">
-                        ${conflictReasonsHtml}
-                    </div>
-                </div>
-                <div class="dol-opt-modal-conflict-question grey">两者底层挂钩逻辑互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。<br>是否确认继续安装？</div>
-            `;
-
-            const proceed = await window.dolOptConfirm({
-                title: '模组冲突风险确认',
-                message: `检测到即将安装的模组与本地存在已知兼容性冲突：\n\n${conflictLines}\n\n两者底层挂钩逻辑互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。\n\n是否确认继续安装？`,
-                trustedMessageHtml,
-                confirmText: '继续安装',
-                cancelText: '取消安装',
-                confirmType: 'danger',
-                confirmDelay: 5,
-                onRender: (dialog) => {
-                    const disableBtns = dialog.querySelectorAll('.dol-opt-conflict-disable-btn');
-                    const disabledSet = new Set();
-
-                    disableBtns.forEach(btn => {
-                        btn.onclick = async (e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-
-                            const rawName = btn.dataset.conflictRaw;
-                            const displayName = btn.dataset.conflictName || rawName;
-                            if (!rawName) return;
-
-                            const affectedMods = findDependentModsForConflict(rawName);
-                            let confirmProceed = false;
-
-                            if (affectedMods.length > 0) {
-                                const modItemsHtml = affectedMods.map(m => `
-                                    <div class="dol-opt-modal-affected-item">
-                                        · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}
-                                    </div>
-                                `).join('');
-                                const modLinesText = affectedMods.map(m => `· 【${m.name}】${m.version ? ` (${m.version})` : ''}`).join('\n');
-
-                                confirmProceed = await window.dolOptConfirm({
-                                    title: `确认快捷禁用【${displayName}】？`,
-                                    message: `禁用【${displayName}】后，以下依赖该框架的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n是否仍然确认禁用？`,
-                                    trustedMessageHtml: `
-                                        <div class="dol-opt-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该框架的模组可能会受到影响或无法正常运行：</div>
-                                        <div class="dol-opt-modal-affected-box">
-                                            ${modItemsHtml}
-                                        </div>
-                                        <div class="grey dol-opt-modal-question" style="margin-top:10px;">是否仍然确认禁用该冲突框架？</div>
-                                    `,
-                                    confirmText: '确认禁用',
-                                    cancelText: '暂不禁用',
-                                    confirmType: 'danger'
-                                });
-                            } else {
-                                confirmProceed = await window.dolOptConfirm({
-                                    title: `确认快捷禁用【${displayName}】？`,
-                                    message: `确定要禁用【${displayName}】吗？\n禁用后该框架将暂停加载，本次安装冲突风险将被排除。`,
-                                    trustedMessageHtml: `
-                                        <div>确定要禁用 <span class="gold">【${escape(displayName)}】</span> 吗？</div>
-                                        <div class="grey" style="margin-top:6px;">禁用后该框架将暂停加载，本次安装冲突风险将被排除。</div>
-                                    `,
-                                    confirmText: '确认禁用',
-                                    cancelText: '取消',
-                                    confirmType: 'warning'
-                                });
-                            }
-
-                            if (!confirmProceed) return;
-
-                            if (typeof window.dolOptToggleSideMod === 'function') {
-                                btn.disabled = true;
-                                btn.textContent = '正在禁用...';
-                                try {
-                                    const toggleResult = await window.dolOptToggleSideMod(rawName, false, { silentOfferReload: true, skipConfirm: true });
-                                    if (toggleResult !== false) {
-                                        disabledSet.add(rawName);
-                                        btn.closest('.dol-opt-conflict-action-row')?.remove();
-                                        if (typeof window.dolOptShowToast === 'function') {
-                                            window.dolOptShowToast(`已快捷禁用【${displayName}】，冲突已排除`, 'success');
-                                        }
-
-                                        // 若所有启用中的冲突模组都已禁用，转为绿色检查通过视觉
-                                        const remainingCount = enabledConflicts.filter(c => !disabledSet.has(c.localConflictMod.rawName)).length;
-                                        if (remainingCount === 0) {
-                                            if (typeof dialog.dolOptClearDelay === 'function') {
-                                                dialog.dolOptClearDelay();
-                                            }
-                                            const alertBox = dialog.querySelector('.dol-opt-modal-conflict-alert-box');
-                                            if (alertBox) {
-                                                alertBox.className = 'dol-opt-modal-conflict-alert-box is-resolved';
-                                                alertBox.innerHTML = `
-                                                    <div style="font-weight: bold; color: #4ade80; margin-bottom: 6px;">
-                                                        冲突模组已全部快捷禁用 · 风险已排除
-                                                    </div>
-                                                    <div class="grey" style="font-size: 0.9em; line-height: 1.4;">
-                                                        互斥冲突已安全排除，可安全安装目标模组。
-                                                    </div>
-                                                `;
-                                            }
-                                            const titleEl = dialog.querySelector('.dol-opt-modal-title');
-                                            if (titleEl) {
-                                                titleEl.className = 'gold dol-opt-modal-title';
-                                                titleEl.textContent = '冲突已排除 · 确认安装';
-                                            }
-                                            const questionEl = dialog.querySelector('.dol-opt-modal-conflict-question');
-                                            if (questionEl) {
-                                                questionEl.className = 'dol-opt-modal-conflict-question green';
-                                                questionEl.textContent = '冲突模组已禁用，风险已排除。点击下方按钮即可开始安装。';
-                                            }
-                                            const confirmBtn = dialog.querySelector('.dol-opt-modal-btn-confirm');
-                                            if (confirmBtn) {
-                                                confirmBtn.className = confirmBtn.className.replace(/\bdol-opt-btn-danger\b/, 'dol-opt-btn-primary');
-                                                confirmBtn.disabled = false;
-                                                confirmBtn.textContent = '确认安装';
-                                            }
-                                        }
-                                    } else {
-                                        btn.disabled = false;
-                                        btn.textContent = `快捷禁用【${escape(displayName)}】`;
-                                    }
-                                } catch (err) {
-                                    console.error('[dolModMarket] 快捷禁用冲突模组失败:', err);
-                                    btn.disabled = false;
-                                    btn.textContent = `快捷禁用【${escape(displayName)}】`;
-                                }
-                            }
-                        };
-                    });
-                }
-            });
-            if (!proceed) {
-                resetDownloadProgress(mod.name);
-                return false;
-            }
+        if (!await confirmInstallConflicts(getActivePlan, { onChanged: onConflictDisabled, getAffectedTargets })) {
+            resetDownloadProgress(mod.name);
+            return false;
+        }
+        const actionsToExecute = getActivePlan().actions;
+        if (plan.unavailable.length || plan.cycles.length) {
+            await window.dolOptAlert('本地模组状态已变化，前置依赖暂时无法满足。请重新检查后再安装。', '安装计划已变化');
+            return false;
         }
 
         if (!actionsToExecute.length) {
@@ -3976,7 +4438,18 @@
                     await window.dolOptAlert(`无法启用前置依赖【${action.mod.name}】，已停止安装目标模组。`, '安装已停止');
                     return false;
                 }
-                await window.dolOptToggleSideMod(action.local.name, true, { silentOfferReload: true });
+                const isEnabled = () => {
+                    const state = window._dolOptModState;
+                    const local = state?.sideMods?.find(item => item.name === action.local.name);
+                    return local ? local.enabled === true : (state?.sideEnabled || []).includes(action.local.name);
+                };
+                if (!isEnabled()) {
+                    const enabled = await window.dolOptToggleSideMod(action.local.name, true, { silentOfferReload: true });
+                    if (enabled !== true || !isEnabled()) {
+                        await window.dolOptAlert(`前置依赖【${action.mod.name}】未能启用，已停止安装目标模组。`, '安装已停止');
+                        return false;
+                    }
+                }
                 updateDownloadProgress(mod.name, 100, `${progressPrefix}已启用`);
                 continue;
             }
@@ -4110,6 +4583,8 @@
                 </div>
             </div>
 
+            <div id="dolOptMarketBatchToolbar" class="dol-opt-market-batch-toolbar" role="group" aria-label="模组多选安装"></div>
+
             <!-- ===== 模组卡片列表容器 ===== -->
             <div id="dolOptMarketCardsContainer" class="dol-opt-market-grid">
                 <div class="dol-opt-loading-box grey">
@@ -4117,6 +4592,7 @@
                 </div>
             </div>
         `;
+        renderBatchInstallToolbar();
 
         // 绑定搜索与筛选事件
         const searchInput = document.getElementById('dolOptMarketSearch');
@@ -4134,6 +4610,7 @@
         const refreshBtn = document.getElementById('dolOptMarketBtnRefresh');
         if (refreshBtn) {
             refreshBtn.onclick = async () => {
+                if (batchInstallState.running) return;
                 refreshBtn.disabled = true;
                 refreshBtn.textContent = '刷新中...';
                 window.dolOptShowToast('正在从 Wiki 抓取最新模组列表...', 'info');
@@ -4172,6 +4649,7 @@
         const mirrorSelect = document.getElementById('dolOptMirrorSelect');
         if (mirrorSelect) {
             mirrorSelect.onchange = () => {
+                if (batchInstallState.running) return;
                 setCurrentMirror(mirrorSelect.value);
             };
         }
@@ -4303,6 +4781,10 @@
 
     /** 一键全部批量更新 */
     async function updateAllMods() {
+        return runMarketInstallTask(() => updateAllModsUnlocked());
+    }
+
+    async function updateAllModsUnlocked() {
         const updatables = getUpdatableMods();
         if (!updatables.length) {
             window.dolOptShowToast('当前暂无可更新的模组', 'info');
@@ -4408,9 +4890,19 @@
         compareVersions,
         satisfiesVersion,
         buildDependencyPlan,
+        buildBatchInstallPlan,
+        executeBatchInstallPlan,
+        installSelectedMods,
         formatVersionDisplay,
         MIRROR_SERVERS,
         getUpdatableMods,
+        getMarketModKey,
+        isBatchInstallEligible,
+        getBatchSelectionState,
+        toggleBatchSelection,
+        selectAllVisibleMods,
+        clearBatchSelection,
+        setBatchModSelected,
         isStatsFilterActive,
         shouldShowCategoryFilters,
         filterUpdatableOnly,
@@ -4447,6 +4939,7 @@
         resolveConflictModDisplayName,
         findDependentModsForConflict,
         detectModInstallationConflicts,
+        confirmInstallConflicts,
         formatConflictWarningHtml
     };
 

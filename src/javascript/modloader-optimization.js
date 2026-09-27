@@ -196,25 +196,30 @@ window.dolOptInitOverlayTabs = function() {
     }
 };
 
-// 重复导入后 getMod() 可能仍返回旧档案，优先取缓存中最后加载的同名模组
+// 只取真实同名档案；getMod() 可能把兼容别名重定向到另一模组。
 window.dolOptGetModInfo = function(modName) {
     const gui = window.dolOptGetGui();
     const utils = gui?.gModUtils;
     const key = String(modName || '').trim().toLowerCase();
+    if (!key) return null;
+    const isExact = mod => String(mod?.bootJson?.name || mod?.name || '').trim().toLowerCase() === key;
     try {
         const cache = utils?.getModLoader?.()?.getModCacheArray?.() ||
             window.modSC2DataManager?.getModLoader?.()?.getModCacheArray?.() || [];
         for (let i = cache.length - 1; i >= 0; i--) {
             const mod = cache[i]?.mod || cache[i];
-            if (String(mod?.name || '').trim().toLowerCase() === key) return mod;
+            if (isExact(mod)) return mod;
         }
     } catch (_) {}
-    return utils?.getAnyModByNameNoAlias?.(modName) ||
-        utils?.getMod?.(modName) ||
-        window._dolOptDisabledModInfo.get(key) || null;
+    const exactMod = utils?.getAnyModByNameNoAlias?.(modName);
+    if (isExact(exactMod)) return exactMod;
+    const storedMod = window._dolOptDisabledModInfo.get(key);
+    if (isExact(storedMod)) return storedMod;
+    const legacyMod = utils?.getMod?.(modName);
+    return isExact(legacyMod) ? legacyMod : null;
 };
 
-// 禁用模组不会进入运行时缓存，直接从 ModLoader 的 IndexedDB 安装包读取 boot.json
+// 禁用或刚安装尚未加载的模组，直接从 IndexedDB 安装包读取真实 boot.json。
 window.dolOptLoadDisabledModInfo = async function(modNames, refresh = false) {
     const gui = window.dolOptGetGui();
     const names = window.dolOptUniqueModNames(Array.isArray(modNames)
@@ -231,13 +236,16 @@ window.dolOptLoadDisabledModInfo = async function(modNames, refresh = false) {
 
     let loaded = 0;
     for (const name of names) {
-        if (!refresh && window._dolOptDisabledModInfo.has(name.trim().toLowerCase())) continue;
+        const key = name.trim().toLowerCase();
+        const cached = window._dolOptDisabledModInfo.get(key);
+        if (!refresh && String(cached?.bootJson?.name || '').trim().toLowerCase() === key) continue;
         try {
             const data = await keyval.get(loader.constructor.calcModNameKey(name), loader.customStore);
             if (!data) continue;
             const bootJson = await controller.checkModZipFileIndexDB(data);
             if (!bootJson || typeof bootJson !== 'object' || Array.isArray(bootJson)) continue;
-            window._dolOptDisabledModInfo.set(name.trim().toLowerCase(), {
+            if (String(bootJson.name || '').trim().toLowerCase() !== key) continue;
+            window._dolOptDisabledModInfo.set(key, {
                 name: bootJson.name || name,
                 bootJson
             });
@@ -1566,6 +1574,7 @@ window.dolOptInstallModZip = async function(fileOrBlob, preferredFileName = '') 
         console.warn('[DolOptimization] 当前环境无法回读模组列表，跳过安装落盘校验:', ensured.reason);
     }
 
+    if (bootJson) window._dolOptDisabledModInfo.set(modName.trim().toLowerCase(), { name: modName, bootJson });
     return {
         modName,
         bootJson,
@@ -2431,7 +2440,8 @@ window.dolOptLoadModManageState = function(refresh = false) {
             builtInMods: [...builtInMods]
         };
 
-        await window.dolOptLoadDisabledModInfo(sideDisabled, refresh);
+        const pendingInfo = sideEnabled.filter(name => !window.dolOptGetModInfo(name));
+        await window.dolOptLoadDisabledModInfo([...sideDisabled, ...pendingInfo], refresh);
         return window._dolOptModState;
     })().finally(() => { window._dolOptModLoading = null; });
     return window._dolOptModLoading;

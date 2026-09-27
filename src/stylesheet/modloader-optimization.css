@@ -1840,6 +1840,32 @@ button.dol-opt-btn-primary:active,
     overflow-y: auto;
 }
 
+.dol-opt-batch-target-list {
+    max-height: min(280px, 32vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    margin-top: 6px;
+    padding: 2px;
+}
+
+.dol-opt-batch-target-list:focus-visible {
+    outline: 1px solid var(--gold, #d4af37);
+    outline-offset: 2px;
+}
+
+.dol-opt-batch-target-dependencies {
+    flex-basis: 100%;
+    font-size: 0.85em;
+    overflow-wrap: anywhere;
+}
+
+.dol-opt-batch-summary {
+    display: grid;
+    gap: 6px;
+    margin-top: 14px;
+}
+
 .dol-opt-install-overview {
     display: flex;
     align-items: baseline;
@@ -2435,6 +2461,115 @@ button.dol-opt-btn-primary:active,
     padding: 10px;
     border: 1px solid var(--750, #333);
     border-radius: 4px;
+}
+
+.dol-opt-market-batch-toolbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+    padding: 8px;
+    background: var(--850, #181818);
+    border: 1px solid var(--750, #333);
+    border-radius: 4px;
+    min-width: 0;
+}
+
+.dol-opt-market-batch-toolbar.is-active,
+.dol-opt-market-batch-toolbar.is-entry {
+    border-color: var(--gold, #d4af37);
+}
+
+.dol-opt-market-batch-toolbar button {
+    flex-shrink: 0;
+    min-width: 0 !important;
+    max-width: 100%;
+    width: auto !important;
+    min-height: 32px !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+}
+
+.dol-opt-batch-entry-hint {
+    flex: 1 1 220px;
+    min-width: 0;
+    color: var(--200, #ccc);
+    font-size: 0.85em;
+    line-height: 1.4;
+}
+
+.dol-opt-batch-entry:focus-visible {
+    outline: 2px solid var(--gold, #d4af37);
+    outline-offset: 3px;
+}
+
+.dol-opt-batch-count,
+.dol-opt-batch-status {
+    flex: 1 1 180px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.dol-opt-batch-status {
+    display: grid;
+    gap: 4px;
+}
+
+.dol-opt-batch-progress {
+    flex: 1 1 120px;
+    min-width: 0;
+    width: 100%;
+    height: 8px;
+    accent-color: var(--gold, #d4af37);
+}
+
+.dol-opt-market-select-label {
+    display: inline-flex;
+    align-items: center;
+    align-self: flex-start;
+    gap: 8px;
+    min-height: 32px;
+    cursor: pointer;
+}
+
+.dol-opt-market-select-label input {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--gold, #d4af37);
+}
+
+.dol-opt-market-card.is-batch-selected {
+    border-color: var(--gold, #d4af37);
+}
+
+.dol-opt-market-card.is-batch-selectable {
+    cursor: pointer;
+}
+
+@media (max-width: 768px) {
+    .dol-opt-market-batch-toolbar button {
+        flex: 1 1 calc(50% - 4px);
+    }
+
+    .dol-opt-market-batch-toolbar .dol-opt-batch-entry {
+        flex-basis: 100%;
+    }
+
+    .dol-opt-batch-entry-hint {
+        display: none;
+    }
+
+    .dol-opt-batch-count,
+    .dol-opt-batch-status,
+    .dol-opt-market-batch-toolbar #dolOptBatchInstall {
+        flex-basis: 100%;
+    }
 }
 
 .dol-opt-market-search-row {
