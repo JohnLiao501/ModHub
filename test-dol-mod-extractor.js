@@ -5,7 +5,7 @@ const path = require('node:path');
 async function main() {
   const source = await readFile(path.join(__dirname, 'dol-mod-extractor.js'), 'utf8');
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-  const { mergeModIdentities } = await import(moduleUrl);
+  const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories } = await import(moduleUrl);
   const catalog = JSON.parse(await readFile(path.join(__dirname, 'mod-identities.json'), 'utf8'));
   assert.equal(catalog.schemaVersion, 1);
   assert.equal(new Set(catalog.mods.map((mod) => mod.id)).size, catalog.mods.length, '身份 ID 不得重复');
@@ -63,7 +63,7 @@ async function main() {
     githubUrls: [],
   },
   {
-    name: '别重购垃圾',
+    name: '未收录的独立模组',
     githubUrl: 'https://github.com/hxdnshx/sugarcube-2-ModLoader',
     githubUrls: ['https://github.com/hxdnshx/sugarcube-2-ModLoader'],
   },
@@ -126,6 +126,108 @@ async function main() {
   }], catalog);
   assert.deepEqual(inferred[0].dependencies, [{ id: 'simple-framework', version: '' }]);
   console.log('模组身份表测试通过');
+
+  for (const url of [
+    'https://example.test/github.com/Owner/Repo', 'https://github.com.example.test/Owner/Repo',
+    'https://github.com/Owner/Repo/tree/main', 'https://github.com/Owner/Repo/blob/main/mod.zip',
+    'https://github.com/Owner/Repo/issues/1', 'https://github.com/Owner/Repo/wiki',
+  ]) assert.equal(parseGithubReleaseTarget(url), null, `不得将非发布入口改为最新发布: ${url}`);
+  assert.deepEqual(parseGithubReleaseTarget('https://github.com/Owner/Repo/releases/download/v1/a%20b.zip'), {
+    owner: 'Owner', repo: 'Repo', tag: 'v1', assetName: 'a b.zip',
+  });
+  const oldSharedIndex = markSharedRepositories([
+    { name: '甲', githubUrl: 'https://github.com/Owner/Repo', version: '99.0', versionSource: 'github', wikiVersion: '1.0' },
+    { name: '乙', githubUrl: 'https://github.com/Owner/Repo', version: '99.0', versionSource: 'github', wikiVersion: '2.0' },
+  ]);
+  assert.deepEqual(oldSharedIndex.map(mod => mod.version), ['1.0', '2.0'], '旧索引的共享最新版本不能继续显示为各产品版本');
+  assert.ok(oldSharedIndex.every(mod => mod.sharedRepository));
+  const originalFetch = global.fetch;
+  const storageDescriptor = Object.getOwnPropertyDescriptor(global, 'localStorage');
+  const cache = new Map();
+  Object.defineProperty(global, 'localStorage', {
+    configurable: true,
+    value: {
+      getItem: (key) => cache.get(key) ?? null,
+      setItem: (key, value) => cache.set(key, value),
+      removeItem: (key) => cache.delete(key),
+    },
+  });
+  const requests = [];
+  const repoUrl = 'https://github.com/AOKIUTAGE/UTAGEsDOL3.0';
+  const apiUrl = 'https://api.github.com/repos/AOKIUTAGE/UTAGEsDOL3.0/releases';
+  const responses = new Map([
+    [`${apiUrl}/tags/mod`, { tag_name: 'mod', assets: [{ name: 'AU.zip', browser_download_url: 'https://example.test/AU.zip' }] }],
+    [`${apiUrl}/tags/face%2Fv1`, { tag_name: 'face/v1', assets: [] }],
+    [`${apiUrl}/latest`, { tag_name: 'latest-version', assets: [] }],
+  ]);
+  global.fetch = async (url) => {
+    requests.push(url);
+    const data = responses.get(url);
+    return { ok: !!data, status: data ? 200 : 404, json: async () => data };
+  };
+  try {
+    const mainMod = { githubUrl: `${repoUrl}/releases/tag/mod` };
+    const faceMod = { githubUrl: `${repoUrl}/releases/tag/face%2Fv1?source=wiki#assets` };
+    const latestMod = { githubUrl: repoUrl };
+    const mainRelease = await fetchModRelease(mainMod);
+    assert.equal(mainRelease.tagName, 'mod', '主包必须读取 Wiki 指定的标签');
+    assert.equal(mainRelease.assetName, 'AU.zip');
+    assert.equal(mainRelease.assetUrl, 'https://example.test/AU.zip');
+    assert.equal(mainRelease.htmlUrl, mainMod.githubUrl);
+    assert.equal((await fetchModRelease(faceMod)).tagName, 'face/v1', '标签应解码后作为单个 API 路径参数编码');
+    assert.equal((await fetchModRelease(latestMod)).tagName, 'latest-version');
+    for (const [mod, tag] of [[mainMod, 'mod'], [faceMod, 'face/v1'], [latestMod, 'latest-version']]) {
+      const cached = await fetchModRelease(mod);
+      assert.equal(cached.tagName, tag, '同仓库各标签与最新版本必须使用独立缓存');
+      assert.equal(cached.fromCache, true);
+    }
+    assert.deepEqual(requests, [`${apiUrl}/tags/mod`, `${apiUrl}/tags/face%2Fv1`, `${apiUrl}/latest`]);
+    assert.equal(cache.size, 3);
+
+    requests.length = 0;
+    await assert.rejects(fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/missing` }), /GitHub API 错误: 404/);
+    assert.deepEqual(requests, [`${apiUrl}/tags/missing`], '指定标签不存在时不得回退最新版本或列表');
+
+    requests.length = 0;
+    responses.delete(`${apiUrl}/latest`);
+    responses.set(`${apiUrl}?per_page=1`, [{ tag_name: 'preview', prerelease: true }]);
+    const fallback = await fetchModRelease(latestMod, { useCache: false });
+    assert.equal(fallback.tagName, 'preview');
+    assert.equal(fallback.prerelease, true);
+    assert.deepEqual(requests, [`${apiUrl}/latest`, `${apiUrl}?per_page=1`], '未指定标签时保留最新版本不存在的列表回退');
+    requests.length = 0;
+    await assert.rejects(fetchModRelease({ githubUrl: `${repoUrl}/tree/main` }), /原始主页/);
+    assert.equal(requests.length, 0, '分支目录不得请求无关的仓库最新发布');
+    responses.set(`${apiUrl}/tags/files`, { tag_name: 'files', assets: [
+      { name: 'first.zip', browser_download_url: 'https://example.test/first.zip' },
+      { name: 'selected.zip', browser_download_url: 'https://example.test/selected.zip' },
+    ] });
+    const selected = await fetchModRelease({ githubUrl: `${repoUrl}/releases/download/files/selected.zip` });
+    assert.deepEqual(selected.assets.map(a => a.name), ['selected.zip'], '直接附件链接不得切换同发布中的其他产品');
+    await assert.rejects(fetchModRelease({ githubUrl: `${repoUrl}/releases/download/files/missing.zip` }), /附件不存在/);
+    responses.set(`${apiUrl}/tags/wrong`, { tag_name: 'other', assets: [] });
+    await assert.rejects(fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/wrong` }), /标签与模组来源不一致/);
+    responses.set(`${apiUrl}?per_page=100`, [
+      { tag_name: 'other-newest', published_at: '2026-09-27', assets: [{ name: 'Other.v99.0.zip' }] },
+      { tag_name: 'shared-products', published_at: '2026-09-20', assets: [
+        { name: 'First.v1.2.zip', browser_download_url: 'https://example.test/first.zip' },
+        { name: 'Second.v2.3.zip', browser_download_url: 'https://example.test/second.zip' },
+      ] },
+    ]);
+    const first = await fetchModRelease({ githubUrl: repoUrl, name: '产品甲', sharedRepository: true, bootNames: ['First'] });
+    const second = await fetchModRelease({ githubUrl: repoUrl, name: '产品乙', sharedRepository: true, bootNames: ['Second'] });
+    assert.equal(first.assetName, 'First.v1.2.zip');
+    assert.equal(first.version, '1.2');
+    assert.equal(second.assetName, 'Second.v2.3.zip', '同仓库不同产品不得复用对方缓存');
+    assert.equal(second.version, '2.3');
+    assert.equal(first.assets.length, 1, '网站不得给当前产品展示同仓库的其他模组作为下载');
+    await assert.rejects(fetchModRelease({ githubUrl: repoUrl, name: '未知产品', sharedRepository: true }), /未找到当前模组/);
+    console.log('GitHub Release 标签与缓存测试通过');
+  } finally {
+    global.fetch = originalFetch;
+    if (storageDescriptor) Object.defineProperty(global, 'localStorage', storageDescriptor);
+    else delete global.localStorage;
+  }
 }
 
 main().catch((err) => {

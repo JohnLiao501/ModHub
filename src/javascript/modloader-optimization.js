@@ -40,7 +40,16 @@ if (typeof window !== 'undefined' && !window._dolOptGlobalErrorHooked) {
         const origConsoleError = console.error;
         console.error = function(...args) {
             try {
-                const text = args.map(a => typeof a === 'string' ? a : (a?.message || JSON.stringify(a) || '')).join(' ');
+                const text = args.map(a => {
+                    if (typeof a === 'string') return a;
+                    // 保留错误类型与堆栈，避免仅含方法名的首个异常被关键词过滤。
+                    if (a?.message) {
+                        const summary = `${a.name || 'Error'}: ${a.message}`;
+                        const stack = typeof a.stack === 'string' ? a.stack : '';
+                        return stack.startsWith(summary) ? stack : [summary, stack].filter(Boolean).join('\n');
+                    }
+                    return JSON.stringify(a) || '';
+                }).join(' ');
                 const textLower = text.toLowerCase();
                 // 忽略预期内良性降级或无害提示，避免无错误时误报弹窗
                 const isBenign = !text ||

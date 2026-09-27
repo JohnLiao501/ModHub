@@ -143,7 +143,7 @@
         'modi18n': ['本地化翻译', 'degreesoflewditymodi18nmod', 'i18nmod'],
         'wovenrealmcookingaddon': ['织境空间-料理扩展', '织境空间·料理扩展', 'wovenrealmcookingaddon', '料理扩展'],
         'aistorygen': ['织境空间', 'wovenrealm'],
-        'npcavatarsmod': ['npc社交栏头像', 'npc侧边栏头像', 'dolnpciconmods', 'maespicvarynpcmod', 'npcavatarsmod'],
+        'npcavatarsmod': ['npc社交栏头像', 'dolnpciconmods', 'npcavatarsmod'],
         'autoclean': ['自动清洁', '自动清洁身体污垢'],
         'autoclothesrepair': ['自动修衣', '衣物破损自动修补'],
         'autoschool': ['自动上学', '自动上课与学校日常辅助'],
@@ -185,6 +185,9 @@
     ];
     const DOL_OPT_KNOWN_MOD_CLASSIFICATIONS = {};
     const DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS = {};
+    const DOL_OPT_IDENTITY_NAME_OWNERS = new Map();
+    const DOL_OPT_AMBIGUOUS_IDENTITY_NAMES = new Set();
+    const DOL_OPT_BOOT_IDENTITIES = new Map();
     const DOL_OPT_OFFLINE_REPOSITORIES = {
         modhub: ['JohnLiao501/ModHub'],
         'modhub模组管理中心': ['JohnLiao501/ModHub'],
@@ -296,7 +299,10 @@
     const batchInstallState = { selecting: false, selected: new Set(), running: false, stopRequested: false, current: '', completed: 0, total: 0 };
 
     function getMarketModKey(mod) {
-        return String(mod?.identityId || mod?.id || extractRepoKey(mod?.githubUrl) || normalizeKey(mod?.name)).toLowerCase();
+        const repo = parseGithubRepo(mod?.githubUrl);
+        const key = mod?.identityId || mod?.id || (repo?.key
+            ? `${repo.key}${mod.sharedRepository ? `/${normalizeKey(mod.name)}` : ''}` : normalizeKey(mod?.name));
+        return `${String(key).toLowerCase()}${repo?.releaseTag ? `@${repo.key}/releases/tag/${encodeURIComponent(repo.releaseTag)}` : ''}${repo?.assetName ? `/${encodeURIComponent(repo.assetName)}` : ''}`;
     }
 
     function isBatchInstallEligible(mod, profiles = getLocalInstalledProfiles()) {
@@ -417,13 +423,6 @@
         }
     }
 
-    // 通用通用停用词集合（严禁单凭此类泛化词汇认定模组已安装）
-    const GENERIC_STOP_WORDS = new Set([
-        'npc', 'dol', 'mod', 'addon', 'expansion', 'framework', 'frameworks', 'pack', 'tool',
-        '助手', '系统', '美化', '优化', '扩展', '拓展', '剧情', '功能', '立绘', '头像',
-        'game', 'original', 'image', 'alpha', 'beta', 'test', 'v', 'the'
-    ]);
-
     /** 清理模组标题中的平台噪点、下载标注与括号说明 */
     function cleanModTitle(str) {
         if (!str) return '';
@@ -431,27 +430,8 @@
         // 移除 [Github], [Discord], (v1.0), 【xxx】 等附加噪点
         s = s.replace(/\[.*?\]|\(.*?\)|【.*?】|（.*?）/g, ' ');
         s = s.replace(/github|discord|下载|论坛|链接|地址|\u2708|\u2764|\u2192/gi, ' ');
+        s = s.replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0E\uFE0F\u200D]/gu, '');
         return cleanText(s);
-    }
-
-    /**
-     * 将可能包含子模块的复合模组标题拆解为主名与子模块鉴别词
-     * 例如："织境空间-场景互动扩展" -> { base: "织境空间", subs: ["场景互动扩展"] }
-     * 例如："织境空间·料理扩展（测试版）" -> { base: "织境空间", subs: ["料理扩展"] }
-     */
-    function splitTitleParts(title) {
-        const raw = cleanModTitle(title);
-        const segments = raw.split(/[-—_·:：/]/).map(s => s.trim()).filter(Boolean);
-        if (segments.length >= 2) {
-            return {
-                base: segments[0],
-                subs: segments.slice(1)
-            };
-        }
-        return {
-            base: raw,
-            subs: []
-        };
     }
 
     /**
@@ -625,7 +605,7 @@
 
     function extractModName(td) {
         if (!td) return '';
-        const utilityRegex = /github|discord|下载|论坛|链接|地址|\u2708|\u2764|\u2192|\[.*?\]/i;
+        const utilityRegex = /github|discord|下载|论坛|链接|地址|源码|镜像|\u2708|\u2764|\u2192|\[.*?\]/i;
         const anchors = Array.from(td.querySelectorAll('a'));
         const nameAnchors = anchors.filter(a => {
             const t = cleanText(a.textContent);
@@ -668,7 +648,7 @@
                 return;
             }
             const host = u.hostname.toLowerCase();
-            if (host === WIKI_HOST || host.endsWith('.miraheze.org') || host.includes('github.com')) return;
+            if (host === WIKI_HOST || host.endsWith('.miraheze.org') || /^(www\.)?github\.com$/.test(host)) return;
             if (host === 'upload.wikimedia.org' || host === 'static.miraheze.org') return;
             urls.push(href.split('#')[0]);
         });
@@ -706,7 +686,14 @@
                 const tds = Array.from(row.querySelectorAll('td'));
                 if (!tds.length) continue;
 
-                const name = extractModName(tds[idx.name]);
+                const nameCell = tds[idx.name];
+                const namedProjects = Array.from(nameCell?.querySelectorAll('a[href]') || []).filter(a =>
+                    parseGithubRepo(a.getAttribute('href')) && cleanText(a.textContent)
+                    && !/github|discord|下载|论坛|链接|地址|源码|镜像|\u2708|\u2764|\u2192|\[.*?\]/i.test(cleanText(a.textContent)));
+                const projects = new Set(namedProjects.map(a => a.getAttribute('href').replace(/\/+$/, ''))).size > 1
+                    ? namedProjects : [null];
+                for (const project of projects) {
+                const name = project ? cleanModTitle(project.textContent) : extractModName(nameCell);
                 if (!name) continue;
 
                 const description = cleanText(tds[idx.description] ? tds[idx.description].textContent : '');
@@ -714,9 +701,9 @@
                 const dateText = idx.date >= 0 && tds[idx.date] ? cleanText(tds[idx.date].textContent) : '';
                 const { date, version } = parseDateCell(dateText);
 
-                const githubUrls = extractGithubUrls(row);
+                const githubUrls = project ? [project.getAttribute('href')] : extractGithubUrls(nameCell);
                 const githubUrl = githubUrls[0] || null;
-                const otherUrls = extractOtherUrls(row);
+                const otherUrls = project ? [] : extractOtherUrls(nameCell);
                 const otherUrl = otherUrls[0] || null;
 
                 const classification = deriveClassification(name, description);
@@ -738,19 +725,46 @@
                     tags: classification.tags,
                     _isDeadRepo: isDead
                 });
+                }
             }
         }
-        return mods;
+        return markSharedRepositories(mods);
+    }
+
+    function markSharedRepositories(mods) {
+        const groups = new Map();
+        for (const mod of mods) {
+            const key = extractRepoKey(mod.githubUrl);
+            if (!key) continue;
+            if (!groups.has(key)) groups.set(key, new Set());
+            groups.get(key).add(mod.identityId || normalizeKey(mod.name || mod.wikiName));
+        }
+        return mods.map(mod => ({ ...mod, sharedRepository: Boolean(mod.sharedRepository
+            || groups.get(extractRepoKey(mod.githubUrl))?.size > 1) }));
     }
 
     // ==================== GitHub Release 检索 ====================
 
     function parseGithubRepo(url) {
-        if (!url) return null;
-        const m = url.match(/github\.com\/([^/?#]+)\/([^/?#]+)/i);
-        if (!m) return null;
-        const repo = m[2].replace(/\.git$/i, '');
-        return { owner: m[1], repo, key: `${m[1]}/${repo}`.toLowerCase() };
+        try {
+            const parsed = new URL(url);
+            if (!/^https?:$/.test(parsed.protocol) || !/^(?:www\.)?github\.com$/i.test(parsed.hostname)) return null;
+            const parts = parsed.pathname.replace(/\/+$/, '').split('/').slice(1);
+            const [owner, rawRepo, section, action] = parts;
+            if (!owner || !rawRepo) return null;
+            const repo = rawRepo.replace(/\.git$/i, '');
+            const isTag = section === 'releases' && action === 'tag' && parts.length > 4;
+            const isAsset = section === 'releases' && action === 'download' && parts.length > 5;
+            const releaseTag = isTag ? decodeURIComponent(parts.slice(4).join('/'))
+                : (isAsset ? decodeURIComponent(parts.slice(4, -1).join('/')) : '');
+            const sourcePath = section && !(section === 'releases' && ((!action && parts.length === 3)
+                || (action === 'latest' && parts.length === 4) || isTag || isAsset))
+                ? parts.slice(2).join('/') : '';
+            return { owner, repo, key: `${owner}/${repo}`.toLowerCase(), releaseTag,
+                assetName: isAsset ? decodeURIComponent(parts.at(-1)) : '', sourcePath };
+        } catch {
+            return null;
+        }
     }
 
     function getReleaseWorkerUrl(path) {
@@ -800,8 +814,8 @@
     }
 
     function getAssetVersionParts(name) {
-        const matches = String(name || '').match(/\d+(?:\.\d+){1,3}/g) || [];
-        return (matches.at(-1) || '').split('.').filter(Boolean).map(Number);
+        const withoutGame = String(name || '').replace(getAssetGameVersion(name), '');
+        return (withoutGame.match(/\d+(?:\.\d+)+/)?.[0] || '').split('.').filter(Boolean).map(Number);
     }
 
     function compareAssetVersions(a, b) {
@@ -815,77 +829,98 @@
     }
 
     function getAssetGameVersion(name) {
-        return String(name || '').match(/(?:^|[-_.])(?:dol[-_.]?)?(0\.5\.\d+(?:\.\d+)?)(?=[-_.]|$)/i)?.[1] || '';
+        const value = String(name || '');
+        const explicit = value.match(/(?:^|[\s_.-])(?:for[\s._-]*)?dol[\s._-]*v?(0\.\d+\.\d+(?:\.\d+)?)(?=[\s_.-]|$)/i)?.[1];
+        if (explicit) return explicit;
+        // 单个 0.5.x 也可能是模组版本；只有并列模组版本时才识别无 DoL 前缀的兼容版本。
+        const versions = value.match(/\d+(?:\.\d+)+/g) || [];
+        return versions.length > 1 ? (versions.find(version => /^0\.5\.\d+(?:\.\d+)?$/.test(version)) || '') : '';
     }
 
-    function buildReleaseAssetPlan(assets, gameVersion = window.StartConfig?.version || '') {
-        const downloadable = (assets || []).filter(asset =>
-            asset?.downloadUrl &&
-            !/source[\s_-]*code/i.test(asset.name || '') &&
-            /\.(?:zip|7z|mod|rar)$/i.test(asset.name || '')
-        );
-        if (!downloadable.length) return { assets: [], candidates: [], needsChoice: false, reason: '' };
+    function getAssetSeries(name) {
+        return String(name || '').replace(/\.(?:zip|mod)$/ig, '')
+            .replace(/(?:for[\s._-]*)?dol[\s._-]*\d+(?:\.\d+)+/ig, '')
+            .replace(/(?:version|ver|v)?\d+(?:\.\d+)+/ig, '')
+            .replace(/(?:^|[\s._-])build[\s._-]*\d+/ig, '')
+            .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '').replace(/(?:mod)+$/, '');
+    }
 
-        const companions = downloadable.filter(asset => COMPANION_ASSET_PATTERN.test(asset.name || ''));
-        let mainCandidates = downloadable.filter(asset => !COMPANION_ASSET_PATTERN.test(asset.name || ''));
+    function matchesAssetIdentity(asset, mod) {
+        const series = getAssetSeries(String(asset.name || '').replace(/(?:^|[\s._-])(?:desktop|windows|pc|mobile|android|english|chinese|chs|cht|cn|en|zh)(?=[\s._-]|$)/ig, ''));
+        return [...(mod?.bootNames || []), ...(mod?.aliases || []), mod?.name].some(name => {
+            const identity = getAssetSeries(name);
+            return identity.length >= 3 && identity === series;
+        });
+    }
+
+    function getMatchingCompanionAssets(main, assets) {
+        const mainSeries = getAssetSeries(main.name);
+        const mainVersion = getAssetVersionParts(main.name).join('.');
+        return assets.filter(asset => asset.downloadUrl !== main.downloadUrl
+            && COMPANION_ASSET_PATTERN.test(asset.name || '')
+            && getAssetSeries(asset.name.replace(COMPANION_ASSET_PATTERN, '')) === mainSeries
+            && (!getAssetGameVersion(asset.name) || getAssetGameVersion(asset.name) === getAssetGameVersion(main.name))
+            && (!getAssetVersionParts(asset.name).length || getAssetVersionParts(asset.name).join('.') === mainVersion));
+    }
+
+    function buildReleaseAssetPlan(assets, gameVersion = window.StartConfig?.version || '', mod = null) {
+        let downloadable = (assets || []).filter(asset => asset?.downloadUrl
+            && /\.(?:zip|mod)$/i.test(asset.name || '')
+            && !/(?:^|[\s._-])(?:source(?:[\s._-]*code)?|src|apk|outdated?|obsolete)(?=[\s._-]|$)|源码|整合包/i.test(asset.name || '')
+            && !/\/archive\//i.test(asset.downloadUrl));
+        const modelNames = new Set(downloadable.filter(asset => /\.model(?=[._-])/i.test(asset.name)).map(asset => asset.name.toLowerCase()));
+        // 同版本直装包存在时，配对的手动覆盖图包不参与自动安装。
+        downloadable = downloadable.filter(asset => !/\.imgpack(?=[._-])/i.test(asset.name)
+            || !modelNames.has(asset.name.replace(/\.imgpack(?=[._-])/i, '.model').toLowerCase()));
+        if (!downloadable.length) return { assets: [], candidates: [], availableAssets: [], needsChoice: false, reason: '没有可自动导入的模组安装包' };
+
+        const identified = mod ? downloadable.filter(asset => matchesAssetIdentity(asset, mod)) : [];
+        let mainCandidates = identified.length ? identified : downloadable.filter(asset => !COMPANION_ASSET_PATTERN.test(asset.name || ''));
         if (!mainCandidates.length) mainCandidates = downloadable;
-
-        const isMobile = typeof window.dolOptIsMobile === 'function'
-            ? !!window.dolOptIsMobile()
-            : !!window.dolOptIsMobile;
-        const preferredPlatform = isMobile
-            ? /(?:^|[-_.])(?:mobile|android)(?=[-_.]|$)/i
-            : /(?:^|[-_.])(?:desktop|pc|windows)(?=[-_.]|$)/i;
-        const oppositePlatform = isMobile
-            ? /(?:^|[-_.])(?:desktop|pc|windows)(?=[-_.]|$)/i
-            : /(?:^|[-_.])(?:mobile|android)(?=[-_.]|$)/i;
-        const preferred = mainCandidates.filter(asset => preferredPlatform.test(asset.name || ''));
-        if (preferred.length) {
-            mainCandidates = preferred;
-        } else {
-            const neutral = mainCandidates.filter(asset => !oppositePlatform.test(asset.name || ''));
-            if (neutral.length) mainCandidates = neutral;
+        if (mod?.sharedRepository && !identified.length) {
+            return { assets: [], candidates: [], availableAssets: [], needsChoice: false, reason: '同仓库包含多个模组，未找到与当前条目身份一致的安装包' };
         }
+
+        const isMobile = typeof window.dolOptIsMobile === 'function' ? !!window.dolOptIsMobile() : !!window.dolOptIsMobile;
+        const preferredPlatform = isMobile ? /(?:^|[\s_.-])(?:mobile|android)(?=[\s_.-]|$)/i : /(?:^|[\s_.-])(?:desktop|pc|windows)(?=[\s_.-]|$)/i;
+        const oppositePlatform = isMobile ? /(?:^|[\s_.-])(?:desktop|pc|windows)(?=[\s_.-]|$)/i : /(?:^|[\s_.-])(?:mobile|android)(?=[\s_.-]|$)/i;
+        const platformGroups = new Map();
+        for (const asset of mainCandidates) {
+            const key = getAssetSeries(asset.name.replace(/(?:^|[\s_.-])(?:mobile|android|desktop|pc|windows)(?=[\s_.-]|$)/ig, ''));
+            if (!platformGroups.has(key)) platformGroups.set(key, []);
+            platformGroups.get(key).push(asset);
+        }
+        mainCandidates = [...platformGroups.values()].flatMap(group => {
+            const preferred = group.filter(asset => preferredPlatform.test(asset.name || ''));
+            const neutral = group.filter(asset => !oppositePlatform.test(asset.name || ''));
+            return preferred.length ? preferred : (neutral.length ? neutral : group);
+        });
 
         const normalizedGameVersion = String(gameVersion || '').replace(/^v/i, '');
         const versionSpecific = mainCandidates.filter(asset => getAssetGameVersion(asset.name));
         if (normalizedGameVersion && versionSpecific.length) {
             const exact = versionSpecific.filter(asset => getAssetGameVersion(asset.name) === normalizedGameVersion);
-            if (exact.length) {
-                mainCandidates = exact;
-            } else if (versionSpecific.length === mainCandidates.length && mainCandidates.length > 1) {
-                return {
-                    assets: [],
-                    candidates: mainCandidates,
-                    needsChoice: true,
-                    reason: `没有与当前 DoL ${normalizedGameVersion} 完全匹配的兼容包`
-                };
-            }
+            const matchingSeries = new Set(exact.map(asset => getAssetSeries(asset.name)));
+            if (exact.length && mainCandidates.every(asset => matchingSeries.has(getAssetSeries(asset.name)))) mainCandidates = exact;
+            else return { assets: [], candidates: mainCandidates, availableAssets: downloadable, needsChoice: true,
+                reason: `无法唯一确定适用于当前 DoL ${normalizedGameVersion} 的模组系列，请核对作者说明后选择` };
         }
 
-        mainCandidates.sort((a, b) => compareAssetVersions(b, a));
+        // 仅在同一产品、语言和模型系列内比较版本，不用另一个模组的版本号淘汰本模组。
+        const series = new Map();
+        for (const asset of mainCandidates) {
+            const key = `${getAssetSeries(asset.name)}${getAssetVersionParts(asset.name).length ? '' : ':unversioned'}`;
+            const existing = series.get(key) || [];
+            const comparison = existing.length ? compareAssetVersions(asset, existing[0]) : 1;
+            if (comparison > 0) series.set(key, [asset]);
+            else if (comparison === 0) existing.push(asset);
+        }
+        mainCandidates = [...series.values()].flat();
+        if (mainCandidates.length > 1) return { assets: [], candidates: mainCandidates, availableAssets: downloadable, needsChoice: true,
+            reason: '检测到多个独立模组或安装变体，请选择需要的安装包' };
         const selectedMain = mainCandidates[0];
-        const sameVersion = mainCandidates.filter(asset => compareAssetVersions(asset, selectedMain) === 0);
-        if (sameVersion.length > 1) {
-            return {
-                assets: [],
-                candidates: sameVersion,
-                needsChoice: true,
-                reason: '检测到多个同版本安装包，无法可靠判断用途'
-            };
-        }
-
-        const mainVersion = getAssetVersionParts(selectedMain.name).join('.');
-        const selectedCompanions = companions.filter(asset => {
-            const companionVersion = getAssetVersionParts(asset.name).join('.');
-            return !companionVersion || !mainVersion || companionVersion === mainVersion;
-        });
-        return {
-            assets: [selectedMain, ...selectedCompanions],
-            candidates: downloadable,
-            needsChoice: false,
-            reason: ''
-        };
+        return { assets: [selectedMain, ...getMatchingCompanionAssets(selectedMain, downloadable)],
+            candidates: mainCandidates, availableAssets: downloadable, needsChoice: false, reason: '' };
     }
 
     async function fetchModRelease(mod, options = {}) {
@@ -893,13 +928,26 @@
         if (!mod || !mod.githubUrl) throw new Error('模组缺少 GitHub 仓库链接');
         const repo = parseGithubRepo(mod.githubUrl);
         if (!repo) throw new Error('无法解析 GitHub 仓库地址');
+        if (repo.sourcePath) {
+            const err = new Error('此条目指向仓库内的文件或分支，请前往模组主页按作者说明下载安装');
+            err.code = 'MANUAL_SOURCE';
+            throw err;
+        }
+        const sharedRepository = !repo.releaseTag && (mod.sharedRepository || (marketModList || [])
+            .filter(item => parseGithubRepo(item.githubUrl)?.key === repo.key).length > 1);
 
-        const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}`;
+        // 同仓库的主包和扩展可能分属固定标签，不能共用 latest 或旧缓存。
+        const entryKey = mod.id || mod.identityId || mod.name || '';
+        const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}${repo.releaseTag ? `_tag_${encodeURIComponent(repo.releaseTag)}` : ''}${repo.assetName ? `_asset_${encodeURIComponent(repo.assetName)}` : ''}${sharedRepository ? `_entry_${encodeURIComponent(entryKey)}` : ''}`;
         const gameVersion = window.StartConfig?.version || '';
+        const platform = (typeof window.dolOptIsMobile === 'function' ? window.dolOptIsMobile() : window.dolOptIsMobile) ? 'mobile' : 'desktop';
+        const source = JSON.stringify([repo.key, repo.releaseTag, repo.assetName, entryKey, mod.bootNames || [], mod.aliases || []]);
+        const isUsableCache = cached => cached?.assetPlanVersion === 3 && cached.assetPlanGameVersion === gameVersion
+            && cached.assetPlanPlatform === platform && cached.assetPlanSource === source
+            && (!mod.version || compareVersions(cached.version, mod.version) >= 0);
         if (useCache) {
             const cached = readLocalCache(cacheKey, RELEASE_CACHE_TTL);
-            if (cached?.assetPlanVersion === 2 && cached.assetPlanGameVersion === gameVersion
-                && (!mod.version || compareVersions(cached.version, mod.version) >= 0)) {
+            if (isUsableCache(cached)) {
                 return { ...cached, fromCache: true };
             }
         }
@@ -909,7 +957,8 @@
 
         let releaseData = null;
         try {
-            const latestRes = await fetch(`${baseUrl}/releases/latest`, { headers, signal });
+            const latestRes = await fetch(sharedRepository ? `${baseUrl}/releases?per_page=100`
+                : `${baseUrl}/releases/${repo.releaseTag ? `tags/${encodeURIComponent(repo.releaseTag)}` : 'latest'}`, { headers, signal });
 
             if (latestRes.status === 429 || latestRes.status === 403) {
                 const err = new Error('GitHub API 触发速率限制，请稍候再试');
@@ -918,6 +967,11 @@
             }
 
             if (latestRes.status === 404) {
+                if (repo.releaseTag) {
+                    const err = new Error(`指定发布标签不存在或不可访问：${repo.releaseTag}`);
+                    err.code = 'RELEASE_NOT_FOUND';
+                    throw err;
+                }
                 const listRes = await fetch(`${baseUrl}/releases?per_page=1`, { headers, signal });
                 if (listRes.status === 429 || listRes.status === 403) {
                     const err = new Error('GitHub API 触发速率限制');
@@ -943,29 +997,51 @@
             } else {
                 releaseData = await latestRes.json();
             }
+            if (sharedRepository) {
+                const releases = Array.isArray(releaseData) ? releaseData : [releaseData];
+                // ponytail: 最多检索最近 100 个发布；超出范围时转作者主页，确有需求再增加分页。
+                // 共享仓库按产品身份找发布，不能把该仓库最后发布的另一个模组当成当前模组。
+                releaseData = releases.filter(release => !release.draft && !release.prerelease
+                    && (release.assets || []).some(asset => matchesAssetIdentity(asset, mod)))
+                    .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0];
+                if (!releaseData) {
+                    const err = new Error('共享仓库中未找到与当前模组身份一致的发布，请前往模组主页核对');
+                    err.code = 'MANUAL_SOURCE';
+                    throw err;
+                }
+            }
+            if (repo.releaseTag && releaseData.tag_name !== repo.releaseTag) {
+                const err = new Error('返回的发布标签与模组来源不一致，请前往模组主页核对');
+                err.code = 'RELEASE_NOT_FOUND';
+                throw err;
+            }
+            if (repo.assetName && !(releaseData.assets || []).some(asset => asset.name === repo.assetName)) {
+                const err = new Error(`指定的模组附件不存在：${repo.assetName}`);
+                err.code = 'RELEASE_NOT_FOUND';
+                throw err;
+            }
             const currentRepoKey = `${repo.owner}/${repo.repo}`.toLowerCase();
             unmarkRepoAsDead(currentRepoKey);
             if (mod) mod._isDeadRepo = false;
         } catch (fetchErr) {
-            if (fetchErr?.code === 'REPO_NOT_FOUND' || fetchErr?.status === 404) {
+            if (['REPO_NOT_FOUND', 'RELEASE_NOT_FOUND', 'MANUAL_SOURCE'].includes(fetchErr?.code) || fetchErr?.status === 404 || fetchErr?.name === 'AbortError') {
                 throw fetchErr;
             }
             const staleCache = readLocalCache(cacheKey, Infinity, true);
-            if (staleCache?.assets && staleCache.assets.length > 0
-                && (!mod.version || compareVersions(staleCache.version, mod.version) >= 0)) {
+            if (isUsableCache(staleCache) && (staleCache.assets?.length || staleCache.requiresManualSelection)) {
                 console.warn('[DolOptimization] GitHub API 直连受限，回退使用最近成功缓存的 Release 数据:', fetchErr);
                 return { ...staleCache, fromCache: true, isStale: true };
             }
             throw fetchErr;
         }
 
-        const assets = (releaseData.assets || []).map(a => ({
+        const assets = (releaseData.assets || []).filter(a => !repo.assetName || a.name === repo.assetName).map(a => ({
             name: a.name,
             size: a.size,
             downloadUrl: a.browser_download_url,
             digest: a.digest || ''
         }));
-        const assetPlan = buildReleaseAssetPlan(assets, gameVersion);
+        const assetPlan = buildReleaseAssetPlan(assets, gameVersion, { ...mod, sharedRepository });
         const bestAsset = assetPlan.assets[0] || null;
 
         const releaseTitle = String(releaseData.name || '').trim();
@@ -973,23 +1049,27 @@
         const tagName = String(releaseData.tag_name || '');
         const tagVersion = /^(?:v?\d)|(?:^|[^a-z0-9])(?:v\d|\d+\.\d+)/i.test(tagName) ? tagName : '';
         const prefixedTitleVersion = releaseTitle.match(/^v(\d+(?:\.\d+){1,3})(?=$|[\s(（-])/i)?.[1];
-        const version = explicitTitleVersion || tagVersion || prefixedTitleVersion || mod.version || '';
+        const version = sharedRepository ? (getAssetVersionParts(bestAsset?.name).join('.') || mod.wikiVersion || '')
+            : (getAssetVersionParts(bestAsset?.name).join('.') || explicitTitleVersion || tagVersion || prefixedTitleVersion || mod.version || '');
         const updateDate = releaseData.published_at ? releaseData.published_at.slice(0, 10) : mod.updateDate || '';
 
         const result = {
             tagName: releaseData.tag_name || '',
             releaseName: releaseData.name || '',
-            htmlUrl: releaseData.html_url || `${mod.githubUrl}/releases/latest`,
+            htmlUrl: releaseData.html_url || `https://github.com/${repo.owner}/${repo.repo}/releases/${repo.releaseTag ? `tag/${encodeURIComponent(repo.releaseTag)}` : 'latest'}`,
             assetName: bestAsset ? bestAsset.name : null,
             assetUrl: bestAsset ? bestAsset.downloadUrl : null,
             assetSize: bestAsset ? Number(bestAsset.size) || 0 : 0,
             assetDigest: bestAsset ? bestAsset.digest : '',
             assets: assetPlan.assets,
             candidateAssets: assetPlan.candidates,
+            availableAssets: assetPlan.availableAssets,
             requiresManualSelection: assetPlan.needsChoice,
             selectionReason: assetPlan.reason,
-            assetPlanVersion: 2,
+            assetPlanVersion: 3,
             assetPlanGameVersion: gameVersion,
+            assetPlanPlatform: platform,
+            assetPlanSource: source,
             version,
             updateDate
         };
@@ -1003,8 +1083,8 @@
     async function fetchRecentCompanionAssets(mod, limit = 3, options = {}) {
         if (!mod?.githubUrl) return [];
         const repo = parseGithubRepo(mod.githubUrl);
-        if (!repo) return [];
-        const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}_companions`;
+        if (!repo || repo.releaseTag || repo.sourcePath || mod.sharedRepository) return [];
+        const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}_companions_v3_${encodeURIComponent(mod.id || mod.name || '')}`;
         if (options.useCache !== false) {
             const cached = readLocalCache(cacheKey, RELEASE_CACHE_TTL);
             if (Array.isArray(cached)) return cached.slice(0, limit);
@@ -1019,8 +1099,11 @@
         const releases = await response.json();
         const companions = [];
         for (const release of Array.isArray(releases) ? releases : []) {
+            if (release.draft || release.prerelease) continue;
             for (const asset of release.assets || []) {
-                if (!COMPANION_ASSET_PATTERN.test(asset.name || '') || !asset.browser_download_url) continue;
+                if (!COMPANION_ASSET_PATTERN.test(asset.name || '') || !asset.browser_download_url
+                    || !/\.(?:zip|mod)$/i.test(asset.name || '')
+                    || !matchesAssetIdentity({ name: asset.name.replace(COMPANION_ASSET_PATTERN, '') }, mod)) continue;
                 companions.push({
                     name: asset.name,
                     size: Number(asset.size) || 0,
@@ -1077,7 +1160,8 @@
             assetUrl: asset.downloadUrl,
             assetSize: Number(asset.size) || 0,
             assetDigest: asset.digest || '',
-            assets: [asset],
+            assets: [asset, ...getMatchingCompanionAssets(asset, releaseInfo.availableAssets || [])],
+            version: getAssetVersionParts(asset.name).join('.') || releaseInfo.version,
             requiresManualSelection: false,
             selectionReason: ''
         };
@@ -1286,32 +1370,15 @@
         return s.length >= 2 ? s : normalizeKey(str);
     }
 
-    /** 提取中文/英文词块（长度 >= 2） */
-    function extractNameParts(str) {
-        if (!str) return [];
-        const parts = [];
-        const clean = str.replace(/[()（）\[\]【】_—\-—.\s]/g, ' ').trim();
-        if (clean) parts.push(clean);
-
-        // 提取中文字符串
-        const cnMatches = str.match(/[\u4e00-\u9fa5]+/g);
-        if (cnMatches) parts.push(...cnMatches);
-
-        // 提取英文字符串（>= 3个字符）
-        const enMatches = str.match(/[a-zA-Z0-9]{3,}/g);
-        if (enMatches) parts.push(...enMatches);
-
-        return [...new Set(parts.map(normalizeKey).filter(p => p.length >= 2))];
-    }
-
     /** 从 GitHub 仓库地址提取仓库名（小写且归一化） */
     function extractRepoName(url) {
-        const repo = parseGithubRepo(url);
-        return repo ? normalizeKey(repo.repo) : '';
+        return normalizeKey(extractRepoKey(url).split('/')[1]);
     }
 
     function extractRepoKey(url) {
-        return parseGithubRepo(url)?.key || '';
+        // 身份校验仍需读取 tree/blob 主页所属仓库，下载入口是否可用由 parseGithubRepo 单独判定。
+        const match = String(url || '').match(/^https?:\/\/github\.com\/([^/?#]+)\/([^/?#]+)(?:[/?#]|$)/i);
+        return match ? `${match[1]}/${match[2].replace(/\.git$/i, '')}`.toLowerCase() : '';
     }
 
     const DEAD_REPOS_STORAGE_KEY = 'dol_opt_market_dead_repos_v1';
@@ -1422,7 +1489,7 @@
 
         let applied = 0;
         for (const identity of identities) {
-            if (!identity || typeof identity !== 'object') continue;
+            if (!identity || typeof identity !== 'object' || identity.identityId === null) continue;
 
             // 净化异常数据：强行切断万能的智能手机与唐百玎HY手机模组的历史混淆关联
             if (identity.id === 'smartphone' || identity.name === '万能的智能手机') {
@@ -1445,13 +1512,23 @@
                 identity.wikiName,
                 ...(Array.isArray(identity.bootNames) ? identity.bootNames : []),
                 ...(Array.isArray(identity.aliases) ? identity.aliases : []),
-                ...(Array.isArray(identity.repositories) ? identity.repositories : []),
-                ...repositoryKeys.map(key => key.split('/')[1])
+                ...(Array.isArray(identity.repositories) ? identity.repositories : [])
             ].filter(value => typeof value === 'string').map(cleanText).filter(Boolean);
             const keys = [...new Set(names.map(normalizeKey).filter(Boolean))];
             if (!keys.length) continue;
 
+            const owner = String(identity.identityId || identity.id || `${repositoryKeys.join('|')}:${normalizeKey(identity.name)}`).toLowerCase();
+            for (const bootName of identity.bootNames || []) {
+                if (typeof bootName !== 'string') continue;
+                const exactName = bootName.trim().toLowerCase();
+                const previous = DOL_OPT_BOOT_IDENTITIES.get(exactName);
+                DOL_OPT_BOOT_IDENTITIES.set(exactName, previous && previous.id !== owner ? { id: null, repositoryKeys: [] } : { id: owner, repositoryKeys });
+            }
             for (const key of keys) {
+                const previousOwner = DOL_OPT_IDENTITY_NAME_OWNERS.get(key);
+                if (previousOwner && previousOwner !== owner) DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.add(key);
+                DOL_OPT_IDENTITY_NAME_OWNERS.set(key, owner);
+                if (DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.has(key)) continue;
                 const aliases = new Set(DOL_OPT_KNOWN_MOD_MARKET_ALIASES[key] || []);
                 names.forEach(name => {
                     if (normalizeKey(name) !== key) aliases.add(name);
@@ -1468,6 +1545,16 @@
                 }
             }
             applied++;
+        }
+        // 同名条目不能互相扩充别名；仓库名也不能替代同仓库内各模组的身份。
+        for (const key of DOL_OPT_AMBIGUOUS_IDENTITY_NAMES) {
+            delete DOL_OPT_KNOWN_MOD_MARKET_ALIASES[key];
+            delete DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[key];
+            delete DOL_OPT_KNOWN_MOD_CLASSIFICATIONS[key];
+        }
+        for (const key of Object.keys(DOL_OPT_KNOWN_MOD_MARKET_ALIASES)) {
+            DOL_OPT_KNOWN_MOD_MARKET_ALIASES[key] = DOL_OPT_KNOWN_MOD_MARKET_ALIASES[key]
+                .filter(name => !DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.has(normalizeKey(name)));
         }
         return applied;
     }
@@ -1504,7 +1591,16 @@
 
         applyIdentityCatalog(index.identities);
         applyIdentityCatalog(index.mods);
-        return index.mods.map(mod => {
+        return markSharedRepositories(index.mods).map(mod => {
+            const target = parseGithubRepo(mod.githubUrl);
+            const indexedRelease = parseGithubRepo(mod.releaseUrl);
+            if (target?.sourcePath || (mod.sharedRepository && !target?.releaseTag) ||
+                (target?.releaseTag && mod.releaseUrl &&
+                (indexedRelease?.key !== target.key || indexedRelease?.releaseTag !== target.releaseTag))) {
+                // 旧索引可能把扩展版本写入主包条目，回退到该条目自身的 Wiki 元数据。
+                mod = { ...mod, releaseUrl: null, version: mod.wikiVersion || '', versionLabel: '',
+                    versionSource: 'wiki', updateDate: mod.wikiDate || '', updateDateSource: mod.wikiDate ? 'wiki' : null };
+            }
             const hasAuthoritativeClassification = mod.identityId !== null;
             const classification = deriveClassification(
                 mod.name || mod.wikiName,
@@ -1593,7 +1689,7 @@
         const seenNames = new Set();
 
         const addProfile = (modName, bootJson, modRef) => {
-            const profileKey = normalizeKey(modName);
+            const profileKey = String(modName || '').trim().toLowerCase();
             if (!profileKey || seenNames.has(profileKey)) return;
             seenNames.add(profileKey);
 
@@ -1642,15 +1738,7 @@
                 }
             }
 
-            // 4. 调用模组管理器的友好副标题解析方法 (dolOptGetModSubtext，显式禁用市场反查避免循环递归)
-            if (typeof window.dolOptGetModSubtext === 'function') {
-                const subtext = window.dolOptGetModSubtext(modName, resolvedMod || { bootJson: boot }, false, true);
-                if (subtext && typeof subtext === 'string') {
-                    displayNames.add(subtext.trim());
-                }
-            }
-
-            // 5. 提取本地配置中可能包含的 repository
+            // 4. 提取本地配置中明确声明的 repository，优先于按名称推断的仓库。
             if (boot.repository) {
                 const repoUrl = typeof boot.repository === 'string' ? boot.repository : boot.repository.url;
                 const repo = extractRepoName(repoUrl);
@@ -1663,9 +1751,15 @@
                 if (repositoryKey) repositoryKeys.add(repositoryKey);
             }
 
-            // 6. 查阅社区知名模组全能别名库，扩充中文与仓库标识
+            // 5. 只扩充与本地声明仓库相容的权威别名，不使用展示简介推断身份。
+            const declaredRepositoryKeys = new Set(repositoryKeys);
+            if (!declaredRepositoryKeys.size) {
+                (DOL_OPT_BOOT_IDENTITIES.get(String(modName).trim().toLowerCase())?.repositoryKeys || []).forEach(key => repositoryKeys.add(key));
+            }
             for (const name of Array.from(displayNames)) {
                 const norm = normalizeKey(name);
+                const knownRepos = DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[norm] || [];
+                if (declaredRepositoryKeys.size && knownRepos.length && !knownRepos.some(key => declaredRepositoryKeys.has(key))) continue;
                 const aliases = DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm] || [];
                 aliases.forEach(alias => {
                     displayNames.add(alias);
@@ -1673,11 +1767,10 @@
                     const ac = stripDoLPrefix(alias);
                     if (ac && ac.length >= 3) repos.add(ac);
                 });
-                const knownRepos = DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[norm] || [];
-                knownRepos.forEach(k => repositoryKeys.add(k));
+                if (!declaredRepositoryKeys.size) knownRepos.forEach(k => repositoryKeys.add(k));
             }
 
-            const cleanNames = Array.from(displayNames).map(cleanModTitle).filter(Boolean);
+            const cleanNames = Array.from(displayNames).map(cleanText).filter(Boolean);
             const normalizedNames = cleanNames.map(normalizeKey).filter(Boolean);
 
             profiles.push({
@@ -1736,6 +1829,8 @@
         if (!profiles) profiles = getLocalInstalledProfiles();
         mod._isIgnored = false;
         mod._ignoredVersion = '';
+        mod._matchedLocal = null;
+        mod._matchedScore = 0;
 
         // 兼容传入 Map 的老接口 (如单元测试)
         let profileList = profiles;
@@ -1754,16 +1849,16 @@
                 const repositoryKey = extractRepoKey(repoUrl);
                 if (repositoryKey) repositoryKeys.add(repositoryKey);
                 const normK = normalizeKey(k);
-                if (DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normK]) {
+                const knownRepos = DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normK] || [];
+                const compatibleRepository = !repositoryKey || !knownRepos.length || knownRepos.includes(repositoryKey);
+                if (compatibleRepository && DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normK]) {
                     DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normK].forEach(a => {
                         disp.add(a);
                         repos.add(normalizeKey(a));
                     });
                 }
-                if (DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normK]) {
-                    DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normK].forEach(repo => repositoryKeys.add(String(repo).toLowerCase()));
-                }
-                const clean = Array.from(disp).map(cleanModTitle).filter(Boolean);
+                if (!repositoryKey) knownRepos.forEach(repo => repositoryKeys.add(String(repo).toLowerCase()));
+                const clean = Array.from(disp).map(cleanText).filter(Boolean);
                 const allRepos = new Set(Array.from(repos).filter(Boolean));
                 allRepos.forEach(r => {
                     const c = stripDoLPrefix(r);
@@ -1790,6 +1885,7 @@
                     });
                     return {
                         ...p,
+                        normalizedNames: [...new Set([...p.normalizedNames, ...p.displayNames.map(normalizeKey)])],
                         repos: Array.from(allRepos),
                         repositoryKeys: (p.repositoryKeys || []).map(key => String(key).toLowerCase())
                     };
@@ -1799,7 +1895,15 @@
                 const normN = normalizeKey(p.name);
                 const nCore = stripDoLPrefix(p.name);
                 if (nCore && nCore.length >= 3) repos.add(nCore);
-                if (DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normN]) {
+                const repositoryKeys = new Set((p.repositoryKeys || []).map(key => String(key).toLowerCase()));
+                const repositoryKey = extractRepoKey(typeof p.repository === 'string' ? p.repository : p.repository?.url);
+                if (repositoryKey) repositoryKeys.add(repositoryKey);
+                if (!repositoryKeys.size) {
+                    (DOL_OPT_BOOT_IDENTITIES.get(String(p.name || '').trim().toLowerCase())?.repositoryKeys || []).forEach(key => repositoryKeys.add(key));
+                }
+                const knownRepos = DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normN] || [];
+                const compatibleRepository = !repositoryKeys.size || !knownRepos.length || knownRepos.some(key => repositoryKeys.has(key));
+                if (compatibleRepository && DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normN]) {
                     DOL_OPT_KNOWN_MOD_MARKET_ALIASES[normN].forEach(a => {
                         disp.add(a);
                         repos.add(normalizeKey(a));
@@ -1807,11 +1911,8 @@
                         if (ac && ac.length >= 3) repos.add(ac);
                     });
                 }
-                const repositoryKeys = new Set((p.repositoryKeys || []).map(key => String(key).toLowerCase()));
-                if (DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normN]) {
-                    DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[normN].forEach(repo => repositoryKeys.add(String(repo).toLowerCase()));
-                }
-                const clean = Array.from(disp).map(cleanModTitle).filter(Boolean);
+                if (!repositoryKeys.size) knownRepos.forEach(repo => repositoryKeys.add(String(repo).toLowerCase()));
+                const clean = Array.from(disp).map(cleanText).filter(Boolean);
                 const allRepos = new Set(Array.from(repos).filter(Boolean));
                 allRepos.forEach(r => {
                     const c = stripDoLPrefix(r);
@@ -1828,154 +1929,54 @@
             });
         }
 
-        const marketTitle = cleanModTitle(mod.name);
-        const marketNorm = normalizeKey(marketTitle);
+        const marketNorm = normalizeKey(mod.name);
         const marketRepo = extractRepoName(mod.githubUrl);
         const marketRepoKey = extractRepoKey(mod.githubUrl);
         const trustedRepoKeys = new Set([
             ...(Array.isArray(mod.repositoryKeys) ? mod.repositoryKeys : []),
-            ...(DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[marketNorm] || []),
-            ...(DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[marketRepo] || [])
+            ...(DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[marketNorm] || [])
         ].map(key => String(key).toLowerCase()));
-        if (trustedRepoKeys.size && !trustedRepoKeys.has(marketRepoKey)) {
-            mod._matchedLocal = null;
-            return mod.githubUrl ? 'not_installed' : (mod.otherUrl ? 'external_only' : 'unavailable');
-        }
-        const { base: marketBase, subs: marketSubs } = splitTitleParts(mod.name);
-        const marketBaseNorm = normalizeKey(marketBase);
-        const marketSubsNorm = marketSubs.map(normalizeKey);
-
+        const marketNames = new Set([mod.name, mod.wikiName, ...(mod.bootNames || []), ...(mod.aliases || [])]
+            .filter(value => typeof value === 'string').map(normalizeKey).filter(Boolean));
+        const marketBootNames = new Set((mod.bootNames || []).filter(name => typeof name === 'string').map(name => name.trim().toLowerCase()));
+        const marketOwner = mod.identityId || (!DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.has(marketNorm) && DOL_OPT_IDENTITY_NAME_OWNERS.get(marketNorm));
         let bestProfile = null;
         let bestScore = 0;
+        let bestMatchCount = 0;
 
         for (const p of profileList) {
-            let score = 0;
             const normTech = normalizeKey(p.name);
+            if (marketRepoKey && trustedRepoKeys.size && !trustedRepoKeys.has(marketRepoKey)) continue;
             if (marketRepoKey && p.repositoryKeys?.length && !p.repositoryKeys.includes(marketRepoKey)) continue;
+            const exactName = String(p.name || '').trim().toLowerCase();
+            const exactIdentity = DOL_OPT_BOOT_IDENTITIES.get(exactName);
+            const localOwner = exactIdentity?.id || DOL_OPT_IDENTITY_NAME_OWNERS.get(normTech);
+            if (marketOwner && localOwner && marketOwner !== localOwner && !DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.has(normTech)) continue;
+            if (marketOwner && exactIdentity?.id && marketOwner !== exactIdentity.id) continue;
+            if (marketBootNames.size && DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.has(normTech) && !marketBootNames.has(exactName)) continue;
+            if (DOL_OPT_AMBIGUOUS_IDENTITY_NAMES.has(marketNorm) && !(marketRepoKey && p.repositoryKeys?.includes(marketRepoKey))) continue;
 
-            // 1. 全名或别名完全一致 (Score 100)
-            if (p.normalizedNames.includes(marketNorm)) {
-                score = 100;
-            }
-
-            // 2. 仓库名精确匹配 (Score 90-95)
-            if (score < 90 && marketRepo) {
-                const marketRepoCore = stripDoLPrefix(marketRepo);
-                const techCore = stripDoLPrefix(normTech);
-                const isCoreMatch = marketRepoCore && marketRepoCore.length >= 3 && !GENERIC_STOP_WORDS.has(marketRepoCore) &&
-                    (marketRepoCore === normTech || marketRepoCore === techCore || (p.repos && p.repos.some(r => stripDoLPrefix(r) === marketRepoCore)));
-                const repoMatch = (marketRepo === normTech) || (p.repos && p.repos.includes(marketRepo)) || isCoreMatch;
-                if (repoMatch) {
-                    if (marketSubs.length > 0) {
-                        // 市场模组包含具体子扩展（如场景互动扩展），要求本地模组必须也含有该子模块关键词
-                        const subMatched = p.normalizedNames.some(pNorm =>
-                            marketSubsNorm.some(s => s.length >= 2 && pNorm.includes(s))
-                        );
-                        if (subMatched) {
-                            score = 95;
-                        }
-                    } else {
-                        // 市场模组是主模组，如果本地模组是一个明确命名的子 Addon（如 WovenRealmCookingAddon），不应匹配到主模组
-                        const isProfileSubAddon = ['addon', 'cooking', 'ui', 'plugin'].some(s => normTech.includes(s));
-                        if (marketRepo === normTech || !isProfileSubAddon) {
-                            score = 90;
-                        }
-                    }
-                }
-            }
-
-            // 3. 复合标题双重匹配：主名一致 + 子扩展模块鉴别词一致 (Score 85)
-            if (score < 85 && marketSubs.length > 0 && marketBaseNorm && !GENERIC_STOP_WORDS.has(marketBaseNorm)) {
-                for (const pName of p.displayNames) {
-                    const { base: pBase, subs: pSubs } = splitTitleParts(pName);
-                    const pBaseNorm = normalizeKey(pBase);
-                    const pSubsNorm = pSubs.map(normalizeKey);
-                    if (pBaseNorm === marketBaseNorm) {
-                        // 主名吻合，检查子模块关键词
-                        const hasSubMatch = marketSubsNorm.some(ws => {
-                            const wsClean = ws.replace(/扩展|拓展|addon|mod/g, '');
-                            return pSubsNorm.some(ps => ps.includes(ws) || (wsClean.length >= 2 && ps.includes(wsClean)));
-                        });
-                        if (hasSubMatch) {
-                            score = 85;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            // 4. 多别名斜杠拆分精确命中 (Score 80)
-            if (score < 80 && mod.name && mod.name.includes('/')) {
-                const parts = mod.name.split('/').map(x => normalizeKey(cleanModTitle(x))).filter(Boolean);
-                for (const pt of parts) {
-                    if (pt.length >= 3 && !GENERIC_STOP_WORDS.has(pt) && p.normalizedNames.includes(pt)) {
-                        score = 80;
-                        break;
-                    }
-                }
-            }
-
-            // 5. 跨语言语义长词双向包含匹配 (Score 82)
-            if (score < 80 && marketNorm.length >= 3) {
-                for (const pNorm of p.normalizedNames) {
-                    if (!pNorm || pNorm.length < 3) continue;
-                    if (GENERIC_STOP_WORDS.has(pNorm) || GENERIC_STOP_WORDS.has(marketNorm)) continue;
-
-                    const isMarketChinese = /[\u4e00-\u9fa5]/.test(marketNorm);
-                    const isPChinese = /[\u4e00-\u9fa5]/.test(pNorm);
-                    const hasChinese = isMarketChinese || isPChinese;
-
-                    const shortStr = marketNorm.length <= pNorm.length ? marketNorm : pNorm;
-                    const longStr = marketNorm.length > pNorm.length ? marketNorm : pNorm;
-
-                    // 纯 ASCII（英文/数字）环境防局部字母拼接假阳性：
-                    // 严禁短于 8 字符的纯英文字串作为子串跨词匹配（避免如 doli 误撞 modloaderdolimageloaderhook 等），且覆盖率须 >= 80%
-                    if (!hasChinese) {
-                        if (shortStr.length < 8) continue;
-                        if ((shortStr.length / longStr.length) < 0.8) continue;
-                    } else {
-                        // 中文语义环境下，短串有效长度至少为 3，且覆盖率须 >= 40%
-                        if (shortStr.length < 3) continue;
-                        if ((shortStr.length / longStr.length) < 0.4) continue;
-                    }
-
-                    const isContained = longStr.includes(shortStr);
-                    if (isContained) {
-                        if (marketSubs.length > 0) {
-                            const subMatched = p.normalizedNames.some(pn =>
-                                marketSubsNorm.some(s => s.length >= 2 && pn.includes(s))
-                            );
-                            if (subMatched) {
-                                score = 82;
-                                break;
-                            }
-                        } else {
-                            const isProfileSubAddon = ['addon', 'cooking', 'ui', 'plugin'].some(s => normTech.includes(s));
-                            if (!isProfileSubAddon) {
-                                score = 82;
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-
+            // 完整技术名和权威别名精确命中；子串或简介相似不能证明是同一模组。
+            let score = marketBootNames.has(exactName) ? 120 : marketNames.has(normTech) ? 110
+                : p.normalizedNames.some(name => marketNames.has(name)) ? 100 : 0;
+            if (!score && marketRepo && !mod.sharedRepository && !parseGithubRepo(mod.githubUrl)?.releaseTag && marketRepo === normTech) score = 90;
             if (score > bestScore) {
                 bestScore = score;
                 bestProfile = p;
+                bestMatchCount = 1;
+            } else if (score && score === bestScore) {
+                bestMatchCount++;
             }
         }
 
-        // 低于 80 分一律认定为未匹配
-        const matchedProfile = bestScore >= 80 ? bestProfile : null;
-        mod._matchedLocal = matchedProfile || null;
+        // 同分候选无法确认身份，避免取列表首项而更新了另一个模组。
+        const matchedProfile = bestScore >= 80 && bestMatchCount === 1 ? bestProfile : null;
+        mod._matchedLocal = matchedProfile;
         mod._matchedScore = matchedProfile ? bestScore : 0;
 
         if (!matchedProfile) {
             const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
-            if (isDead) {
-                return mod.otherUrl ? 'external_only' : 'unavailable';
-            }
+            if (isDead) return mod.otherUrl ? 'external_only' : 'unavailable';
             if (!mod.githubUrl && !mod.otherUrl) return 'unavailable';
             if (!mod.githubUrl && mod.otherUrl) return 'external_only';
             return 'not_installed';
@@ -3296,6 +3297,16 @@
         return true;
     }
 
+    async function offerOriginalDownloadSource(mod, error) {
+        const confirmed = await window.dolOptConfirm({
+            title: '请按作者说明下载',
+            message: `【${mod.name}】${error.message}。\n\n是否打开该条目原始主页？`,
+            confirmText: '打开主页', cancelText: '取消', confirmType: 'primary'
+        });
+        if (confirmed) window.open(mod.githubUrl || mod.otherUrl, '_blank', 'noopener');
+        return false;
+    }
+
     async function downloadAndInstallMod(mod, mirrorId = currentMirrorId, options = {}) {
         if (!mod) return false;
         const failBatch = reason => { options.onFailure?.(reason); return false; };
@@ -3326,6 +3337,10 @@
         } catch (err) {
             console.warn('[DolOptimization] 读取 Release 失败，尝试回退', err);
             if (options.batchMode) return failBatch(err?.message || '读取发布包失败');
+            if (['MANUAL_SOURCE', 'RELEASE_NOT_FOUND'].includes(err?.code)) {
+                resetDownloadProgress(mod.name);
+                return offerOriginalDownloadSource(mod, err);
+            }
             if (err?.code === 'REPO_NOT_FOUND' || err?.status === 404 || mod._isDeadRepo || isDeadRepo(mod.githubUrl)) {
                 reportProgress(null, '模组仓库已被作者移除', 'error');
                 if (typeof window.dolOptAlert === 'function') {
@@ -3356,6 +3371,7 @@
             releaseInfo = applyManualAssetSelection(releaseInfo, choice);
             if (!releaseInfo) return false;
             installAssets = getReleaseInstallAssets(releaseInfo);
+            targetVersion = releaseInfo.version || targetVersion;
         }
 
         if (!installAssets.length) {
@@ -3555,6 +3571,28 @@
                     fileObjects.push(fileBlob);
                 }
             }
+            // 写入前统一核验所有包，避免主包错误或附属包无效时留下部分安装。
+            const modController = window.dolOptGetController?.() || gui.modModLoadController;
+            if (typeof modController?.checkModZipFileIndexDB === 'function') {
+                const expectedNames = (mod.bootNames?.length ? mod.bootNames : [mod._matchedLocal?.name])
+                    .filter(name => typeof name === 'string' && name.trim()).map(name => name.trim().toLowerCase());
+                for (const [index, file] of fileObjects.entries()) {
+                    try {
+                        const boot = await modController.checkModZipFileIndexDB(new Uint8Array(await file.arrayBuffer()));
+                        const actualName = typeof boot?.name === 'string' ? boot.name.trim() : '';
+                        if (!actualName || typeof boot !== 'object' || Array.isArray(boot)) {
+                            throw new Error(`【${file.name}】没有可识别的模组清单，不能作为 ModLoader 模组导入。`);
+                        }
+                        if (index === 0 && expectedNames.length && !expectedNames.includes(actualName.toLowerCase())) {
+                            throw new Error(`所选【${mod.name}】的安装包实际为【${actualName}】，与已确认的模组身份不符，已停止安装。`);
+                        }
+                    } catch (error) {
+                        const failure = new Error(error?.message || '无法读取安装包的模组清单');
+                        failure.code = 'INSTALL_PACKAGE_INVALID';
+                        throw failure;
+                    }
+                }
+            }
             reportProgress(100, installAssets.length === 1 ? '下载完成，正在安装...' : `${installAssets.length} 个安装包下载完成，正在安装...`, 'installing');
 
             // 3. 构造虚拟文件列表并一次性交给 ModLoader 批量导入。
@@ -3662,6 +3700,11 @@
             }
             const isTooLarge = err?.code === 'FILE_TOO_LARGE';
             const isDigestFailure = ['DIGEST_MISMATCH', 'DIGEST_UNSUPPORTED', 'DIGEST_UNAVAILABLE'].includes(err?.code);
+            if (err?.code === 'INSTALL_PACKAGE_INVALID') {
+                reportProgress(null, err.message, 'error');
+                if (!options.batchMode) await window.dolOptAlert(err.message, '安装包校验失败');
+                return failBatch(err.message);
+            }
             console.warn('[DolOptimization] 页面内自动安装失败:', err);
             reportProgress(null, isDigestFailure ? '完整性校验失败，已阻止安装' : (isTooLarge ? '安装包较大，可改用浏览器下载' : '自动安装失败，请重试或改用浏览器下载'), 'error');
 
@@ -3710,8 +3753,7 @@
         if (!forceRefresh) {
             const cached = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL);
             if (cached && Array.isArray(cached) && cached.length > 0) {
-                applyIdentityCatalog(cached);
-                marketModList = cached;
+                marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: cached });
                 renderBatchInstallToolbar();
                 return marketModList;
             }
@@ -3730,7 +3772,7 @@
             const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
             if (stale && Array.isArray(stale) && stale.length > 0) {
                 await identityPromise;
-                marketModList = stale;
+                marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: stale });
                 renderBatchInstallToolbar();
                 return marketModList;
             }
@@ -3760,7 +3802,7 @@
         } catch (error) {
             const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
             if (stale && Array.isArray(stale) && stale.length > 0) {
-                marketModList = stale;
+                marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: stale });
                 renderBatchInstallToolbar();
                 return marketModList;
             }
@@ -3830,12 +3872,13 @@
 
         const normalizedName = normalizeKey(modName);
         const profiles = getLocalInstalledProfiles();
-        const localProfile = profiles.find(profile => normalizeKey(profile.name) === normalizedName)
-            || profiles.find(profile => profile.normalizedNames?.includes(normalizedName))
-            || { name: modName, version: '' };
+        const exactProfile = profiles.find(profile => String(profile.name).trim().toLowerCase() === String(modName).trim().toLowerCase());
+        const aliasProfiles = profiles.filter(profile => profile.normalizedNames?.includes(normalizedName));
+        const localProfile = exactProfile || (aliasProfiles.length === 1 ? aliasProfiles[0] : { name: modName, version: '' });
 
         let bestCandidate = null;
         let highestScore = 0;
+        let bestMatchCount = 0;
 
         for (const mod of source) {
             const candidate = { ...mod };
@@ -3851,10 +3894,13 @@
                 if (score > highestScore) {
                     highestScore = score;
                     bestCandidate = candidate;
+                    bestMatchCount = 1;
+                } else if (score === highestScore) {
+                    bestMatchCount++;
                 }
             }
         }
-        return bestCandidate;
+        return bestMatchCount === 1 ? bestCandidate : null;
     }
 
     /**
@@ -3868,26 +3914,24 @@
         const list = marketModList.length ? marketModList : (readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true) || []);
         if (!Array.isArray(list) || !list.length) return '';
 
-        const core = stripDoLPrefix(modName);
-        for (const m of list) {
-            const mNorm = normalizeKey(m.name);
-            const mRepo = extractRepoName(m.githubUrl);
-            const mRepoCore = stripDoLPrefix(mRepo);
-            const isMatch = (mNorm === norm) ||
-                (mRepo && mRepo === norm) ||
-                (core.length >= 3 && mRepoCore.length >= 3 && core === mRepoCore) ||
-                (DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm] && DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm].includes(mNorm));
-            if (isMatch) {
-                if (m.name && m.name !== modName && /[\u4e00-\u9fa5]/.test(m.name)) {
-                    return m.name;
-                }
-                const d = m.desc || m.description;
-                if (d && typeof d === 'string') {
-                    let clean = d.replace(/[\r\n\t]+/g, ' ').trim();
-                    clean = clean.replace(/^(?:包含|提供|支持|增加|新增|用于)[：:]\s*/, '');
-                    if (clean.length > 28) clean = clean.slice(0, 26) + '...';
-                    if (clean) return clean;
-                }
+        const knownRepos = DOL_OPT_KNOWN_MOD_REPOSITORY_KEYS[norm] || [];
+        const names = new Set([norm, ...(DOL_OPT_KNOWN_MOD_MARKET_ALIASES[norm] || []).map(normalizeKey)]);
+        const matches = list.filter(m => {
+            const repoKey = extractRepoKey(m.githubUrl);
+            if (repoKey && knownRepos.length && !knownRepos.includes(repoKey)) return false;
+            return [m.name, ...(m.bootNames || []), ...(m.aliases || [])].some(name => names.has(normalizeKey(name)));
+        });
+        if (matches.length === 1) {
+            const m = matches[0];
+            if (m.name && m.name !== modName && /[\u4e00-\u9fa5]/.test(m.name)) {
+                return m.name;
+            }
+            const d = m.desc || m.description;
+            if (d && typeof d === 'string') {
+                let clean = d.replace(/[\r\n\t]+/g, ' ').trim();
+                clean = clean.replace(/^(?:包含|提供|支持|增加|新增|用于)[：:]\s*/, '');
+                if (clean.length > 28) clean = clean.slice(0, 26) + '...';
+                if (clean) return clean;
             }
         }
         return '';
@@ -4268,6 +4312,9 @@
                     return false;
                 }
                 resetDownloadProgress(mod.name);
+                if (['MANUAL_SOURCE', 'RELEASE_NOT_FOUND'].includes(error?.code)) {
+                    return offerOriginalDownloadSource(mod, error);
+                }
                 if (error?.code === 'REPO_NOT_FOUND' || error?.status === 404 || mod._isDeadRepo || isDeadRepo(mod.githubUrl)) {
                     if (typeof window.dolOptAlert === 'function') {
                         await window.dolOptAlert('该模组的 GitHub 仓库已被作者移除或不存在 (404)，无法下载更新。\n\n已自动更新本地模组状态为无需更新。', '模组仓库已失效');

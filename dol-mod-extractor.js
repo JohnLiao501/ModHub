@@ -7,14 +7,16 @@
  *   extractModsFromHtml(html)    从 HTML 字符串解析（不请求 GitHub）
  *   fetchModIdentities()         获取网站维护的模组身份表
  *   mergeModIdentities(mods)     将身份表合并进模组列表
- *   fetchModRelease(mod)         传入模组对象，获取其 GitHub 最新 Release（带缓存）
+ *   fetchModRelease(mod)         传入模组对象，获取其 GitHub 指定或最新 Release（带缓存）
  *   clearReleaseCache()          清空 release 缓存
+ *   parseGithubReleaseTarget()   校验精确发布入口
+ *   markSharedRepositories()     标记共享仓库并清除旧快照错配版本
  */
 
 const WIKI_API = 'https://degreesoflewditycn.miraheze.org/w/api.php';
 const WIKI_PAGE = '模组列表';
 const IDENTITY_FILE = './mod-identities.json';
-const CACHE_PREFIX = 'dol_mod_release_v1_';
+const CACHE_PREFIX = 'dol_mod_release_v2_';
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 小时
 
 // ==================== 通用工具 ====================
@@ -207,12 +209,12 @@ function extractName(td) {
   return cleanText(clone.textContent);
 }
 
-/** 提取该行所有 GitHub 链接 */
+/** 仅提取名称列中的 GitHub 项目链接，描述与作者中的引用不是发布源。 */
 function extractGithubUrls(row) {
   const urls = [];
   row.querySelectorAll('a[href]').forEach((a) => {
     const href = a.getAttribute('href') || '';
-    if (/^https?:\/\/(www\.)?github\.com\//i.test(href)) {
+    if (parseGithubUrl(href)) {
       urls.push(href.split('#')[0]);
     }
   });
@@ -300,59 +302,68 @@ export function extractModsFromHtml(html) {
       const tds = Array.from(row.querySelectorAll('td'));
       if (!tds.length) continue;
 
-      const name = extractName(tds[idx.name]);
-      const description = cleanText(tds[idx.description] ? tds[idx.description].textContent : '');
-      const author =
-        idx.author >= 0 && tds[idx.author] ? cleanText(tds[idx.author].textContent) : '';
-      const dateText = idx.date >= 0 && tds[idx.date] ? cleanText(tds[idx.date].textContent) : '';
-      const { date, version } = parseDateCell(dateText);
+      const nameCell = tds[idx.name];
+      const namedProjects = Array.from(nameCell?.querySelectorAll('a[href]') || []).filter((a) =>
+        parseGithubUrl(a.getAttribute('href')) && cleanText(a.textContent)
+        && !/github|discord|下载|论坛|链接|地址|源码|镜像|\u2708|\u2764|→|\[.*?\]/i.test(cleanText(a.textContent)));
+      const projects = new Set(namedProjects.map((a) => a.getAttribute('href').replace(/\/+$/, ''))).size > 1
+        ? namedProjects : [null];
+      for (const project of projects) {
+        const name = (project ? cleanText(project.textContent) : extractName(nameCell))
+          .replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0E\uFE0F\u200D]/gu, '').trim();
+        const description = cleanText(tds[idx.description] ? tds[idx.description].textContent : '');
+        const author =
+          idx.author >= 0 && tds[idx.author] ? cleanText(tds[idx.author].textContent) : '';
+        const dateText = idx.date >= 0 && tds[idx.date] ? cleanText(tds[idx.date].textContent) : '';
+        const { date, version } = parseDateCell(dateText);
 
-      const githubUrls = extractGithubUrls(row);
-      const githubUrl = githubUrls[0] || null;
+        const githubUrls = project ? [project.getAttribute('href')] : extractGithubUrls(nameCell);
+        const githubUrl = githubUrls[0] || null;
 
-      const otherUrls = extractOtherUrls(row);
-      const otherUrl = pickBestOtherUrl(otherUrls);
+        const otherUrls = project ? [] : extractOtherUrls(nameCell);
+        const otherUrl = pickBestOtherUrl(otherUrls);
 
-      // 状态判定：核心字段决定 Failed / 通过
-      const coreMissing = [];
-      if (!name) coreMissing.push('name');
-      if (!githubUrl && !otherUrl) coreMissing.push('url');
+        // 状态判定：核心字段决定 Failed / 通过
+        const coreMissing = [];
+        if (!name) coreMissing.push('name');
+        if (!githubUrl && !otherUrl) coreMissing.push('url');
 
-      // 次要字段决定 Warning
-      const secondaryMissing = [];
-      if (!description) secondaryMissing.push('description');
-      if (!author) secondaryMissing.push('author');
-      if (!date) secondaryMissing.push('updateDate');
-      if (!version) secondaryMissing.push('version');
-      if (!githubUrl) secondaryMissing.push('githubUrl'); // 无 GitHub 视为次要缺失
+        // 次要字段决定 Warning
+        const secondaryMissing = [];
+        if (!description) secondaryMissing.push('description');
+        if (!author) secondaryMissing.push('author');
+        if (!date) secondaryMissing.push('updateDate');
+        if (!version) secondaryMissing.push('version');
+        if (!githubUrl) secondaryMissing.push('githubUrl'); // 无 GitHub 视为次要缺失
 
-      let status = 'Succeed';
-      if (coreMissing.length > 0) status = 'Failed';
-      else if (secondaryMissing.length > 0) status = 'Warning';
+        let status = 'Succeed';
+        if (coreMissing.length > 0) status = 'Failed';
+        else if (secondaryMissing.length > 0) status = 'Warning';
 
-      const missing = [...coreMissing, ...secondaryMissing];
+        const missing = [...coreMissing, ...secondaryMissing];
 
-      mods.push({
-        name: name || null,
-        githubUrl,
-        githubUrls,
-        otherUrl,
-        otherUrls,
-        description: description || null,
-        author: author || null,
-        // 表格中的版本 / 日期（未请求 release 时的回退值）
-        version: version || null,
-        updateDate: date || null,
-        tableVersion: version || null,
-        tableUpdateDate: date || null,
-        tableDateRaw: dateText || null,
-        status,
-        missing,
-      });
+        mods.push({
+          name: name || null,
+          githubUrl,
+          githubUrls,
+          otherUrl,
+          otherUrls,
+          description: description || null,
+          author: author || null,
+          // 表格中的版本 / 日期（未请求 release 时的回退值）
+          version: version || null,
+          updateDate: date || null,
+          tableVersion: version || null,
+          tableUpdateDate: date || null,
+          tableDateRaw: dateText || null,
+          status,
+          missing,
+        });
+      }
     }
   }
 
-  return mods;
+  return markSharedRepositories(mods);
 }
 
 // ==================== 从 Wiki 获取 ====================
@@ -414,21 +425,78 @@ export function clearReleaseCache() {
 
 // ==================== 获取 GitHub Release（按需 + 缓存） ====================
 
-function parseGithubUrl(url) {
-  if (!url) return null;
-  const m = url.match(/github\.com\/([^/?#]+)\/([^/?#]+)/i);
-  if (!m) return null;
-  return { owner: m[1], repo: m[2].replace(/\.git$/i, '') };
+function parseGithubUrl(value) {
+  try {
+    const url = new URL(value);
+    if (!/^https?:$/.test(url.protocol) || !/^(www\.)?github\.com$/i.test(url.hostname)) return null;
+    const [owner, rawRepo] = url.pathname.split('/').filter(Boolean);
+    const repo = rawRepo?.replace(/\.git$/i, '');
+    return owner && repo ? { owner, repo } : null;
+  } catch {
+    return null;
+  }
+}
+
+export function markSharedRepositories(mods) {
+  const repoCounts = new Map();
+  for (const mod of mods) {
+    const repo = parseGithubUrl(mod.githubUrl);
+    if (repo) {
+      const key = `${repo.owner}/${repo.repo}`.toLowerCase();
+      repoCounts.set(key, (repoCounts.get(key) || 0) + 1);
+    }
+  }
+  return mods.map(mod => {
+    const repo = parseGithubUrl(mod.githubUrl);
+    const sharedRepository = Boolean(mod.sharedRepository || (!!repo && repoCounts.get(`${repo.owner}/${repo.repo}`.toLowerCase()) > 1));
+    const target = parseGithubReleaseTarget(mod.githubUrl);
+    const unscopedVersion = mod.versionSource === 'github' && mod.githubUrl && (!target || (sharedRepository && !target.tag));
+    return { ...mod, sharedRepository, ...(unscopedVersion ? {
+      version: mod.wikiVersion || mod.tableVersion || null, versionLabel: null, versionSource: 'wiki',
+      updateDate: mod.wikiDate || mod.tableUpdateDate || null, updateDateSource: 'wiki', releaseUrl: null,
+    } : {}) };
+  });
+}
+// 分支、目录、文件与讨论页不能隐式跳到仓库的其他产品发布。
+export function parseGithubReleaseTarget(value) {
+  const repo = parseGithubUrl(value);
+  if (!repo) return null;
+  try {
+    const path = new URL(value).pathname.replace(/\/+$/, '');
+    const tagMatch = path.match(/^\/[^/]+\/[^/]+\/releases\/tag\/(.+)$/i);
+    const assetMatch = path.match(/^\/[^/]+\/[^/]+\/releases\/download\/([^/]+)\/([^/]+)$/i);
+    if (!tagMatch && !assetMatch && !/^\/[^/]+\/[^/]+(?:\/releases(?:\/latest)?)?$/i.test(path)) return null;
+    return { ...repo, tag: decodeURIComponent(tagMatch?.[1] || assetMatch?.[1] || ''), assetName: assetMatch ? decodeURIComponent(assetMatch[2]) : null };
+  } catch {
+    return null;
+  }
 }
 
 function pickDownloadAsset(assets) {
   if (!assets || !assets.length) return null;
   const prefer = [/\.zip$/i, /\.7z$/i, /\.rar$/i, /\.mod$/i, /\.jar$/i, /\.tar\.gz$/i];
   for (const re of prefer) {
-    const found = assets.find((a) => re.test(a.name));
-    if (found) return found;
+    const found = assets.filter((a) => re.test(a.name));
+    if (found.length) return found.length === 1 ? found[0] : null;
   }
   return assets.find((a) => a.downloadUrl) || null;
+}
+
+// 与 Mod 端保持一致，只按完整产品系列匹配，避免主包、扩展与依赖之间的子串误认。
+function getAssetSeries(name) {
+  return String(name || '').replace(/\.(?:zip|mod)$/ig, '')
+    .replace(/(?:for[\s._-]*)?dol[\s._-]*\d+(?:\.\d+)+/ig, '')
+    .replace(/(?:version|ver|v)?\d+(?:\.\d+)+/ig, '')
+    .replace(/(?:^|[\s._-])build[\s._-]*\d+/ig, '')
+    .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '').replace(/(?:mod)+$/, '');
+}
+
+function matchesAssetIdentity(asset, mod) {
+  const series = getAssetSeries(String(asset.name || '').replace(/(?:^|[\s._-])(?:desktop|windows|pc|mobile|android|english|chinese|chs|cht|cn|en|zh)(?=[\s._-]|$)/ig, ''));
+  return [...(mod?.bootNames || []), ...(mod?.aliases || []), mod?.name].some(name => {
+    const identity = getAssetSeries(name);
+    return identity.length >= 3 && identity === series;
+  });
 }
 
 function rateLimitError(res) {
@@ -442,7 +510,7 @@ function rateLimitError(res) {
 }
 
 /**
- * 获取模组的 GitHub 最新 Release（带 localStorage 缓存，不使用 Token）
+ * 获取模组的 GitHub 指定或最新 Release（带 localStorage 缓存，不使用 Token）
  * @param {object} mod 模组对象（需要 githubUrl）
  * @param {object} [options]
  * @param {boolean} [options.useCache=true] 是否使用缓存
@@ -451,10 +519,12 @@ export async function fetchModRelease(mod, options = {}) {
   const { useCache = true } = options;
 
   if (!mod || !mod.githubUrl) throw new Error('模组缺少 GitHub 链接');
-  const parsed = parseGithubUrl(mod.githubUrl);
-  if (!parsed) throw new Error('无法解析 GitHub 链接');
+  const parsed = parseGithubReleaseTarget(mod.githubUrl);
+  if (!parsed) throw new Error('该链接未指定模组发布页，请前往原始主页下载');
 
-  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}`;
+  const sharedRepository = !!mod.sharedRepository && !parsed.tag;
+  const releasePath = parsed.tag ? `tags/${encodeURIComponent(parsed.tag)}` : 'latest';
+  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || []]))}`;
 
   if (useCache) {
     const cached = readCache(cacheKey);
@@ -464,12 +534,12 @@ export async function fetchModRelease(mod, options = {}) {
   const headers = { Accept: 'application/vnd.github+json' };
   const baseUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`;
 
-  const latestRes = await fetch(`${baseUrl}/releases/latest`, { headers });
+  const latestRes = await fetch(sharedRepository ? `${baseUrl}/releases?per_page=100` : `${baseUrl}/releases/${releasePath}`, { headers });
   if (latestRes.status === 429 || latestRes.status === 403) throw rateLimitError(latestRes);
 
   let releaseData = null;
 
-  if (latestRes.status === 404) {
+  if (latestRes.status === 404 && !parsed.tag && !sharedRepository) {
     const listRes = await fetch(`${baseUrl}/releases?per_page=1`, { headers });
     if (listRes.status === 429 || listRes.status === 403) throw rateLimitError(listRes);
     if (!listRes.ok) throw new Error(`GitHub API 错误: ${listRes.status}`);
@@ -482,15 +552,29 @@ export async function fetchModRelease(mod, options = {}) {
     releaseData = await latestRes.json();
   }
 
-  const assets = (releaseData.assets || []).map((a) => ({
+  if (sharedRepository) {
+    // ponytail: 最多检索最近 100 个发布，无可信匹配时转作者主页，确有需求再增加分页。
+    releaseData = (Array.isArray(releaseData) ? releaseData : []).filter(release => !release.draft && !release.prerelease
+      && (release.assets || []).some(asset => matchesAssetIdentity(asset, mod)))
+      .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0];
+    if (!releaseData) throw new Error('共享仓库中未找到当前模组的发布，请前往原始主页核对');
+  }
+  if (parsed.tag && releaseData.tag_name !== parsed.tag) throw new Error('返回的 Release 标签与模组来源不一致');
+  const assets = (releaseData.assets || []).filter((a) => (!parsed.assetName || a.name === parsed.assetName)
+    && (!sharedRepository || matchesAssetIdentity(a, mod))).map((a) => ({
     name: a.name,
     size: a.size,
     contentType: a.content_type,
     downloadUrl: a.browser_download_url,
   }));
+  if (parsed.assetName && !assets.length) throw new Error('指定的模组附件不存在');
   const best = pickDownloadAsset(assets);
 
-  const version = releaseData.tag_name || mod.version || null;
+  const assetVersions = String(best?.name || '').match(/\d+(?:\.\d+)+/g) || [];
+  const gameVersion = String(best?.name || '').match(/(?:^|[\s_.-])(?:for[\s._-]*)?dol[\s._-]*v?(0\.\d+\.\d+(?:\.\d+)?)(?=[\s_.-]|$)/i)?.[1]
+    || (assetVersions.length > 1 ? assetVersions.find(version => /^0\.5\.\d+(?:\.\d+)?$/.test(version)) : '');
+  const assetVersion = String(best?.name || '').replace(gameVersion || '', '').match(/\d+(?:\.\d+)+/)?.[0];
+  const version = sharedRepository ? assetVersion || mod.wikiVersion || mod.tableVersion || null : releaseData.tag_name || mod.version || null;
   const updateDate = releaseData.published_at
     ? releaseData.published_at.slice(0, 10)
     : mod.updateDate || null;
@@ -498,7 +582,7 @@ export async function fetchModRelease(mod, options = {}) {
   const release = {
     tagName: releaseData.tag_name || null,
     releaseName: releaseData.name || null,
-    htmlUrl: releaseData.html_url || `${mod.githubUrl}/releases/latest`,
+    htmlUrl: releaseData.html_url || `https://github.com/${parsed.owner}/${parsed.repo}/releases/${releaseData.tag_name ? `tag/${encodeURIComponent(releaseData.tag_name)}` : 'latest'}`,
     publishedAt: releaseData.published_at || null,
     prerelease: !!releaseData.prerelease,
     assetName: best ? best.name : null,
