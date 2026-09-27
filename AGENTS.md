@@ -17,7 +17,8 @@
      - 本模组打包生成的安装包**仅允许存放于项目发布归档路径** `release/ModHub-v<version>.zip`，并通过 GitHub Releases 分发。
      - **不再同步保存到游戏 MOD 文件夹**（自 v1.0.1 起生效）；游戏内的安装与调试由玩家自行通过模组市场或手动导入 `release/` 中的包体完成。
      - **严禁在根目录或其他任何文件夹遗留或生成 `.zip` 安装包**；每次打包完成后根目录必须保持干净，绝不允许残留任何散落的包体。
-     - **历史 release 永久保留（红线）**：`release/` 归档目录与 GitHub Releases 中的所有历史版本安装包**严禁删除或覆盖**，确保任何旧版本均可追溯与回滚。
+     - **本地归档保留最近 3 个数值版本**：`release/` 中每个版本仅保留一份正式包；同版本重打包默认覆盖当前最新版本的正式包，较低版本不重新生成或覆盖。校验临时包并成功替换正式包后，才清理超出保留范围的旧包及 `ModHub-v<version>-archiveN.zip` 同版重复包。
+     - **GitHub 历史永久保留（红线）**：GitHub Releases 中的历史版本与安装包永久保留，不受本地归档清理规则影响。
 
 ---
 
@@ -26,6 +27,7 @@
 1. **全局语言规范**：
    - 所有对话交互、任务规划、执行总结、代码注释及界面呈现，**必须统一使用规范简体中文**。
    - 专有名词保留行业标准或通用对照（如 Flex、requestAnimationFrame、ModLoader 等）。
+   - ModHub 自有文件使用 `modhub` 命名，JavaScript 接口与 DOM ID 使用 `modHub` 前缀，CSS 类使用 `modhub-`，常量使用 `MODHUB_`，日志使用 `[ModHub]`。旧版 `dol_opt_` 存储键仅供兼容读取，新写入使用 `modhub_`；第三方模组的真实名称与标识不得随本项目更名替换。
 2. **严格禁止 Emoji 表情符号（0 Emoji 红线）**：
    - 界面所有标签、按钮、日志信息、提示框、代码注释及文档中，**严禁使用任何 Emoji 表情符号**（如火箭、星星、包裹、扳手等图形符号）。
    - 每次提交或打包前，必须执行 Python Unicode 扫描，确保核心修改文件中 Emoji 计数严格为 0。
@@ -34,7 +36,7 @@
    - 杜绝使用高饱和刺眼背景、外挂 UI 框架或花哨突兀的动画，保持克制、沉稳与原生契合。
 4. **全面淘汰浏览器原生弹窗**：
    - 严禁在任何交互逻辑中调用浏览器原生白底 `confirm()` 或 `alert()`。
-   - 所有确认提示、模组删除、错误警告必须统一调用本项目封装的游戏原生暗黑模态对话框 `window.dolOptConfirm` 与 `window.dolOptAlert`。
+   - 所有确认提示、模组删除、错误警告必须统一调用本项目封装的游戏原生暗黑模态对话框 `window.modHubConfirm` 与 `window.modHubAlert`。
 5. **移动端与窄屏设备第一优先适配原则**：
    - 必须充分考虑手机端浏览器、竖屏折叠屏与窄屏窗口玩家的使用体验。
    - 所有的布局、交互控件、操作按钮、弹窗遮罩与滚动列表，必须原生支持触控手势，且在窄屏（如屏幕宽度 <= 768px 或小至 360px）下绝不能出现内容挤压变形、文字生硬截断、按钮被压缩成空块或被底部状态栏遮挡的现象。
@@ -44,7 +46,7 @@
 ## 三、 核心技术架构与交互规约
 
 ### 1. 拖拽排序与视口自动滚动引擎
-- **统一拖拽驱动**：通过 `dolOptBindDragSort(ulElement, listType)` 统一接管，桌面端基于 HTML5 Drag & Drop，移动端基于 `.dol-opt-drag-handle` 触控事件。
+- **统一拖拽驱动**：通过 `modHubBindDragSort(ulElement, listType)` 统一接管，桌面端基于 HTML5 Drag & Drop，移动端基于 `.modhub-drag-handle` 触控事件。
 - **边缘平滑自动滚动 (Auto-scroll)**：
   - 感应阈值设定为 `70px`，靠近边缘按距离动态缓动（2px ~ 16px/帧）。
   - 必须由 `requestAnimationFrame` 驱动，指针静止悬停在边缘时依然平滑滚动；在 `drop`、`dragend`、`touchend`、`touchcancel` 时必须彻底清理 RAF 句柄。
@@ -54,9 +56,9 @@
 - **入口**：模组管理顶部常驻【导入模组】主按钮，支持单选或批量 Zip 文件导入。
 - **单模组导入**：包含 ReadMe 时平滑跳转至【模组说明】页签；无 ReadMe 时停留在【模组管理】界面并带有金色呼吸高亮脉冲。
 - **批量模组导入**：坚决不切走页面打断用户，在【模组管理】界面集中保持批量金色呼吸高亮，并弹出友好的汇总统计 Toast。
-- **模组市场安装（页签停留红线）**：从【模组市场】页签一键安装模组后，若玩家在重载确认框选择【稍后重载】，**必须停留在模组市场页签，严禁自动跳转**（玩家通常需要连续安装多个模组，跳转会强制打断浏览）。实现上由市场调用 `dolOptHandleAddMod` 时传递 `keepCurrentTab: true`，仅 Toast 提示安装完成；本地导入路径不得携带该参数，保持「切换管理页并高亮」的原有设计。
+- **模组市场安装（页签停留红线）**：从【模组市场】页签一键安装模组后，若玩家在重载确认框选择【稍后重载】，**必须停留在模组市场页签，严禁自动跳转**（玩家通常需要连续安装多个模组，跳转会强制打断浏览）。实现上由市场调用 `modHubHandleAddMod` 时传递 `keepCurrentTab: true`，仅 Toast 提示安装完成；本地导入路径不得携带该参数，保持「切换管理页并高亮」的原有设计。
 
-### 3. 游戏原生暗黑模态框规范 (`dolOptConfirm` / `dolOptAlert`)
+### 3. 游戏原生暗黑模态框规范 (`modHubConfirm` / `modHubAlert`)
 - **视觉规格**：
   - 遮罩层：75% 纯黑背景 + `backdrop-filter: blur(2px)`，层级固定 `z-index: 100000`。
   - 弹窗主体：`var(--850)` 深灰黑底色 + `var(--600)` 边框 + `0 10px 30px rgba(0,0,0,0.85)` 阴影 + 入场微缩放动画。
@@ -76,13 +78,34 @@
 - **底部安全边距 (Safe Area) 防遮挡**：
   - 模组管理器与各类弹出层容器底部，必须显式保留至少 `60px` 的底部安全外边距或内边距，确保页面滑动至最底端时脱离底层悬浮状态栏的遮挡。
 - **模态对话框窄屏自适应**：
-  - `dol-opt-modal-dialog` 宽度必须采用自适应流式设定（如 `width: 100%; max-width: 440px;`），在窄屏下留出 16px 边距。
+  - `modhub-modal-dialog` 宽度必须采用自适应流式设定（如 `width: 100%; max-width: 440px;`），在窄屏下留出 16px 边距。
 
 ### 5. 网站与 Mod 数据接口同步规范
-- **统一索引入口**：模组市场版本数据以 Cloudflare Worker 的 `release-index.json` 为在线事实来源，网站与 `src/javascript/dol-mod-market.js` 必须消费同一份索引结构。
+- **统一索引入口**：模组市场版本数据以 Cloudflare Worker 的 `release-index.json` 为在线事实来源，网站与 `src/javascript/modhub-market.js` 必须消费同一份索引结构。
 - **变更必须同步审查**：凡修改网站的索引字段、地址、身份映射或版本判定逻辑，必须在同一任务中同步检查并调整 Mod 端解析与测试。
 - **离线回退链路**：Mod 必须保留“Cloudflare 统一索引 -> 浏览器最后成功缓存 -> Wiki 直连 -> 内置别名映射”的容错顺序。
-- **契约测试**：每次网站索引结构调整后，必须在 `src/test-smart-sort.js` 中更新统一索引契约测试。
+- **契约测试**：每次网站索引结构调整后，必须在 `tests/market-catalog.test.js` 中更新统一索引契约测试，并通过 `node src/test-smart-sort.js` 运行完整回归。
+
+### 6. 源码模块与加载边界
+
+新增或迁移代码时，按职责选择文件。仅在依赖边界清楚、维护收益明确时继续拆分，不以文件行数作为拆分门槛；调整模块边界、文件路径或加载顺序后，同步检查并按需更新 `src/boot.json`、相关测试与 `README.md`。
+
+`src/javascript/` 中的运行模块按下表顺序加载，实际清单以 `src/boot.json` 的 `scriptFileList` 为准：
+
+| 文件 | 职责 |
+| --- | --- |
+| `modhub-manager.js` | 公共入口、ModLoader 兼容、模组导入与状态持久化、排序、操作锁和失败恢复、启动错误捕获 |
+| `modhub-dialog.js` | Toast、确认框、提示框及弹窗状态 |
+| `modhub-drag.js` | 长按、桌面与触摸拖拽、边缘自动滚动 |
+| `modhub-beauty.js` | 可选美化插件的加载、自动启用、渲染、排序与保存 |
+| `modhub-readme.js` | 模组说明、Markdown、徽章、内置图片与在线回退 |
+| `modhub-log.js` | 日志诊断、筛选、截图与启动自检 |
+| `modhub-market.js` | 市场目录、身份与版本识别、依赖和冲突检查、下载安装 |
+
+- 跨文件调用通过显式的 `window` 接口，不依赖其他文件的顶层局部变量；新增自有接口使用 `modHub` 前缀，既有模板入口 `initModManage`、`initModReadMe` 沿用现名。重排持久化与 `modHubRunManagerAction` 的统一操作锁、失败恢复继续由管理器协调。
+- `src/stylesheet/` 的加载顺序为 `modhub.css`（公共与响应式样式）、`modhub-market.css`（市场样式）、`modhub-overrides.css`（跨页面提示及最终覆盖），由 `styleFileList` 注册。最后一份包含跨模块覆盖，不能随意前移。
+- 仅移动 CSS 规则时，按清单顺序拼接后的内容必须与拆分前等价；涉及样式文件拆分或层叠顺序调整时，核对 360px、768px 与桌面布局，以及页签、操作按钮、弹窗和日志全屏。使用测试页面验证时须注明，不能表述为完整游戏实测。
+- `src/twee/modloader/modloader.twee` 保留界面模板与初始化入口；三个 `modloader-patch-*.twee` 分别服务对应补丁入口。复杂交互放在 JavaScript 模块中，不向 Twee 内堆积业务逻辑。
 
 ---
 
@@ -99,24 +122,44 @@
 3. **真实性验证**：
    - 严禁臆测未经验证的功能已经生效，每次输出前确认产物已落盘。
 
+### 测试目录约定
+
+`src/test-smart-sort.js` 是统一入口，按顺序等待各组测试完成；必须保留失败退出和异步未完成检测。具体用例放在项目根目录 `tests/`：
+
+| 文件 | 覆盖范围 |
+| --- | --- |
+| `manager.test.js` | 版本与加载清单、管理器状态、持久化及公共弹窗 |
+| `market-catalog.test.js` | 统一索引、模组身份、发布来源与版本识别 |
+| `diagnostics-conflicts.test.js` | 日志诊断、界面契约、依赖与冲突 |
+| `market-install.test.js` | 安装计划、批量安装、取消、包体校验及来源筛选 |
+| `interaction.test.js` | 说明、美化、长按与拖拽交互 |
+
+- 共用沙箱与加载工具集中在 `tests/helpers.js`，各运行脚本仍在独立作用域中加载，避免遗漏的跨文件依赖被测试掩盖。
+- 用 `srcRoot` 定位源码，用 `readStyles()` 按 `styleFileList` 顺序读取全部样式；不能只读取基础 CSS 而漏掉市场或覆盖规则。
+- 移动用例时保留原有断言、执行顺序及异步等待，不为拆分引入新的测试框架。
+- 涉及根目录提取器或身份数据时，额外运行 `node test-dol-mod-extractor.js`；涉及网站源码时，在 `dolmod-site/` 中运行 `npm test`。
+- 涉及打包脚本或归档策略时，额外运行 `python tests/test_pack.py`，验证同版替换、失败保护、数值版本排序及本地保留规则。
+
 ---
 
 ## 五、 版本升级与打包发布流程
 
-1. **版本号递增（若发布新版）**：
-   - 修改 `src/boot.json` 中的 `"version"` 字段。
-   - 同步更新 `src/test-smart-sort.js` 中的版本号断言。
+1. **版本号按用户要求调整**：
+   - 默认保持 `src/boot.json` 中的 `"version"` 不变；只有用户明确要求升级版本号时，才修改该字段并生成新版安装包。`pack.py` 不自动升版。
+   - 升版时同步更新 `tests/manager.test.js` 中的版本号断言及 `src/test-smart-sort.js` 的成功提示。
 2. **自动化打包与归档（仅限 release，严禁放别处）**：
    - 执行根目录打包脚本：`python pack.py`。
-   - 脚本自动压缩 `src/` 目录中的全部条目，直接输出至项目发布归档目录 `release/ModHub-v<version>.zip`。
+   - 脚本按现有排除规则打包 `src/` 中的运行资源，正式包路径为 `release/ModHub-v<version>.zip`；`src/test-smart-sort.js` 被排除，根目录 `tests/` 不进入安装包。
    - 保持 Zip 根目录扁平规范。
-   - 自动校验包体完整性（Zip 内部测试、清单比对、正斜杠路径验证等）。
-3. **历史版本保留**：
-   - `release/` 归档目录中的历史版本**永久保留**（红线），脚本仅打印保留清单，绝不删除。
+   - 先在 `release/` 内生成临时包，完成 Zip 完整性、包内版本、清单、重复条目及相对路径校验后，再替换正式包；校验或替换失败时保留原正式包，不清理历史归档。
+   - 同版本重打包默认覆盖当前最新版本的正式包，不另存同版备份；若当前源码版本低于本地最新数值版本，脚本拒绝覆盖或重新生成该历史版本。
+3. **本地归档清理**：
+   - 正式包成功替换后，按版本号各数值段比较，仅保留最近 3 个版本，每个版本一份 `ModHub-v<version>.zip` 正式包；不足 3 个时全部保留，不按字符串或文件时间排序。
+   - 清理超出保留范围的本地旧包；`release/` 中已有对应正式包的 `ModHub-v<version>-archiveN.zip` 旧归档重复包可以移除，不再以永久本地备份方式保留同版包。
    - 打包产物**不再同步至游戏 MOD 文件夹**；游戏内安装与调试由玩家自行通过模组市场或手动导入 `release/` 中的包体完成。
    - 自动扫描并清理项目根目录下可能遗留的任何 `.zip` 文件。
 4. **GitHub 发布**：
-   - 源码提交并推送 `main` 后，使用 `gh release create v<version>` 创建 Release 并上传安装包附件；GitHub Releases 中的历史版本同样永久保留。
+   - 源码提交并推送 `main` 后，新版本使用 `gh release create v<version>` 创建 Release 并上传安装包附件；本地同版本重打包不自动创建或更新 GitHub Release。GitHub Releases 中的历史版本与安装包永久保留，本地清理不得删除远端历史。
 
 ---
 

@@ -1,7 +1,7 @@
-:: modloader-optimization [widget]
+:: modhub-manager [widget]
 <<widget "titleModloader">>
 	<<setupTabs _args[0]>>
-	<div id="overlayTabs" class="tab dol-opt-modloader-tabs">
+	<div id="overlayTabs" class="tab modhub-modloader-tabs">
 		<<closeButtonMobile>>
 		<<button "模组管理">>
 			<<toggleTab>>
@@ -19,7 +19,7 @@
 			<<toggleTab>>
 			<<replace #customOverlayContent>><<modloaderlog>><</replace>>
 		<</button>>
-		<<run setTimeout(window.dolOptInitOverlayTabs, 0)>>
+		<<run setTimeout(window.modHubInitOverlayTabs, 0)>>
 	</div>
 	<<closeButton>>
 <</widget>>
@@ -29,58 +29,58 @@
 <</widget>>
 
 <<widget "modloadermodmanage">>
-	<div id="dolOptModManageContainer" class="dol-opt-container"></div>
+	<div id="modHubModManageContainer" class="modhub-container"></div>
 	<<run setTimeout(initModManage, 1)>>
 <</widget>>
 
 <<widget "modloaderreadme">>
-	<div id="dolOptReadmeContainer" class="dol-opt-container"></div>
+	<div id="modHubReadmeContainer" class="modhub-container"></div>
 	<<run setTimeout(initModReadMe, 1)>>
 <</widget>>
 
 <<widget "modloaderlog">>
-	<div class="dol-opt-container">
-		<div class="dol-opt-group-header">
+	<div class="modhub-container">
+		<div class="modhub-group-header">
 			<span class="gold">模组加载过程日志</span>
-			<div class="dol-opt-log-header-actions" style="display: flex; gap: 6px; align-items: center;">
-				<button id="btnToggleLogFullscreen" type="button" class="macro-button dol-opt-btn-secondary" onclick="window.dolOptToggleLogFullscreen()">全屏展示</button>
-				<button type="button" class="macro-button dol-opt-btn-secondary" onclick="window.dolOptCaptureLogScreenshot()">一键截图</button>
-				<button type="button" class="macro-button dol-opt-btn-primary" onclick="window.dolOptCopyLoadLog()">复制日志</button>
+			<div class="modhub-log-header-actions" style="display: flex; gap: 6px; align-items: center;">
+				<button id="btnToggleLogFullscreen" type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubToggleLogFullscreen()">全屏展示</button>
+				<button type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubCaptureLogScreenshot()">一键截图</button>
+				<button type="button" class="macro-button modhub-btn-primary" onclick="window.modHubCopyLoadLog()">复制日志</button>
 			</div>
 		</div>
-		<div id="dolOptLogDiagnosisContainer"></div>
-		<div class="dol-opt-log-toolbar">
-			<div class="dol-opt-log-search-row">
-				<input id="dolOptLogSearch" class="dol-opt-search-input dol-opt-log-search" type="search" placeholder="搜索日志内容……" aria-label="搜索日志内容">
-				<span id="dolOptLogSearchStatus" class="dol-opt-log-search-status grey">0/0</span>
+		<div id="modHubLogDiagnosisContainer"></div>
+		<div class="modhub-log-toolbar">
+			<div class="modhub-log-search-row">
+				<input id="modHubLogSearch" class="modhub-search-input modhub-log-search" type="search" placeholder="搜索日志内容……" aria-label="搜索日志内容">
+				<span id="modHubLogSearchStatus" class="modhub-log-search-status grey">0/0</span>
 			</div>
-			<div class="dol-opt-log-actions-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
-				<div class="dol-opt-log-filter-group">
-					<button type="button" class="dol-opt-log-filter-btn active" data-filter="all" onclick="window.dolOptSetLogLevelFilter('all')">全部</button>
-					<button id="dolOptFilterError" type="button" class="dol-opt-log-filter-btn filter-error" data-filter="error" onclick="window.dolOptSetLogLevelFilter('error')">仅错误</button>
-					<button id="dolOptFilterWarn" type="button" class="dol-opt-log-filter-btn filter-warn" data-filter="warn" onclick="window.dolOptSetLogLevelFilter('warn')">仅警告</button>
-					<button type="button" class="dol-opt-log-filter-btn" data-filter="issues" onclick="window.dolOptSetLogLevelFilter('issues')">错误+警告</button>
+			<div class="modhub-log-actions-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 6px;">
+				<div class="modhub-log-filter-group">
+					<button type="button" class="modhub-log-filter-btn active" data-filter="all" onclick="window.modHubSetLogLevelFilter('all')">全部</button>
+					<button id="modHubFilterError" type="button" class="modhub-log-filter-btn filter-error" data-filter="error" onclick="window.modHubSetLogLevelFilter('error')">仅错误</button>
+					<button id="modHubFilterWarn" type="button" class="modhub-log-filter-btn filter-warn" data-filter="warn" onclick="window.modHubSetLogLevelFilter('warn')">仅警告</button>
+					<button type="button" class="modhub-log-filter-btn" data-filter="issues" onclick="window.modHubSetLogLevelFilter('issues')">错误+警告</button>
 				</div>
 				<div style="display: flex; gap: 4px; align-items: center;">
-					<button type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptMoveLogMatch(-1)">↑ 上一处</button>
-					<button type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptMoveLogMatch(1)">↓ 下一处</button>
-					<button id="dolOptLogErrors" type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptJumpToLevel('error')"><span class="red">错误</span></button>
-					<button id="dolOptLogWarnings" type="button" class="macro-button dol-opt-log-btn" onclick="window.dolOptJumpToLevel('warn')"><span class="gold">警告</span></button>
+					<button type="button" class="macro-button modhub-log-btn" onclick="window.modHubMoveLogMatch(-1)">↑ 上一处</button>
+					<button type="button" class="macro-button modhub-log-btn" onclick="window.modHubMoveLogMatch(1)">↓ 下一处</button>
+					<button id="modHubLogErrors" type="button" class="macro-button modhub-log-btn" onclick="window.modHubJumpToLevel('error')"><span class="red">错误</span></button>
+					<button id="modHubLogWarnings" type="button" class="macro-button modhub-log-btn" onclick="window.modHubJumpToLevel('warn')"><span class="gold">警告</span></button>
 				</div>
 			</div>
 		</div>
-		<div id="dolOptLogContent" class="dol-opt-log-wrapper"></div>
+		<div id="modHubLogContent" class="modhub-log-wrapper"></div>
 	</div>
 	<<script>>
 		setTimeout(() => {
-			if (typeof window.dolOptInitLogTools === 'function') {
-				window.dolOptInitLogTools();
+			if (typeof window.modHubInitLogTools === 'function') {
+				window.modHubInitLogTools();
 			}
 		}, 1);
 	<</script>>
 <</widget>>
 
 <<widget "modloadermarket">>
-	<div id="dolOptModMarketContainer" class="dol-opt-container"></div>
-	<<run setTimeout(window.dolOptInitMarket, 1)>>
+	<div id="modHubModMarketContainer" class="modhub-container"></div>
+	<<run setTimeout(window.modHubInitMarket, 1)>>
 <</widget>>

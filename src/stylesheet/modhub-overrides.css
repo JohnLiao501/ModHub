@@ -1,0 +1,131 @@
+/* ========== 15. 全域立体模组更新提醒体系样式 ========== */
+
+/* 顶部 Tab 胶囊数字气泡徽标 */
+.modhub-tab-badge {
+    display: inline-block;
+    background-color: var(--gold, #d4af37);
+    color: #111111;
+    font-size: 11px;
+    font-weight: 700;
+    padding: 1px 6px;
+    border-radius: 10px;
+    margin-left: 5px;
+    vertical-align: middle;
+    line-height: 1.2;
+    box-shadow: 0 0 6px rgba(218, 165, 32, 0.6);
+    pointer-events: none;
+}
+
+/* 模组管理置顶醒目金边提示横幅 */
+.modhub-update-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    background: linear-gradient(90deg, rgba(218, 165, 32, 0.18) 0%, rgba(30, 30, 38, 0.85) 100%);
+    border: 1px solid var(--gold, #d4af37);
+    border-radius: 4px;
+    padding: 9px 14px;
+    margin: 8px 0 10px 0;
+    gap: 12px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+}
+
+.modhub-update-banner-main {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 1;
+}
+
+.modhub-update-banner-title {
+    font-weight: 600;
+    font-size: 0.95em;
+    color: var(--gold, #d4af37);
+}
+
+.modhub-update-banner-sub {
+    font-size: 0.82em;
+    color: var(--300, #bbb);
+}
+
+.modhub-update-banner .modhub-btn-primary {
+    flex-shrink: 0;
+    white-space: nowrap;
+    padding: 4px 14px !important;
+}
+
+/* 模组管理列表原地更新按钮 */
+.btn-inline-update {
+    background-color: var(--gold, #d4af37) !important;
+    color: #111 !important;
+    font-weight: bold !important;
+    border: 1px solid #ffd700 !important;
+}
+
+.btn-inline-update:hover {
+    background-color: #ffd700 !important;
+    box-shadow: 0 0 8px rgba(218, 165, 32, 0.8) !important;
+}
+
+/* 模组市场中可更新项强制置顶的微光金边卡片 */
+.modhub-market-card.modhub-market-card-updatable {
+    border: 1px solid var(--gold, #d4af37) !important;
+    background: linear-gradient(180deg, rgba(218, 165, 32, 0.08) 0%, rgba(30, 30, 36, 0.95) 100%) !important;
+    box-shadow: 0 0 10px rgba(218, 165, 32, 0.25) !important;
+}
+
+/* 金色数字静态强调，避免常驻文字阴影动画持续触发重绘 */
+.modhub-pulse-gold {
+    font-weight: bold;
+    text-shadow: 0 0 4px rgba(218, 165, 32, 0.55);
+}
+
+.modhub-clickable {
+    cursor: pointer !important;
+    transition: transform 0.12s ease, border-color 0.12s ease !important;
+}
+
+.modhub-clickable:hover {
+    transform: translateY(-2px);
+    border-color: var(--gold, #d4af37) !important;
+}
+
+@media (max-width: 600px) {
+    .modhub-update-banner {
+        flex-direction: column;
+        align-items: stretch;
+    }
+    .modhub-update-banner .modhub-btn-primary {
+        align-self: flex-start;
+        width: 100%;
+    }
+    .modhub-dep-item {
+        padding: 6px 8px;
+        gap: 8px;
+        min-height: 36px;
+    }
+    .modhub-dep-status {
+        font-size: 0.78em;
+        padding: 2px 5px;
+    }
+    .modhub-conflict-action-row {
+        width: 100%;
+    }
+    .modhub-conflict-disable-btn {
+        width: 100%;
+        min-height: 32px;
+        font-size: 0.84em;
+        text-align: center;
+    }
+}
+
+/* 管理器保存期间统一禁用输入，保持原生布局与窄屏宽度。 */
+.modhub-manager-controls {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    min-width: 0;
+    width: 100%;
+    box-sizing: border-box;
+}
+#modHubManagerStatus { margin: 6px 0; font-size: 0.9em; overflow-wrap: anywhere; }

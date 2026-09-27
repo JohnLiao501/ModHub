@@ -2,6 +2,27 @@
 
 Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 TweeReplacer 补丁架构。
 
+## 源码命名
+
+- `src/javascript/modhub-manager.js`：管理、持久化、导入、重排保存与公共入口。
+- `src/javascript/modhub-dialog.js`：Toast、确认框与提示框。
+- `src/javascript/modhub-drag.js`：长按、桌面与触摸拖拽、边缘自动滚动；重排结果由管理器保存。
+- `src/javascript/modhub-beauty.js`：可选美化插件的自动启用、列表、排序与保存；操作锁和失败恢复由管理器统一处理。
+- `src/javascript/modhub-readme.js`：模组说明、Markdown、徽章与内置图片。
+- `src/javascript/modhub-log.js`：日志诊断、筛选、截图与启动自检。
+- `src/javascript/modhub-market.js`：市场目录、依赖规划与下载安装。
+- 样式按 `modhub.css`、`modhub-market.css`、`modhub-overrides.css` 顺序加载，分别保留公共与响应式样式、市场样式、跨页面提示及最终覆盖；调整时须保持层叠顺序。
+- 脚本按 `src/boot.json` 中的管理器、弹窗、拖拽、美化、说明、日志、市场顺序加载；跨文件调用使用显式的 `window.modHub…` 接口。
+- 自有 JavaScript 接口和 DOM ID 使用 `modHub` 前缀，CSS 类使用 `modhub-`，常量使用 `MODHUB_`，日志使用 `[ModHub]`。
+- 本地设置与缓存使用 `modhub_` 键，缺失时兼容读取旧版 `dol_opt_` 键，新设置优先且不删除旧数据。
+- 市场中“原版优化”模组的真实名称、技术标识与仓库地址保持原样。
+
+## 自动化测试
+
+运行 `node src/test-smart-sort.js`，依次执行 `tests/` 下的管理、市场目录、诊断与冲突、安装流程及交互回归用例。`tests/helpers.js` 提供共用沙箱与源码读取工具；样式检查按 `boot.json` 的加载顺序读取全部 CSS。
+
+测试文件位于 `src/` 外，不进入安装包。修改用例时保留入口的失败退出和异步未完成检查。
+
 ## 主要功能
 
 1. **模组管理**：支持旁加载模组的启用、禁用、删除、拖拽排序与智能依赖拓扑排序。
@@ -22,7 +43,7 @@ Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 
 ## 目录与工具分工
 
 - `src/`：ModHub 模组核心源码（`boot.json`、`javascript/`、`stylesheet/`、`twee/`）。
-- `release/`：由 `pack.py` 打包生成的安装包（`ModHub-v<version>.zip`），历史版本永久保留；通过 GitHub Releases 分发，不再同步至游戏 MOD 文件夹。
+- `release/`：由 `pack.py` 生成的本地安装包（`ModHub-v<version>.zip`），按数值版本保留最近 3 版，每版一份正式包；GitHub Releases 中的历史版本永久保留。不再同步至游戏 MOD 文件夹。
 - `dolmod-site/`：模组市场在线索引、身份目录与反馈中心 Worker/Pages 仓库。
 - `mod-identities.json`：模组市场元数据与统一身份字典。
 - `dol-mod-extractor.js`：DoL 中文 Wiki 模组列表抓取、解析与身份合并脚本。
@@ -33,4 +54,11 @@ Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 
 
 - 核心单元测试（含依赖拓扑排序与 ModLoader 契约）：`node src/test-smart-sort.js`
 - 模组身份字典测试：`node test-dol-mod-extractor.js`
-- 自动化打包与单目录归档：`python pack.py`，仅输出至 `release/`，同版本归档已存在时拒绝覆盖。
+- 打包策略测试：`python tests/test_pack.py`
+- 自动化打包与单目录归档：`python pack.py`，仅输出至 `release/`，同版本重打包默认覆盖当前最新版本的正式包。
+
+版本号以 `src/boot.json` 为准，打包脚本不自动升版；只有明确要求升级版本号时才修改版本并生成新版。若源码版本低于本地最新数值版本，脚本拒绝覆盖或重新生成该历史版本。
+
+打包时先在 `release/` 内生成临时包，完成完整性、版本、清单和路径校验后再替换正式包。替换成功后，按版本号各数值段比较保留最近 3 个版本，每版仅一份正式包，并清理超出范围的旧包及已有对应正式包的 `ModHub-v<version>-archiveN.zip` 同版重复包；校验或替换失败时保留原包，不进行历史清理。
+
+以上保留与清理规则仅适用于本地，GitHub Releases 历史永久保留；本地重打包不会自动更新远端 Release。

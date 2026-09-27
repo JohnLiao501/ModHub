@@ -1,14 +1,21 @@
 {
     "name": "ModHub",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "nickName": "模组管理器与市场套件",
     "description": "DoL 原生暗黑风格模组管理与市场套件",
     "styleFileList": [
-        "stylesheet/modloader-optimization.css"
+        "stylesheet/modhub.css",
+        "stylesheet/modhub-market.css",
+        "stylesheet/modhub-overrides.css"
     ],
     "scriptFileList": [
-        "javascript/modloader-optimization.js",
-        "javascript/dol-mod-market.js"
+        "javascript/modhub-manager.js",
+        "javascript/modhub-dialog.js",
+        "javascript/modhub-drag.js",
+        "javascript/modhub-beauty.js",
+        "javascript/modhub-readme.js",
+        "javascript/modhub-log.js",
+        "javascript/modhub-market.js"
     ],
     "tweeFileList": [
         "twee/modloader/modloader.twee"
