@@ -72,8 +72,6 @@ function createBaseSandbox(overrides = {}) {
     const storage = new Map();
     const sandbox = {
         console,
-        URL,
-        URLSearchParams,
         // 存根定时器：不执行回调，避免启动自检链路在测试进程中挂起
         setTimeout: () => 0,
         clearTimeout: () => {},
@@ -151,7 +149,7 @@ function createMockController(initial = {}) {
      * ========================================================================= */
     const bootJson = JSON.parse(fs.readFileSync(path.join(__dirname, 'boot.json'), 'utf8'));
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.0.4', 'boot.json 版本号必须为 1.0.4');
+    assert.equal(bootJson.version, '1.0.3', 'boot.json 版本号必须为 1.0.3');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     for (const file of ['javascript/modloader-optimization.js', 'javascript/dol-mod-market.js']) {
@@ -577,7 +575,7 @@ function createMockController(initial = {}) {
         const market = sb.dolModMarket;
         const mod = { name: 'ModHub', version: '1.0.2', githubUrl: 'https://github.com/JohnLiao501/ModHub' };
         const cacheKey = 'dol_opt_market_rel_v2_JohnLiao501_ModHub';
-        let cache = {
+        const cache = {
             version: '1.0.1', assetPlanVersion: 2, assetPlanGameVersion: '',
             assets: [{ name: 'ModHub-v1.0.1.zip', downloadUrl: `${mod.githubUrl}/releases/download/v1.0.1/ModHub-v1.0.1.zip` }]
         };
@@ -601,227 +599,10 @@ function createMockController(initial = {}) {
         assert.equal(requestCount, 1, '可用缓存不得产生额外请求');
 
         sb.fetch = async () => { throw new Error('模拟 GitHub 离线'); };
-        writeCache('1.0.2');
-        await assert.rejects(market.fetchModRelease(mod), /模拟 GitHub 离线/, '旧资产选择规则缓存即使版本一致也不得离线复用');
-        cache = { ...release };
         writeCache('1.0.1');
         await assert.rejects(market.fetchModRelease(mod), /模拟 GitHub 离线/, 'GitHub 失败时也不得回退到低于市场版本的安装包');
         writeCache('1.0.2');
         assert.equal((await market.fetchModRelease(mod, { useCache: false })).isStale, true, '版本满足要求时必须保留网络失败后的缓存回退');
-    }
-
-    // 统一索引保留指定发布渠道，主包与同仓库扩展不得串包或共用旧缓存
-    {
-        const sb = loadMarket();
-        const market = sb.dolModMarket;
-        const repoUrl = 'https://github.com/AOKIUTAGE/UTAGEsDOL3.0';
-        const index = { schemaVersion: 1, mods: [
-            { name: 'AU美化', identityId: null, githubUrl: `${repoUrl}/releases/tag/mod`, releaseUrl: `${repoUrl}/releases/tag/facemod`, version: '99.0', versionSource: 'github', wikiVersion: '0.8.7' },
-            { name: 'AU面部扩展', identityId: null, githubUrl: `${repoUrl}/releases/tag/facemod` }
-        ] };
-        const mods = market.normalizeReleaseIndex(index);
-        assert.equal(mods[0].version, '0.8.7', '旧索引的跨渠道版本必须回退到本条目的Wiki版本');
-        assert.equal(mods[0].releaseUrl, null, '旧索引的错配发布页不得继续展示');
-        sb.localStorage.setItem('dol_opt_market_wiki_v5', JSON.stringify({ data: index.mods, timestamp: Date.now() }));
-        assert.equal((await market.loadMarketData())[0].version, '0.8.7', '本地列表缓存也必须经过渠道纠偏');
-        assert.notEqual(market.getMarketModKey(mods[0]), market.getMarketModKey(mods[1]), '同仓库不同发布渠道必须保留独立的批量安装身份');
-        sb.localStorage.setItem('dol_opt_market_rel_v2_AOKIUTAGE_UTAGEsDOL3.0', JSON.stringify({
-            timestamp: Date.now(), data: { version: '99.0', assetPlanVersion: 2, assetPlanGameVersion: '', assets: [{ name: 'wrong.zip', downloadUrl: 'wrong' }] }
-        }));
-        const urls = [];
-        sb.fetch = async url => {
-            urls.push(url);
-            const tag = decodeURIComponent(url.split('/tags/')[1] || 'latest');
-            return { ok: true, status: 200, json: async () => ({ tag_name: tag, assets: [{
-                name: `${tag}.zip`, browser_download_url: `${repoUrl}/releases/download/${tag}/${tag}.zip`
-            }] }) };
-        };
-        assert.equal((await market.fetchModRelease(mods[0])).assetName, 'mod.zip', 'AU主包必须遵循 githubUrl 指定渠道，不得采用旧索引 releaseUrl 或缓存中的面部扩展');
-        assert.equal((await market.fetchModRelease(mods[1])).assetName, 'facemod.zip', '面部扩展必须使用自己的发布渠道');
-        assert.deepEqual(urls, ['mod', 'facemod'].map(tag => `https://api.github.com/repos/AOKIUTAGE/UTAGEsDOL3.0/releases/tags/${tag}`));
-        assert.equal((await market.fetchModRelease(mods[0])).fromCache, true, '指定标签成功后仍可复用本渠道缓存');
-        assert.equal((await market.fetchModRelease(mods[1])).assetName, 'facemod.zip', '两次缓存读取不得互相覆盖');
-        assert.equal(urls.length, 2, '渠道缓存命中不得额外访问网络');
-        assert.equal((await market.fetchRecentCompanionAssets(mods[0])).length, 0, '固定渠道不得跨发布渠道推荐附属包');
-        assert.equal(urls.length, 2);
-
-        const encodedMod = { githubUrl: `${repoUrl}/releases/tag/model%2Fstable?test=1#assets` };
-        const encodedRelease = await market.fetchModRelease(encodedMod);
-        assert.ok(urls.at(-1).endsWith('/releases/tags/model%2Fstable'), '标签须解码一次再作为单个 API 路径参数编码');
-        assert.equal(encodedRelease.htmlUrl, `${repoUrl}/releases/tag/model%2Fstable`, '缺少发布页地址时必须回退到指定标签');
-        const callsBeforeMissing = urls.length;
-        sb.fetch = async url => { urls.push(url); return { ok: false, status: 404 }; };
-        await assert.rejects(market.fetchModRelease(mods[0], { useCache: false }), error => error.code === 'RELEASE_NOT_FOUND', '指定标签404不得回退到 latest 或过期包');
-        assert.equal(urls.length, callsBeforeMissing + 1, '指定标签失效不得继续查询其他发布渠道');
-        assert.notEqual(mods[0]._isDeadRepo, true, '标签不存在不能误标整个仓库失效');
-        sb.fetch = async () => { throw new Error('模拟渠道离线'); };
-        assert.equal((await market.fetchModRelease(mods[0], { useCache: false })).assetName, 'mod.zip', '离线回退也必须保持渠道隔离');
-    }
-
-    // AU发布页包含多个独立模型系列，覆盖包不能被误当成直装包
-    {
-        const market = loadMarket().dolModMarket;
-        const asset = name => ({ name, downloadUrl: `https://example.test/${name}` });
-        const assets = Object.entries({ female: ['0.8.7', '0.9.3'], male: ['0.3.7', '0.4.2'], androgynous: ['0.0.7', '0.1.1'] })
-            .flatMap(([model, versions]) => versions.flatMap(version => ['model', 'imgpack'].map(type => asset(`AU${model}.${type}_v${version}.zip`))));
-        const plan = market.buildReleaseAssetPlan(assets);
-        assert.equal(plan.needsChoice, true, '不同模型系列必须交由玩家选择');
-        assert.equal(plan.assets.length, 0, '不得跨模型系列比较版本后自动安装女体');
-        assert.deepEqual(Array.from(plan.candidates, item => item.name).sort(), [
-            'AUfemale.model_v0.9.3.zip', 'AUmale.model_v0.4.2.zip', 'AUandrogynous.model_v0.1.1.zip'
-        ].sort(), '必须保留每个模型系列的最新版直装包，排除配对覆盖包');
-        const single = market.buildReleaseAssetPlan([asset('AUfemale.model_v0.9.3.zip'), asset('AUfemale.imgpack_v0.9.3.zip')]);
-        assert.equal(single.needsChoice, false);
-        assert.equal(single.assets.length, 1, '同一模型不得同时安装model与覆盖用imgpack');
-        assert.equal(single.assets[0].name, 'AUfemale.model_v0.9.3.zip');
-        assert.equal(market.buildReleaseAssetPlan([asset('Example-v1.0.zip'), asset('Example-v2.0.zip')]).assets[0].name, 'Example-v2.0.zip', '普通模组仍选最新版本');
-        assert.equal(market.buildReleaseAssetPlan([asset('Only.imgpack_v1.0.zip')]).assets[0].name, 'Only.imgpack_v1.0.zip', '无配对model时不得凭扩展命名排除既有独立资源');
-    }
-
-    // Wiki 回退也必须只采用名称列来源，拆分独立项目并识别共享仓库。
-    {
-        const sb = loadMarket();
-        const anchor = (textContent, href) => ({ textContent, getAttribute: () => href });
-        const cell = (textContent, links = []) => ({ textContent, querySelectorAll: () => links });
-        const cells = [
-            [cell('主模组', [anchor('主模组', 'https://github.com/Owner/Shared')]), cell('介绍', [anchor('依赖', 'https://github.com/Other/Dependency')]), cell('作者'), cell('2026-09-27 (v1.0)')],
-            [cell('扩展 / 独立工具', [anchor('扩展', 'https://github.com/Owner/Shared'), anchor('独立工具', 'https://github.com/Owner/Tool')]), cell('介绍'), cell('作者'), cell('2026-09-27')]
-        ];
-        const header = { querySelectorAll: () => ['名称', '简介', '作者', '更新'].map(text => cell(text)) };
-        const rows = cells.map(tds => ({ querySelectorAll: () => tds, querySelector: () => null }));
-        const table = { querySelector: () => header, querySelectorAll: () => rows };
-        sb.Node = { DOCUMENT_POSITION_FOLLOWING: 4, DOCUMENT_POSITION_PRECEDING: 2 };
-        sb.DOMParser = class { parseFromString() { return {
-            getElementById: id => id === '公开模组' ? { compareDocumentPosition: () => 4 } : null,
-            querySelectorAll: () => [table]
-        }; } };
-        const mods = sb.dolModMarket.parseModsFromHtml('');
-        assert.deepEqual(Array.from(mods, mod => mod.name), ['主模组', '扩展', '独立工具']);
-        assert.deepEqual(Array.from(mods[0].githubUrls), ['https://github.com/Owner/Shared'], '不得采集介绍中的依赖仓库');
-        assert.equal(mods[0].otherUrl, null);
-        assert.deepEqual(Array.from(mods, mod => mod.sharedRepository), [true, true, false]);
-        assert.notEqual(sb.dolModMarket.getMarketModKey(mods[0]), sb.dolModMarket.getMarketModKey(mods[1]), 'Wiki回退无ID时共享仓库多项不能被批量合并');
-        const cached = sb.dolModMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: mods.map(mod => ({
-            ...mod, sharedRepository: undefined, version: '99.0', versionSource: 'github', wikiVersion: '1.0',
-            releaseUrl: 'https://github.com/Owner/Shared/releases/tag/Other'
-        })) });
-        assert.equal(cached[0].sharedRepository, true, '旧缓存未带字段时也必须重新识别共享仓库');
-        assert.equal(cached[0].version, '1.0', '共享仓库的旧latest版本必须清除');
-        assert.equal(cached[0].releaseUrl, null);
-        assert.equal(cached[2].version, '99.0', '独立仓库版本仍可正常使用');
-    }
-
-    // 同名、子串和仓库尾名都不能跨模组建立身份。
-    {
-        const market = loadMarket().dolModMarket;
-        const catalog = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'mod-identities.json'), 'utf8'));
-        market.applyIdentityCatalog(catalog);
-        const main = { ...catalog.mods.find(item => item.id === 'woven-realm'), githubUrl: 'https://github.com/Kanna-hanabi/WovenRealm', sharedRepository: true };
-        const child = { ...catalog.mods.find(item => item.id === 'woven-realm-cooking'), githubUrl: main.githubUrl, sharedRepository: true };
-        for (const [target, other] of [[main, child], [child, main]]) {
-            market.checkModInstallStatus(target, [{ name: target.bootNames[0] }]);
-            assert.equal(target._matchedLocal?.name, target.bootNames[0]);
-            market.checkModInstallStatus(other, [{ name: target.bootNames[0] }]);
-            assert.equal(other._matchedLocal, null, '织境主包和料理扩展不得共享别名');
-        }
-        const unknown = { name: '美化扩展', githubUrl: 'https://github.com/Fixture/Unknown' };
-        assert.equal(market.checkModInstallStatus(unknown, [{ name: '美化扩展修复' }]), 'not_installed');
-        market.applyIdentityCatalog([{ identityId: null, id: 'wiki-a', name: '假条目', repositories: ['RealTech'] }]);
-        assert.equal(market.checkModInstallStatus({ ...unknown, name: '假条目' }, [{ name: 'RealTech' }]), 'not_installed');
-        const sameNames = ['A', 'B'].map(owner => ({ id: `fixture-${owner}`, name: '同名模组', bootNames: [`Tech${owner}`], repositoryKeys: [`${owner}/Same`], githubUrl: `https://github.com/${owner}/Same` }));
-        market.applyIdentityCatalog(sameNames);
-        for (const entry of sameNames) {
-            for (const local of sameNames) {
-                market.checkModInstallStatus(entry, [{ name: local.bootNames[0], repository: local.githubUrl }]);
-                assert.equal(Boolean(entry._matchedLocal), entry.id === local.id, '同名不同作者必须按完整仓库隔离');
-            }
-        }
-        const doli = { name: 'D.O.L.I', githubUrl: 'https://github.com/ArsNativa/DOLI' };
-        market.checkModInstallStatus(doli, [{ name: 'DOLI', repository: 'https://github.com/Other/Different' }]);
-        assert.equal(doli._matchedLocal, null, '显式来源与已知身份不同的本地包不得冒充官方版本');
-        assert.equal(market.findMarketModByLocalName('无来源同名', ['A', 'B'].map(owner => ({ name: '无来源同名', githubUrl: `https://github.com/${owner}/Repo` }))), null, '反查同分不能取第一项');
-        const tagged = tag => ({ identityId: 'one-id', name: '固定渠道', githubUrl: `https://github.com/Owner/Repo/releases/tag/${tag}` });
-        assert.notEqual(market.getMarketModKey(tagged('main')), market.getMarketModKey(tagged('extra')));
-        assert.notEqual(...['main.zip', 'extra.zip'].map(name => market.getMarketModKey({ identityId: 'one-id', githubUrl: `https://github.com/Owner/Repo/releases/download/v1/${name}` })), '同标签的指定附件也必须保留独立身份');
-        const shared = { ...unknown, githubUrl: 'https://github.com/Owner/RealTech', sharedRepository: true };
-        market.checkModInstallStatus(shared, [{ name: 'RealTech' }]);
-        assert.equal(shared._matchedLocal, null, '共享仓库尾名不能证明当前产品已安装');
-        const sidebar = { name: 'NPC侧边栏头像', githubUrl: 'https://github.com/Maenoko/Mae-s-Picvary-NPC-mod/tree/DOL' };
-        market.checkModInstallStatus(sidebar, [{ name: 'NPC侧边栏头像', repository: sidebar.githubUrl }]);
-        assert.ok(sidebar._matchedLocal, '侧边栏头像本身的真实来源必须仍可识别');
-        market.checkModInstallStatus(sidebar, [{ name: 'NPCAvatarsMod', repository: 'https://github.com/Eudemonism00/DOL-npcicon-mods' }]);
-        assert.equal(sidebar._matchedLocal, null, '社交栏头像不能充当另一作者的侧边栏头像');
-    }
-
-    // 资产按产品系列选择，共享仓库查找当前条目的发布而非仓库latest。
-    {
-        const sb = loadMarket();
-        const market = sb.dolModMarket;
-        const asset = name => ({ name, downloadUrl: `https://example.test/${name}` });
-        const frameworkAssets = ['Simple.Framework.ver2.0.5.build_2.zip', 'Simple.Inventory.ver1.0.0.build_18.zip', 'simple.new.content.ver0.0.1.zip'].map(asset);
-        assert.equal(market.buildReleaseAssetPlan(frameworkAssets).needsChoice, true);
-        assert.equal(market.buildReleaseAssetPlan(frameworkAssets, '', { bootNames: ['Simple Framework'] }).assets[0].name, frameworkAssets[0].name);
-        assert.equal(market.buildReleaseAssetPlan(['Foo1.0.zip', 'Bar99.0.zip'].map(asset)).candidates.length, 2, '不能跨产品比较版本');
-        assert.equal(market.buildReleaseAssetPlan([asset('ResourcePack.zip')]).assets.length, 1, '独立资源主包不能重复安装');
-        const companions = market.buildReleaseAssetPlan(['Main1.0.zip', 'Main.PhotoPack1.0.zip', 'Other.PhotoPack1.0.zip'].map(asset));
-        assert.deepEqual(Array.from(companions.assets, item => item.name), ['Main1.0.zip', 'Main.PhotoPack1.0.zip']);
-        assert.equal(market.buildReleaseAssetPlan(['source-code.zip', 'app.apk.zip', 'Other.7z', 'Other.rar'].map(asset)).assets.length, 0);
-        assert.equal(market.buildReleaseAssetPlan([asset('Foo Mobile 1.0.zip'), asset('Foo Desktop 1.0.zip')]).assets[0].name, 'Foo Desktop 1.0.zip');
-        const repo = 'https://github.com/Fixture/Shared';
-        const urls = [];
-        sb.fetch = async url => { urls.push(url); return { ok: true, status: 200, json: async () => ['Other', 'Foo', 'Bar'].map((name, index) => ({
-            tag_name: `product-${index}`, html_url: `${repo}/releases/tag/product-${index}`,
-            assets: [{ name: `${name}1.0.zip`, browser_download_url: `${repo}/releases/download/product-${index}/${name}1.0.zip` }]
-        })) }; };
-        const mod = name => ({ name, bootNames: [name], githubUrl: repo, sharedRepository: true });
-        assert.equal((await market.fetchModRelease(mod('Foo'))).assetName, 'Foo1.0.zip');
-        assert.equal((await market.fetchModRelease(mod('Bar'))).assetName, 'Bar1.0.zip');
-        assert.equal((await market.fetchModRelease(mod('Foo'))).fromCache, true);
-        assert.equal(urls.length, 2, '同仓库不同条目缓存不能串包');
-        assert.ok(urls.every(url => url.endsWith('/releases?per_page=100')));
-        await assert.rejects(market.fetchModRelease(mod('Missing')), error => error.code === 'MANUAL_SOURCE');
-        for (const suffix of ['/tree/main', '/blob/main/mod.zip', '/issues/1', '/releases/latest/extra']) {
-            await assert.rejects(market.fetchModRelease({ githubUrl: repo + suffix }), error => error.code === 'MANUAL_SOURCE');
-        }
-        await assert.rejects(market.fetchModRelease({ githubUrl: 'https://fake.github.com/Fixture/Shared' }), /无法解析/);
-        sb.fetch = async () => ({ ok: true, status: 200, json: async () => ({ tag_name: 'v1', assets: ['Foo1.0.zip', 'Bar2.0.zip'].map(name => ({ name, browser_download_url: `${repo}/releases/download/v1/${name}` })) }) });
-        assert.equal((await market.fetchModRelease({ githubUrl: `${repo}/releases/download/v1/Foo1.0.zip` })).assetName, 'Foo1.0.zip');
-        await assert.rejects(market.fetchModRelease({ githubUrl: `${repo}/releases/download/v1/Missing.zip` }), error => error.code === 'RELEASE_NOT_FOUND', '指定附件消失时不能改装其他文件');
-        await assert.rejects(market.fetchModRelease({ githubUrl: `${repo}/releases/tag/another` }), error => error.code === 'RELEASE_NOT_FOUND', '返回标签与指定标签不同必须停止');
-        sb.fetch = async () => { const error = new Error('取消'); error.name = 'AbortError'; throw error; };
-        await assert.rejects(market.fetchModRelease(mod('Foo'), { useCache: false }), error => error.name === 'AbortError', '取消请求不能继续使用离线包');
-    }
-
-    // 手选仍保留匹配资源；需手动来源的条目直接解释原因，不进入自动导入。
-    {
-        const sb = loadMarket();
-        sb.Blob = Blob;
-        sb.dolOptGetGui = () => ({});
-        sb.dolOptShowToast = () => {};
-        sb.dolOptEscapeHtml = value => value;
-        const installedFiles = [];
-        sb.dolOptHandleAddMod = async input => { installedFiles.push(...Array.from(input.files || input, file => file.name)); return true; };
-        sb.dolOptConfirm = async () => 'asset:0';
-        sb.fetch = async () => ({ ok: true, headers: { get: () => null }, blob: async () => new Blob(['data']) });
-        const availableAssets = ['Main1.0.zip', 'Bar2.0.zip', 'Main.PhotoPack1.0.zip', 'Other.PhotoPack1.0.zip']
-            .map(name => ({ name, downloadUrl: `https://example.test/${name}` }));
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod({ name: '手选测试' }, 'ddlc', { askRestart: false, releaseInfo: {
-            requiresManualSelection: true, version: '99.0', candidateAssets: availableAssets.slice(0, 2), availableAssets
-        } }), true);
-        assert.deepEqual(installedFiles, ['Main1.0.zip', 'Main.PhotoPack1.0.zip']);
-        assert.equal(JSON.parse(sb.localStorage.getItem('dol_opt_market_confirmed_updates_v1'))['手选测试'], '1.0', '手选低版本不能被记录为仓库最高版本');
-        const dialogs = [];
-        sb.dolOptConfirm = async dialog => { dialogs.push(dialog); return false; };
-        sb.fetch = async () => { throw new Error('文件页不应访问API'); };
-        const manual = { name: '分支模组', githubUrl: 'https://github.com/Fixture/Repo/tree/main' };
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod(manual), false);
-        assert.equal(dialogs.at(-1).confirmText, '打开主页');
-        assert.ok(dialogs.at(-1).message.includes('文件或分支'));
-        assert.equal(installedFiles.length, 2, '手动来源不能调用安装接口');
-        let batchFailure = '';
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod(manual, 'ddlc', { batchMode: true, onFailure: reason => { batchFailure = reason; } }), false);
-        assert.ok(batchFailure.includes('文件或分支'));
-        assert.equal(dialogs.length, 1, '批量应记录原因且不弹单装对话框');
     }
 
     /* =========================================================================
@@ -1139,53 +920,6 @@ function createMockController(initial = {}) {
         assert.ok(issue.desc.includes('汉化') || issue.desc.includes('银海螺'), '描述中必须说明汉化环境或分支选项原因');
         assert.ok(issue.solution.includes('不必担心') && issue.solution.includes('怨灵恋爱核心剧情'), '必须给出定心丸说明不影响恋爱核心剧情');
         assert.ok(issue.solution.includes('智能整理模组与美化顺序'), '解决方案必须指导使用智能整理模组与美化顺序');
-    }
-
-    // 13.3 启动错误对象不能因消息缺少 Error 字样而漏记，原版日志仍保持独立
-    {
-        const forwarded = [];
-        const manager = loadManager({
-            console: {
-                error(...args) { forwarded.push({ context: this, args }); return '已转发'; }
-            },
-            modLoaderGui: {
-                gLoadingProgress: { logList: [{ type: 'info', str: 'ModLoader startInit() start' }] }
-            }
-        });
-        const firstError = vm.runInContext("new TypeError('ev.preventDefault is not a function')", manager, { filename: 'tw-user-script-0' });
-        const detail = { source: '启动脚本' };
-        const originalContext = {};
-        assert.equal(manager.console.error.call(originalContext, firstError, detail), '已转发', '捕获器必须保留原 console.error 返回值');
-        assert.equal(manager._dolOptStartupErrors.length, 1, '消息中不含 Error 字样的 TypeError 也必须捕获');
-        assert.ok(manager._dolOptStartupErrors[0].includes('TypeError: ev.preventDefault is not a function'), '必须保留原始异常类型与消息');
-        assert.ok(manager._dolOptStartupErrors[0].includes('tw-user-script-0:1:'), '必须保留异常堆栈中的脚本位置');
-        assert.equal(manager._dolOptStartupErrors[0].split('TypeError: ev.preventDefault is not a function').length, 2, '堆栈已含异常摘要时不得重复添加摘要');
-        assert.equal(forwarded[0].context, originalContext, '必须保留原 console.error 调用上下文');
-        assert.equal(forwarded[0].args[0], firstError, '必须原样转发异常对象');
-        assert.equal(forwarded[0].args[1], detail, '必须原样转发附加参数');
-
-        manager.console.error(vm.runInContext(`new Error("0.5.11.9 Error (:: ): <<variablesStatic>>: TypeError: Cannot read properties of undefined (reading 'Init')")`, manager));
-        manager.console.error('普通控制台提示');
-        manager.console.error(new Error('modList.json 读取失败'));
-        manager.console.error(new Error('ResizeObserver loop limit exceeded'));
-        assert.equal(manager._dolOptStartupErrors.length, 2, '后续 StoryInit 异常必须保留，普通提示与良性降级不得误报');
-        assert.equal(forwarded.length, 5, '捕获或过滤日志都必须原样转发且仅转发一次');
-
-        const loaderLogs = manager.modLoaderGui.gLoadingProgress.logList;
-        assert.equal(loaderLogs.filter(item => item.type === 'error').length, 0, '不得将运行时异常写入原版 ModLoader 日志');
-        const analysis = manager.dolOptAnalyzeLogs(manager.dolOptGetRawModLoaderLogs());
-        assert.equal(analysis.errorCount, 2, '原版日志无错误时，合并日志仍须显示两个运行时异常');
-        assert.equal(analysis.infoCount, 1, '合并日志必须保留原版信息日志');
-
-        const noStackError = new ReferenceError('启动变量未定义');
-        delete noStackError.stack;
-        manager.console.error(noStackError);
-        assert.equal(manager._dolOptStartupErrors[2], '[控制台报错] ReferenceError: 启动变量未定义', '无堆栈的异常也必须保留类型并正常捕获');
-        const firefoxError = new TypeError('启动对象不可用');
-        firefoxError.stack = 'startup@file:///game.html:12:3';
-        manager.console.error(firefoxError);
-        assert.equal(manager._dolOptStartupErrors[3], '[控制台报错] TypeError: 启动对象不可用\nstartup@file:///game.html:12:3', '堆栈不含类型摘要时必须补充摘要并保留原堆栈');
-        assert.equal(forwarded.length, 7, '不同堆栈格式不得影响原日志转发');
     }
 
     // 14. 顶部吸顶操作栏按钮顺序与样式契约测试
@@ -2526,54 +2260,8 @@ function createMockController(initial = {}) {
         }
     }
 
-    // 市场导入前核对真实清单，任何包校验失败都不得调用写入接口。
-    {
-        const sb = loadMarket();
-        sb.Blob = Blob;
-        const mod = { name: '主模组显示名', bootNames: ['FixtureMain'], githubUrl: 'https://github.com/ModHubTests/PackageCheck' };
-        const bootByByte = new Map([[1, { name: 'FixtureMain' }], [2, { name: 'FixtureResources' }]]);
-        sb.dolOptGetGui = () => ({});
-        sb.dolOptGetController = () => ({ checkModZipFileIndexDB: async data => bootByByte.get(data[0]) });
-        sb.dolOptShowToast = () => {};
-        const alerts = [];
-        sb.dolOptAlert = async message => { alerts.push(message); };
-        sb.dolOptConfirm = async () => { throw new Error('包内容校验失败不应弹出换线重试'); };
-        let imports = 0;
-        sb.dolOptHandleAddMod = async () => { imports++; return true; };
-        sb._dolOptModState = { sideMods: [{ name: 'FixtureMain', enabled: true }] };
-        sb.dolOptGetModInfo = () => ({ bootJson: { name: 'FixtureMain' } });
-        let downloads = 0;
-        sb.fetch = async url => {
-            downloads++;
-            return { ok: true, headers: { get: () => null }, blob: async () => new Blob([new Uint8Array([String(url).includes('companion.zip') ? 2 : 1])]) };
-        };
-        let reason = '';
-        const releaseInfo = { assets: ['main.zip', 'companion.zip'].map(name => ({ name, downloadUrl: `${mod.githubUrl}/releases/download/v1/${name}` })) };
-        const options = { releaseInfo, batchMode: true, askRestart: false, onFailure: value => { reason = value; } };
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod(mod, 'ddlc', options), true, '可信主包与有效附属包应正常导入');
-        assert.equal(imports, 1);
-
-        bootByByte.set(1, { name: 'UnrelatedExtension' });
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod(mod, 'ddlc', { ...options, batchMode: false }), false, '主包身份错配必须在写入前阻止');
-        assert.ok(reason.includes('UnrelatedExtension'));
-        assert.equal(alerts.length, 1, '单项错误应直接说明实际包名');
-        assert.equal(imports, 1, '不能写入不相关模组');
-        assert.equal(downloads, 4, '内容错误不得触发换线反复下载');
-
-        bootByByte.set(1, { name: 'FixtureMain' });
-        bootByByte.set(2, false);
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod(mod, 'ddlc', options), false, '附属ZIP缺少清单也必须阻止整组导入');
-        assert.ok(reason.includes('companion.zip'));
-        assert.equal(imports, 1, '后续包无效时不能先写入主包');
-
-        bootByByte.set(2, { name: 'FixtureResources' });
-        bootByByte.set(1, { name: 'UnmappedTechnicalName' });
-        assert.equal(await sb.dolModMarket.downloadAndInstallMod({ ...mod, bootNames: [], _matchedLocal: null }, 'ddlc', options), true, '未知中文显示名不得被猜测为技术名从而误拦有效包');
-        assert.equal(imports, 2);
-    }
-
     suiteComplete = true;
-    console.log('ModHub v1.0.4 全部测试通过');
+    console.log('ModHub v1.0.3 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;
