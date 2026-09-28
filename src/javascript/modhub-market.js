@@ -16,8 +16,6 @@
     const WIKI_PAGE = '模组列表';
     const WIKI_CACHE_KEY = 'modhub_market_wiki_v5';
     const WIKI_CACHE_TTL = 30 * 60 * 1000; // 30 分钟
-    const MODHUB_WITHDRAWN_STORAGE_KEY = 'modhub_market_withdrawn_v1';
-    const MODHUB_SUBMISSION_URL = 'https://github.com/JohnLiao501/ModHub/issues/new?template=modhub-catalog.yml';
     const PRIMARY_RELEASE_INDEX_URL = 'https://dol.alseece.top/release-index.json';
     const BACKUP_RELEASE_INDEX_URL = 'https://dolmod-release-index.johnliao381658675.workers.dev/release-index.json';
     const RELEASE_WORKER_API_BASE = 'https://dolmod-release-index.johnliao381658675.workers.dev';
@@ -314,8 +312,6 @@
 
     function isBatchInstallEligible(mod, profiles = getLocalInstalledProfiles()) {
         return Boolean(mod && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+(?:[/?#]|$)/i.test(mod.githubUrl || '')
-            && (mod.catalogSource !== 'community' || hasCommunityReleaseSource(mod))
-            && !isWithdrawn(mod)
             && !mod._isDeadRepo && !isDeadRepo(mod.githubUrl, mod)
             && checkModInstallStatus(mod, profiles) === 'not_installed');
     }
@@ -435,63 +431,6 @@
         } catch {
             /* 忽略配额超限错误 */
         }
-    }
-
-    function safeHttpsUrl(value) {
-        if (typeof value !== 'string') return null;
-        try {
-            const url = new URL(value.trim());
-            return url.protocol === 'https:' && url.hostname && !url.username && !url.password ? url.href : null;
-        } catch {
-            return null;
-        }
-    }
-
-    function hasCommunityReleaseSource(mod) {
-        const githubUrl = safeHttpsUrl(mod?.githubUrl);
-        return mod?.autoInstall === true && typeof mod.identityId === 'string' && !!mod.identityId.trim()
-            && !!parseGithubRepo(githubUrl)
-            && /^\/[^/]+\/[^/]+\/releases\/(?:latest|tag\/[^/]+)\/?$/.test(new URL(githubUrl).pathname)
-            && sourceUrlKey(mod.sourceUrl) === sourceUrlKey(githubUrl);
-    }
-
-    function sourceUrlKey(value) {
-        const safe = safeHttpsUrl(value);
-        if (!safe) return null;
-        const url = new URL(safe);
-        url.hash = '';
-        url.pathname = url.pathname.replace(/\/+$/, '') || '/';
-        return url.href;
-    }
-
-    const withdrawnIds = new Set();
-    const withdrawnUrls = new Set();
-    try {
-        const saved = JSON.parse(readStoredValue(MODHUB_WITHDRAWN_STORAGE_KEY) || '{}');
-        (Array.isArray(saved.ids) ? saved.ids : []).forEach(id => { if (typeof id === 'string') withdrawnIds.add(id.toLowerCase()); });
-        (Array.isArray(saved.urls) ? saved.urls : []).forEach(url => { const key = sourceUrlKey(url); if (key) withdrawnUrls.add(key); });
-    } catch (_) {}
-
-    function rememberWithdrawals(index) {
-        const before = withdrawnIds.size + withdrawnUrls.size;
-        const removed = (index.mods || []).filter(mod => mod?.status === 'withdrawn');
-        [...(Array.isArray(index.withdrawnIds) ? index.withdrawnIds : []), ...removed.map(mod => mod.id)]
-            .forEach(id => { if (typeof id === 'string' && id.trim()) withdrawnIds.add(id.trim().toLowerCase()); });
-        (Array.isArray(index.withdrawnUrls) ? index.withdrawnUrls : [])
-            .forEach(url => { const key = sourceUrlKey(url); if (key) withdrawnUrls.add(key); });
-        if (withdrawnIds.size + withdrawnUrls.size !== before) {
-            try { localStorage.setItem(MODHUB_WITHDRAWN_STORAGE_KEY, JSON.stringify({ ids: [...withdrawnIds], urls: [...withdrawnUrls] })); } catch (_) {}
-        }
-    }
-
-    function isWithdrawn(mod) {
-        if (!mod) return false;
-        if (typeof mod.id === 'string' && withdrawnIds.has(mod.id.toLowerCase())) return true;
-        if (mod.catalogSource === 'community' && mod.id) return false;
-        return [mod.sourceUrl, mod.otherUrl, mod.githubUrl,
-            ...(Array.isArray(mod.otherUrls) ? mod.otherUrls : []),
-            ...(Array.isArray(mod.githubUrls) ? mod.githubUrls : [])]
-            .some(url => withdrawnUrls.has(sourceUrlKey(url)));
     }
 
     /** 清理模组标题中的平台噪点、下载标注与括号说明 */
@@ -743,7 +682,7 @@
         const WIKI_HOST = 'degreesoflewditycn.miraheze.org';
         row.querySelectorAll('a[href]').forEach(a => {
             const href = a.getAttribute('href') || '';
-            if (!safeHttpsUrl(href)) return;
+            if (!/^https?:\/\//i.test(href)) return;
             let u;
             try {
                 u = new URL(href);
@@ -753,7 +692,7 @@
             const host = u.hostname.toLowerCase();
             if (host === WIKI_HOST || host.endsWith('.miraheze.org') || /^(www\.)?github\.com$/.test(host)) return;
             if (host === 'upload.wikimedia.org' || host === 'static.miraheze.org') return;
-            urls.push(sourceUrlKey(href));
+            urls.push(href.split('#')[0]);
         });
         return [...new Set(urls)];
     }
@@ -1729,11 +1668,9 @@
         if (index?.schemaVersion !== 1 || !Array.isArray(index.mods)) {
             throw new Error('自动版本索引格式异常');
         }
-        rememberWithdrawals(index);
-        const activeMods = index.mods.filter(mod => mod && mod.status !== 'withdrawn');
 
         // 客户端容错修正：若远程 release-index 仍包含未更新的旧身份映射，即时纠偏并拆分
-        for (const mod of activeMods) {
+        for (const mod of index.mods) {
             const repoKey = (extractRepoKey(mod.githubUrl) || mod.repo || '').toLowerCase();
             if (repoKey === 'hcptanghy/dol-phonemod') {
                 mod.id = 'dol-phone-mod';
@@ -1756,22 +1693,9 @@
             }
         }
 
-        const visibleMods = activeMods.filter(mod => !isWithdrawn(mod));
         applyIdentityCatalog(index.identities);
-        applyIdentityCatalog(visibleMods.filter(mod => mod.catalogSource !== 'community' || mod.identityId));
-        return markSharedRepositories(visibleMods).map(mod => {
-            const isCommunity = mod.catalogSource === 'community';
-            const sourceUrl = safeHttpsUrl(mod.sourceUrl);
-            const otherUrl = safeHttpsUrl(mod.otherUrl) || (isCommunity ? sourceUrl : null);
-            const githubUrl = safeHttpsUrl(mod.githubUrl);
-            const autoInstall = !isCommunity || hasCommunityReleaseSource(mod);
-            mod = {
-                ...mod,
-                sourceUrl,
-                otherUrl,
-                autoInstall: Boolean(autoInstall),
-                githubUrl: githubUrl && autoInstall ? githubUrl : null
-            };
+        applyIdentityCatalog(index.mods);
+        return markSharedRepositories(index.mods).map(mod => {
             const target = parseGithubRepo(mod.githubUrl);
             const indexedRelease = parseGithubRepo(mod.releaseUrl);
             if (target?.sourcePath || (mod.sharedRepository && !target?.releaseTag) ||
@@ -1798,8 +1722,8 @@
                     ? mod.githubUrls
                     : (mod.githubUrl ? [mod.githubUrl] : []),
                 otherUrls: Array.isArray(mod.otherUrls)
-                    ? mod.otherUrls.map(safeHttpsUrl).filter(Boolean)
-                    : (otherUrl ? [otherUrl] : []),
+                    ? mod.otherUrls
+                    : (mod.otherUrl ? [mod.otherUrl] : []),
                 description: mod.description || '暂无说明',
                 author: mod.author || '未知作者',
                 version: mod.version || '',
@@ -2011,10 +1935,6 @@
         mod._ignoredVersion = '';
         mod._matchedLocal = null;
         mod._matchedScore = 0;
-        if (isWithdrawn(mod)) return 'unavailable';
-        if (mod.catalogSource === 'community' && !mod.identityId) {
-            return safeHttpsUrl(mod.otherUrl || mod.sourceUrl) ? 'external_only' : 'unavailable';
-        }
 
         // 兼容传入 Map 的老接口 (如单元测试)
         let profileList = profiles;
@@ -2170,14 +2090,10 @@
 
         if (!matchedProfile) {
             const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
-            if (isDead) return safeHttpsUrl(mod.otherUrl) ? 'external_only' : 'unavailable';
-            if (!mod.githubUrl && !safeHttpsUrl(mod.otherUrl)) return 'unavailable';
-            if (!mod.githubUrl || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod))) return 'external_only';
+            if (isDead) return mod.otherUrl ? 'external_only' : 'unavailable';
+            if (!mod.githubUrl && !mod.otherUrl) return 'unavailable';
+            if (!mod.githubUrl && mod.otherUrl) return 'external_only';
             return 'not_installed';
-        }
-
-        if (!mod.githubUrl || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod))) {
-            return 'external_installed';
         }
 
         // 比对版本
@@ -3507,17 +3423,13 @@
             message: `【${mod.name}】${error.message}。\n\n是否打开该条目原始主页？`,
             confirmText: '打开主页', cancelText: '取消', confirmType: 'primary'
         });
-        const url = safeHttpsUrl(mod.githubUrl || mod.otherUrl);
-        if (confirmed && url) window.open(url, '_blank', 'noopener');
+        if (confirmed) window.open(mod.githubUrl || mod.otherUrl, '_blank', 'noopener');
         return false;
     }
 
     async function downloadAndInstallMod(mod, mirrorId = currentMirrorId, options = {}) {
         if (!mod) return false;
         const failBatch = reason => { options.onFailure?.(reason); return false; };
-        if (isWithdrawn(mod) || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod))) {
-            return failBatch('该来源不支持自动安装');
-        }
         const gui = window.modHubGetGui ? window.modHubGetGui() : null;
         if (!gui) {
             window.modHubShowToast('未找到 ModLoader 运行时实例，无法自动安装', 'warning');
@@ -3781,12 +3693,8 @@
             }
             // 写入前统一核验所有包，避免主包错误或附属包无效时留下部分安装。
             const modController = window.modHubGetController?.() || gui.modModLoadController;
-            const communityInstall = mod.catalogSource === 'community' && mod.autoInstall === true;
-            if ((communityInstall || options.dependencyRequirements?.some(item => item.bootVersions))
-                && typeof modController?.checkModZipFileIndexDB !== 'function') {
-                const error = new Error(communityInstall
-                    ? '当前 ModLoader 无法核验社区模组安装包，请手动下载并导入。'
-                    : '当前 ModLoader 无法核验 AU 模型版本，请先手动安装符合要求的 AU 美化。');
+            if (options.dependencyRequirements?.some(item => item.bootVersions) && typeof modController?.checkModZipFileIndexDB !== 'function') {
+                const error = new Error('当前 ModLoader 无法核验 AU 模型版本，请先手动安装符合要求的 AU 美化。');
                 error.code = 'INSTALL_PACKAGE_INVALID';
                 throw error;
             }
@@ -3795,11 +3703,6 @@
                     ? mod._matchedLocal?.name || mod.bootNames?.find(name => normalizeKey(name) === getAssetSeries(fileObjects[0]?.name)) : '';
                 const expectedNames = (auModelName ? [auModelName] : (mod.bootNames?.length ? mod.bootNames : [mod._matchedLocal?.name]))
                     .filter(name => typeof name === 'string' && name.trim()).map(name => name.trim().toLowerCase());
-                if (communityInstall && (!mod.bootNames?.length || !expectedNames.length)) {
-                    const error = new Error('社区模组缺少已确认的技术名，无法核验安装包身份。');
-                    error.code = 'INSTALL_PACKAGE_INVALID';
-                    throw error;
-                }
                 for (const [index, file] of fileObjects.entries()) {
                     try {
                         const boot = await modController.checkModZipFileIndexDB(new Uint8Array(await file.arrayBuffer()));
@@ -3807,7 +3710,7 @@
                         if (!actualName || typeof boot !== 'object' || Array.isArray(boot)) {
                             throw new Error(`【${file.name}】没有可识别的模组清单，不能作为 ModLoader 模组导入。`);
                         }
-                        if ((index === 0 || communityInstall) && expectedNames.length && !expectedNames.includes(actualName.toLowerCase())) {
+                        if (index === 0 && expectedNames.length && !expectedNames.includes(actualName.toLowerCase())) {
                             throw new Error(`所选【${mod.name}】的安装包实际为【${actualName}】，与已确认的模组身份不符，已停止安装。`);
                         }
                         if (index === 0) {
@@ -3999,12 +3902,14 @@
         }
 
         const identityPromise = loadIdentityCatalog(forceRefresh);
-        const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
-        if (stale && Array.isArray(stale) && stale.length > 0) {
-            await identityPromise;
-            marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: stale });
-            renderBatchInstallToolbar();
-            return marketModList;
+        if (!forceRefresh) {
+            const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
+            if (stale && Array.isArray(stale) && stale.length > 0) {
+                await identityPromise;
+                marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: stale });
+                renderBatchInstallToolbar();
+                return marketModList;
+            }
         }
 
         const params = new URLSearchParams({
@@ -4024,7 +3929,7 @@
             const data = await res.json();
             if (!data.parse || !data.parse.text) throw new Error('Wiki 数据格式解析异常');
 
-            marketModList = parseModsFromHtml(data.parse.text['*']).filter(mod => !isWithdrawn(mod));
+            marketModList = parseModsFromHtml(data.parse.text['*']);
             writeLocalCache(WIKI_CACHE_KEY, marketModList);
             renderBatchInstallToolbar();
             return marketModList;
@@ -4040,7 +3945,7 @@
     }
 
     function isMarketSourceVisible(mod) {
-        return !isWithdrawn(mod) && (!hideDeadSources || !isDeadRepo(mod.githubUrl, mod));
+        return !hideDeadSources || !isDeadRepo(mod.githubUrl, mod);
     }
 
     function filterAndSortMods() {
@@ -4061,7 +3966,7 @@
         if (currentStatusFilter === 'installable') {
             list = list.filter(m => m._status === 'not_installed' || m._status === 'update_available');
         } else if (currentStatusFilter === 'installed') {
-            list = list.filter(m => ['up_to_date', 'update_available', 'external_installed'].includes(m._status));
+            list = list.filter(m => m._status === 'up_to_date' || m._status === 'update_available');
         } else if (currentStatusFilter === 'updatable') {
             list = list.filter(m => m._status === 'update_available');
         } else if (currentStatusFilter === 'ignored') {
@@ -4116,7 +4021,6 @@
         let bestMatchCount = 0;
 
         for (const mod of source) {
-            if (isWithdrawn(mod)) continue;
             const candidate = { ...mod };
             checkModInstallStatus(candidate, [localProfile]);
             if (candidate._matchedLocal && candidate._matchedScore >= 80) {
@@ -4153,7 +4057,6 @@
         const knownRepos = MODHUB_KNOWN_MOD_REPOSITORY_KEYS[norm] || [];
         const names = new Set([norm, ...(MODHUB_KNOWN_MOD_MARKET_ALIASES[norm] || []).map(normalizeKey)]);
         const matches = list.filter(m => {
-            if (isWithdrawn(m)) return false;
             const repoKey = extractRepoKey(m.githubUrl);
             if (repoKey && knownRepos.length && !knownRepos.includes(repoKey)) return false;
             return [m.name, ...(m.bootNames || []), ...(m.aliases || [])].some(name => names.has(normalizeKey(name)));
@@ -4230,10 +4133,9 @@
         let ignoredCount = 0;
         const updatableList = [];
 
-        const activeMods = marketModList.filter(mod => !isWithdrawn(mod));
-        activeMods.forEach(m => {
+        marketModList.forEach(m => {
             const st = checkModInstallStatus(m, profiles);
-            if (st === 'up_to_date' || st === 'update_available' || st === 'external_installed') installedCount++;
+            if (st === 'up_to_date' || st === 'update_available') installedCount++;
             if (m._isIgnored) ignoredCount++;
             if (st === 'update_available') {
                 updatableCount++;
@@ -4246,7 +4148,7 @@
             }
         });
 
-        renderStatsHeader(activeMods.length, installedCount, updatableCount);
+        renderStatsHeader(marketModList.length, installedCount, updatableCount);
         renderIgnoredFilterLink(ignoredCount);
         renderBatchInstallToolbar();
         const deadCount = document.getElementById('modHubDeadSourceCount');
@@ -4269,19 +4171,10 @@
             return;
         }
 
-        const escapeHtml = window.modHubEscapeHtml || (value => String(value ?? '').replace(/[&<>"']/g, char =>
-            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]));
+        const escapeHtml = window.modHubEscapeHtml || (s => s);
 
         const html = filtered.map(mod => {
             const modIndex = mod._marketIndex;
-            const isCommunity = mod.catalogSource === 'community';
-            const sourceName = { github: 'GitHub', tieba: '百度贴吧', discord: 'Discord' }[mod.sourcePlatform] || '其他社区';
-            const externalText = isCommunity
-                ? ({ github: '前往发布页', tieba: '前往原帖', discord: '前往社区' }[mod.sourcePlatform] || '前往来源')
-                : '外部主页';
-            const sourceInfo = isCommunity
-                ? `<div class="modhub-market-meta grey"><span>来源: ${escapeHtml(sourceName)} · 已核验出处</span>${mod.sourcePlatform === 'discord' ? '<span>可能需要登录或加入服务器</span>' : ''}</div>`
-                : '';
             const tagsHtml = [
                 `<span class="modhub-market-tag modhub-market-category">${escapeHtml(mod.category || '待分类')}</span>`,
                 ...(mod.tags || []).map(t => `<span class="modhub-market-tag">${escapeHtml(t)}</span>`)
@@ -4306,18 +4199,13 @@
                 if (mod._status === 'up_to_date' || mod._matchedLocal) {
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
                 } else if (mod.otherUrl) {
-                    actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">${externalText}</button>`;
+                    actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">外部主页</button>`;
                 } else {
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>暂无下载</button>`;
                 }
             } else if (isUpdatable) {
                 badgeHtml = `<span class="modhub-market-badge badge-update">发现新版</span>`;
                 actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="一键更新">一键更新</button>`;
-            } else if (mod._status === 'external_installed') {
-                badgeHtml = `<span class="modhub-market-badge badge-installed">已安装</span>`;
-                actionBtnHtml = safeHttpsUrl(mod.otherUrl || mod.sourceUrl)
-                    ? `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">${externalText}</button>`
-                    : `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
             } else if (mod._status === 'up_to_date') {
                 if (isIgnored) {
                     badgeHtml = `<span class="modhub-market-badge badge-ignored">${isPermanentlyIgnored ? '已永久忽略' : '已忽略本次'}</span>`;
@@ -4331,14 +4219,14 @@
                 actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-install" data-mod-index="${modIndex}" data-idle-text="下载安装">下载安装</button>`;
             } else if (mod._status === 'external_only') {
                 badgeHtml = `<span class="modhub-market-badge badge-external">外部资源</span>`;
-                actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">${externalText}</button>`;
+                actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">外部主页</button>`;
             } else {
                 badgeHtml = `<span class="modhub-market-badge badge-external">暂无直链</span>`;
                 actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>暂无下载</button>`;
             }
 
-            const homeUrl = safeHttpsUrl(isCommunity ? (mod.sourceUrl || mod.otherUrl || mod.githubUrl) : (mod.githubUrl || mod.otherUrl));
-            const homeBtnHtml = homeUrl && !(isCommunity && ['external_only', 'external_installed'].includes(mod._status))
+            const homeUrl = mod.githubUrl || mod.otherUrl || '';
+            const homeBtnHtml = homeUrl
                 ? `<a href="${escapeHtml(homeUrl)}" target="_blank" rel="noopener" class="buttonlike modhub-btn-sub" title="访问模组发布主页">主页</a>`
                 : '';
 
@@ -4371,7 +4259,6 @@
                         ${mod.version || mod.versionLabel ? `<span>版本: ${escapeHtml(mod.version ? formatVersionDisplay(mod.version) : mod.versionLabel)}</span>` : ''}
                         ${localVerText}
                     </div>
-                    ${sourceInfo}
                     <div class="modhub-market-desc">
                         ${escapeHtml(mod.description)}
                     </div>
@@ -4472,7 +4359,7 @@
             btn.onclick = () => {
                 const targetMod = marketModList[Number(btn.dataset.modIndex)];
                 if (targetMod) {
-                    const url = safeHttpsUrl(targetMod.otherUrl || targetMod.sourceUrl || targetMod.githubUrl);
+                    const url = targetMod.otherUrl || targetMod.githubUrl;
                     if (url) window.open(url, '_blank', 'noopener');
                 }
             };
@@ -4488,11 +4375,9 @@
     }
 
     async function promptDownloadMirrorAndInstallUnlocked(mod) {
-        if (isWithdrawn(mod)) return false;
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
-        let externalOnly = !mod.githubUrl || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod));
-        const manualSourceUrl = safeHttpsUrl(externalOnly ? (mod.otherUrl || mod.sourceUrl || mod.githubUrl) : mod.githubUrl);
-        if (externalOnly && !manualSourceUrl) return false;
+        let externalOnly = !mod.githubUrl && Boolean(mod.otherUrl);
+        const manualSourceUrl = mod.githubUrl || mod.otherUrl;
         let plan = buildDependencyPlan(mod);
         const dependencyKey = item => String(item?.identityId || item?.id || normalizeKey(item?.name)).toLowerCase();
         const skippedDependencyKeys = new Set();
@@ -4853,7 +4738,7 @@
             <div id="modHubMarketStats" class="settingsGridSmall modhub-stats-container"></div>
 
             <div class="modhub-market-source grey" role="note">
-                模组资料来源：<a href="https://degreesoflewditycn.miraheze.org/wiki/%E6%A8%A1%E7%BB%84%E5%88%97%E8%A1%A8" target="_blank" rel="noopener">DOL 中文社区 Wiki「模组列表」</a>及维护者审核的社区目录。收录表示出处经过核验，不代表安装包安全。
+                模组资料来源：<a href="https://degreesoflewditycn.miraheze.org/wiki/%E6%A8%A1%E7%BB%84%E5%88%97%E8%A1%A8" target="_blank" rel="noopener">DOL 中文社区 Wiki「模组列表」</a>
             </div>
 
             <!-- ===== 搜索与筛选工具栏 ===== -->
@@ -4867,8 +4752,7 @@
                         value="${window.modHubEscapeHtml(currentSearchText)}"
                     />
                     <button id="modHubMarketBtnResetFilter" type="button" class="macro-button modhub-btn-primary" onclick="window.modHubMarket.resetFilters()" title="清除当前所有筛选与搜索，查看全部模组" style="display:none; white-space:nowrap;">返回全部模组</button>
-                    <button id="modHubMarketBtnRefresh" type="button" class="macro-button modhub-btn-sub" title="重新获取最新模组目录">刷新市场</button>
-                    <a class="buttonlike modhub-btn-sub modhub-submit-link" href="${MODHUB_SUBMISSION_URL}" target="_blank" rel="noopener" title="申请收录、纠错或下架">申请收录</a>
+                    <button id="modHubMarketBtnRefresh" type="button" class="macro-button modhub-btn-sub" title="重新从 Wiki 拉取最新模组">刷新市场</button>
                 </div>
 
                 <div class="modhub-market-filter-row">
@@ -4905,7 +4789,7 @@
             <!-- ===== 模组卡片列表容器 ===== -->
             <div id="modHubMarketCardsContainer" class="modhub-market-grid">
                 <div class="modhub-loading-box grey">
-                    正在拉取模组市场数据，请稍候……
+                    正在拉取 Wiki 模组市场数据，请稍候……
                 </div>
             </div>
         `;

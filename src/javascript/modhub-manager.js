@@ -2571,7 +2571,16 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
                         disableBtn.textContent = '正在禁用...';
 
                         try {
-                            if (!await window.modHubToggleSideMod(rawName, false, { skipConfirm: true, silentOfferReload: true })) throw new Error('快捷禁用未完成');
+                            const conflictItem = state.sideMods.find(m => m.name === rawName);
+                            if (conflictItem) {
+                                conflictItem.enabled = false;
+                                window.modHubEnsureModStateSync(state);
+                                await window.modHubSaveModManageState(false);
+                            }
+
+                            if (typeof window.modHubShowToast === 'function') {
+                                window.modHubShowToast(`已快捷禁用【${displayName}】，冲突已排除`, 'success');
+                            }
 
                             if (typeof dialog.modHubClearDelay === 'function') {
                                 dialog.modHubClearDelay();
@@ -2663,16 +2672,15 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     }
 
     return window.modHubRunManagerAction(async () => {
-        const currentState = window._modHubModState;
-        const currentItem = currentState?.sideMods?.find(m => m.name === modName);
-        if (!currentItem || currentItem.enabled === targetEnable) return false;
-        currentItem.enabled = targetEnable;
-        window.modHubEnsureModStateSync(currentState);
+        item.enabled = targetEnable;
+        window.modHubEnsureModStateSync(state);
 
         if (!await window.modHubSaveModManageState(false)) throw new Error('模组配置保存失败');
 
-        // 禁用时始终同步停用所属图包；自动启用开关只控制启用方向。
-        await window.modHubLoadBeautyState();
+        // 若开启了美化自动启用，跟随对齐美化状态
+        if (window.modHubIsAutoBeautyEnabled()) {
+            await window.modHubLoadBeautyState();
+        }
 
         window.modHubShowToast(`模组【${modName}】已${targetEnable ? '启用' : '禁用'}`, 'success');
         if (!options.silentOfferReload && window.modHubIsFrameworkMod(modName)) {
@@ -2743,7 +2751,6 @@ window.modHubDeleteSideMod = async function(modName) {
         state.sideDisabled = state.sideDisabled.filter(name => name !== modName);
         // dropNames：明确告知保存层该模组已被删除，禁止被「已安装保留」逻辑复活
         if (!await window.modHubSaveModManageState(false, { dropNames: [modName] })) throw new Error('删除模组配置失败');
-        await window.modHubLoadBeautyState(true, [modName]);
         window._modHubDisabledModInfo.delete(modName.trim().toLowerCase());
         // 真正删除浏览器存储中的安装包；
         // 只从列表移除而不删包体，会留下永远无法被加载的孤儿包体（占用空间且状态诡异）。

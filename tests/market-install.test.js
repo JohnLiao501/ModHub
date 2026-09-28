@@ -783,34 +783,6 @@ module.exports = async function() {
         bootByByte.set(1, { name: 'UnmappedTechnicalName' });
         assert.equal(await sb.modHubMarket.downloadAndInstallMod({ ...mod, bootNames: [], _matchedLocal: null }, 'ddlc', options), true, '未知中文显示名不得被猜测为技术名从而误拦有效包');
         assert.equal(imports, 2);
-
-        const communityRelease = `${mod.githubUrl}/releases/latest`;
-        const [community] = sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
-            ...mod, id: 'community-package-check', identityId: 'fixture-main',
-            catalogSource: 'community', sourcePlatform: 'github', sourceUrl: communityRelease,
-            githubUrl: communityRelease, autoInstall: true
-        }] });
-        bootByByte.set(1, { name: 'FixtureMain' });
-        assert.equal(await sb.modHubMarket.downloadAndInstallMod({
-            ...community, sourceUrl: mod.githubUrl, githubUrl: mod.githubUrl
-        }, 'ddlc', options), false, '直接调用安装入口也不能绕过社区 Release 链接核验');
-        assert.equal(imports, 2);
-        sb.modHubGetController = () => ({});
-        assert.equal(await sb.modHubMarket.downloadAndInstallMod(community, 'ddlc', options), false,
-            '社区安装缺少 ModLoader 包体校验接口时必须失败');
-        assert.ok(reason.includes('无法核验社区模组安装包'));
-        assert.equal(imports, 2, '无法校验时不得导入任何包');
-
-        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async data => bootByByte.get(data[0]) });
-        assert.equal(await sb.modHubMarket.downloadAndInstallMod(community, 'ddlc', options), false,
-            '社区多包安装的附属包也必须符合已核验技术名');
-        assert.ok(reason.includes('FixtureResources'));
-        assert.equal(imports, 2, '附属包身份错配时整组不得写入');
-
-        bootByByte.set(2, { name: 'FixtureMain' });
-        assert.equal(await sb.modHubMarket.downloadAndInstallMod(community, 'ddlc', options), true,
-            '社区多包均通过包体身份校验后才能安装');
-        assert.equal(imports, 3);
     }
 
     // AU 三模型为可替代前置，各自版本要求必须贯穿单装、批装和包体预检。
