@@ -150,6 +150,16 @@
     margin-bottom: 10px;
 }
 
+.modhub-market-search-row .modhub-submit-link {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    min-height: 32px;
+    box-sizing: border-box;
+    white-space: nowrap;
+}
+
 .modhub-market-search-row .modhub-search-input {
     flex: 1;
     min-width: 0;
@@ -575,7 +585,8 @@
         grid-template-columns: 1fr;
     }
 
-    .modhub-market-search-row button {
+    .modhub-market-search-row button,
+    .modhub-market-search-row .modhub-submit-link {
         width: 100% !important;
     }
 }

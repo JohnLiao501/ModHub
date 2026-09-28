@@ -30,6 +30,14 @@ Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 
 3. **ReadMe 浏览器**：优先安全读取已加载包内的说明；缺少本地说明时通过 Worker、GitHub 官方 API 获取，并缓存成功文档。断网时可回退上次内容，读取失败不会被误报为模组加载故障。
 4. **加载日志**：提供结构化错误分析、关键词过滤及诊断长图生成导出。
 
+## 社区模组收录（v1.1.0）
+
+在模组市场或网站点击“申请收录”，填写 [GitHub Issue 表单](https://github.com/JohnLiao501/ModHub/issues/new?template=modhub-catalog.yml)。作者和玩家均可推荐模组；维护者核对作者原帖、发布来源与模组身份后，才会将条目写入公共目录。纠错、失效链接与下架申请也通过该表单提交。收录表示来源资料经过核验，不保证第三方模组代码安全。
+
+贴吧、Discord 等社区条目可在市场中打开原帖；需要登录或加入社区的来源会注明访问条件。社区 GitHub 条目默认只提供外链，只有具体发布渠道和安装包身份经过核验，才使用原有一键安装。外链模组的版本由人工记录，玩家应前往原帖查看更新。
+
+审核通过的条目保存在 `modhub-community-catalog.json`，网站与游戏继续读取同一份 Worker `release-index.json`。来源暂时不可用时保留最后成功的目录；下架记录会过滤旧目录和缓存中对应的条目。
+
 ## 市场多选安装（v1.0.3）
 
 1. 打开“模组市场”，点击金框主按钮“批量下载”，勾选或点击卡片空白、标题、介绍选择未安装的模组，也可使用“全选当前筛选”。卡片内按钮和主页链接继续执行原有操作。搜索、分类和排序不会清空已选项；退出多选会清空勾选。
@@ -46,6 +54,7 @@ Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 
 - `release/`：由 `pack.py` 生成的本地安装包（`ModHub-v<version>.zip`），按数值版本保留最近 3 版，每版一份正式包；GitHub Releases 中的历史版本永久保留。不再同步至游戏 MOD 文件夹。
 - `dolmod-site/`：模组市场在线索引、身份目录与反馈中心 Worker/Pages 仓库。
 - `mod-identities.json`：模组市场元数据与统一身份字典。
+- `modhub-community-catalog.json`：人工审核后的社区条目与下架记录。
 - `dol-mod-extractor.js`：DoL 中文 Wiki 模组列表抓取、解析与身份合并脚本。
 - `test-dol-mod-extractor.js`：模组身份字典与提取器的自动化校验脚本。
 - `plans/`：ModHub 功能规划、版本迭代案与验收记录。

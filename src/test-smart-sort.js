@@ -12,6 +12,7 @@ process.on('beforeExit', () => {
 });
 
 (async () => {
+    await require('../tests/validate-community-catalog.test')();
     await require('../tests/manager.test')();
     await require('../tests/market-catalog.test')();
     await require('../tests/diagnostics-conflicts.test')();
@@ -19,7 +20,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.0.5 全部测试通过');
+    console.log('ModHub v1.1.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

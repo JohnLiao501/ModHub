@@ -1,7 +1,7 @@
 // ModHub 市场索引、身份、版本与来源解析。
 const {
     assert, fs, path, srcRoot, bootJson,
-    readStyles, loadScripts, loadManager, loadMarket,
+    readStyles, loadScripts, loadManager, loadMarket, createStubElement,
 } = require('./helpers');
 
 module.exports = async function() {
@@ -74,6 +74,88 @@ module.exports = async function() {
         };
         assert.equal((await market.loadMarketData(true))[0].version, '1.0.2', '手动刷新必须取代内存和本地的旧版本列表');
         assert.deepEqual(requestedUrls, Array.from(market.RELEASE_INDEX_MIRRORS), '主镜像失效后必须继续尝试备用镜像');
+    }
+
+    // 社区外链默认只开放原帖；审核通过的精确 GitHub 发布源才可自动安装。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        const sourceUrl = 'https://tieba.baidu.com/p/12345';
+        const manual = {
+            id: 'community-manual', name: '社区手动模组', description: '<img src=x onerror=alert(1)>',
+            author: '作者', catalogSource: 'community', sourcePlatform: 'tieba',
+            sourceUrl, otherUrl: sourceUrl, githubUrl: 'https://github.com/Other/Wrong',
+            autoInstall: false, version: '9.0.0', versionSource: 'github'
+        };
+        const [external] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [manual] });
+        assert.equal(external.githubUrl, null, '社区条目未获安装资格时不得使用投稿的 GitHub 仓库');
+        assert.equal(market.checkModInstallStatus(external, []), 'external_only');
+        assert.equal(market.checkModInstallStatus(external, [{ name: manual.name, version: '1.0.0', repository: 'https://github.com/Other/Else' }]),
+            'external_only', '未核实身份的同名社区条目不能声称本地已安装');
+        assert.equal(market.isBatchInstallEligible(external, []), false);
+        const [identified] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            ...manual, id: 'community-identified', identityId: 'verified-tech', bootNames: ['VerifiedTech']
+        }] });
+        assert.equal(market.checkModInstallStatus(identified, [{ name: 'VerifiedTech', version: '1.0.0' }]),
+            'external_installed', '核实技术名后可显示已安装，但人工版本不能触发更新');
+
+        const release = 'https://github.com/Owner/Verified/releases/tag/v2';
+        const [approved] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-approved', identityId: 'verified-github', name: '已核验 GitHub 模组', catalogSource: 'community',
+            sourcePlatform: 'github', sourceUrl: release, otherUrl: release,
+            githubUrl: release, autoInstall: true
+        }] });
+        assert.equal(approved.githubUrl, release, '已核验的精确发布源仍可沿用现有 GitHub 安装');
+        assert.equal(market.isBatchInstallEligible(approved, []), true);
+        const repositoryRoot = 'https://github.com/Owner/Verified';
+        const [unscoped] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-unscoped', identityId: 'verified-github', name: '仓库根地址',
+            catalogSource: 'community', sourcePlatform: 'github', sourceUrl: repositoryRoot,
+            githubUrl: repositoryRoot, autoInstall: true
+        }] });
+        assert.equal(unscoped.githubUrl, null, '社区安装资格必须指向明确的 GitHub Release 入口');
+        const [badLink] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-bad', name: '非法链接', catalogSource: 'community',
+            sourcePlatform: 'tieba', sourceUrl: 'javascript:alert(1)', otherUrl: 'http://example.com/mod'
+        }] });
+        assert.equal(badLink.otherUrl, null, '市场外链必须是无凭据的 HTTPS URL');
+        assert.equal(market.checkModInstallStatus(badLink, []), 'unavailable');
+
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer',
+            'modHubCategoryCapsules'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        sb.modHubEscapeHtml = value => String(value).replace(/[&<>"']/g, char =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [manual] }) });
+        await sb.modHubInitMarket(true);
+        const card = elements.get('modHubMarketCardsContainer').innerHTML;
+        assert.ok(elements.get('modHubModMarketContainer').innerHTML.includes('template=modhub-catalog.yml'), '市场必须提供申请收录入口');
+        assert.ok(card.includes('来源: 百度贴吧') && card.includes('前往原帖'));
+        assert.ok(!card.includes('一键更新') && !card.includes('已是最新') && !card.includes('<img src=x'), '外链卡片不能承诺自动更新，也不能渲染投稿 HTML');
+    }
+
+    // 下架墓碑跨缓存持久；共享来源按 id 区分，旧 Wiki 无身份条目才用 URL 拦截。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        const sharedUrl = 'https://github.com/Owner/Shared/releases/tag/v1';
+        const removed = { id: 'community-removed', catalogSource: 'community', name: '下架模组', sourceUrl: sharedUrl, otherUrl: sharedUrl };
+        const active = { id: 'community-active', catalogSource: 'community', name: '同源在架模组', sourceUrl: sharedUrl, otherUrl: sharedUrl };
+        const oldUrl = 'https://tieba.baidu.com/p/98765';
+        const index = { schemaVersion: 1, withdrawnIds: [removed.id], withdrawnUrls: [`${oldUrl}/#reply`], mods: [removed, active] };
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex(index), mod => mod.id), [active.id], '共享来源仅下架指定 id');
+        const oldWiki = { name: '旧 Wiki 模组', otherUrl: oldUrl };
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex({ schemaVersion: 1, mods: [removed, active, oldWiki] }), mod => mod.name),
+            [active.name], '旧索引及 Wiki 回退不能复活已下架来源');
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [removed, active, oldWiki], timestamp: 1 }));
+        const requests = [];
+        sb.fetch = async url => { requests.push(url); throw new Error('模拟离线'); };
+        assert.deepEqual(Array.from(await market.loadMarketData(true), mod => mod.name), [active.name],
+            '手动刷新离线时仍应优先使用经过下架过滤的最后成功缓存');
+        assert.ok(!requests.some(url => String(url).includes('/w/api.php')), '已有成功缓存时无需退回 Wiki');
+        loadScripts(sb, ['javascript/modhub-market.js']);
+        assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [removed, active, oldWiki] }), mod => mod.name),
+            [active.name], '重启后仍保留下架墓碑');
     }
 
     // README 在线线路失败后使用官方 API 或最后成功缓存，不能无限等待网络。
