@@ -238,6 +238,82 @@ module.exports = async function() {
         assert.deepEqual(Array.from(addon.typeOrderUsed, item => item.type), savedOrder, '失败后 Addon 顺序也必须保持原样');
     }
 
+    // 禁用或删除模组后，其图包必须退出独立保存的美化启用顺序。
+    for (const action of ['disable', 'delete', 'disable-with-auto-off']) {
+        const controller = createMockController({ enabled: ['ModA', 'ModB'], zips: ['ModA', 'ModB'] });
+        const sb = loadManager({ modModLoadController: controller });
+        sb._modHubModState = {
+            sideMods: [{ name: 'ModA', enabled: true }, { name: 'ModB', enabled: true }],
+            sideEnabled: ['ModA', 'ModB'], sideDisabled: [],
+        };
+        if (action === 'disable-with-auto-off') sb.modHubSetAutoBeautyEnabled(false);
+        const items = [
+            { type: '基础图像', modRef: { name: 'Builtin' } },
+            { type: 'A图包', modRef: { name: 'ModA' } },
+            { type: 'B图包', modRef: { name: 'ModB' } },
+        ];
+        let savedOrder = items.map(item => item.type);
+        const addon = sb.addonBeautySelectorAddon = {
+            getTypeOrder: () => items,
+            typeOrderUsed: [...items],
+            saveOrder(order) { savedOrder = [...order]; return true; },
+        };
+        await sb.modHubLoadBeautyState(false);
+        if (action === 'delete') {
+            sb.modHubConfirm = async () => true;
+            assert.equal(await sb.modHubDeleteSideMod('ModA'), true);
+            assert.deepEqual(controller.store.removed, ['ModA'], '只删除目标模组的包体');
+        } else {
+            assert.equal(await sb.modHubToggleSideMod('ModA', false), true);
+        }
+        assert.deepEqual(savedOrder, ['基础图像', 'B图包'], `${action} 后必须保存去掉目标图包的顺序`);
+        assert.deepEqual(Array.from(addon.typeOrderUsed, item => item.type), savedOrder, 'Addon 当前顺序必须同步');
+        assert.deepEqual(Array.from(sb._modHubBeautyState.disabledList, item => item.type), ['A图包'], '目标图包应进入禁用列表');
+        await sb.modHubLoadBeautyState();
+        assert.equal(await sb.modHubToggleBeauty('A图包', true), false, '所属模组未启用时不能手动重启图包');
+        if (action === 'disable') {
+            assert.equal(await sb.modHubToggleSideMod('ModA', true), true);
+            assert.deepEqual(savedOrder, ['基础图像', 'B图包', 'A图包'], '重新启用模组后应恢复自动图包联动');
+        }
+    }
+
+    // 快捷禁用图包保存失败后会重读状态，随后继续启用不能只修改失效的旧对象。
+    {
+        const controller = createMockController({ enabled: ['Conflict'], disabled: ['Target'] });
+        const sb = loadManager({ modModLoadController: controller, console: { error() {}, warn() {}, log() {} } });
+        sb._modHubModState = {
+            sideMods: [{ name: 'Conflict', enabled: true }, { name: 'Target', enabled: false }],
+            sideEnabled: ['Conflict'], sideDisabled: ['Target'],
+        };
+        const originalState = sb._modHubModState;
+        const image = { type: 'Conflict图包', modRef: { name: 'Conflict' } };
+        let saves = 0;
+        sb.addonBeautySelectorAddon = {
+            getTypeOrder: () => [image], typeOrderUsed: [image],
+            saveOrder: () => ++saves !== 1,
+        };
+        await sb.modHubLoadBeautyState(false);
+        sb.modHubCheckEnableConflicts = () => ({
+            targetDisplayName: 'Target', conflictDisplayName: 'Conflict', conflictModName: 'Conflict', reason: '测试冲突',
+        });
+        sb.modHubFindDependentMods = async () => [];
+        let conflictDialog, confirmEnable;
+        sb.modHubConfirm = options => options.title === '模组冲突风险确认'
+            ? new Promise(resolve => { conflictDialog = options; confirmEnable = resolve; })
+            : Promise.resolve(true);
+
+        const enabling = sb.modHubToggleSideMod('Target', true);
+        const disableButton = { disabled: false, textContent: '' };
+        conflictDialog.onRender({ querySelector: selector => selector === '#modHubModalConflictDisableBtn' ? disableButton : null });
+        await disableButton.onclick({ preventDefault() {}, stopPropagation() {} });
+        assert.equal(saves, 1, '快捷禁用必须实际尝试保存图包');
+        assert.notEqual(sb._modHubModState, originalState, '图包保存失败后必须重读模组状态');
+        confirmEnable(true);
+        assert.equal(await enabling, true, '继续启用目标模组应成功');
+        assert.deepEqual(controller.store.enabled, ['Target'], '成功提示对应的目标模组必须真正写入启用列表');
+        assert.deepEqual(controller.store.disabled, ['Conflict'], '冲突模组应保持禁用');
+    }
+
     // 长按消费本次手势，释放与浏览器随后合成的点击不能再触发短按。
     {
         const sb = createBaseSandbox();

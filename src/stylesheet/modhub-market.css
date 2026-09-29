@@ -33,6 +33,7 @@
     padding: 10px;
     border: 1px solid var(--750, #333);
     border-radius: 4px;
+    container-type: inline-size;
 }
 
 .modhub-market-batch-toolbar {
@@ -148,6 +149,28 @@
     display: flex;
     gap: 8px;
     margin-bottom: 10px;
+}
+
+.modhub-market-search-row > button {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: auto !important;
+    max-width: none !important;
+    min-width: 0 !important;
+    min-height: 40px;
+    box-sizing: border-box;
+    padding: 6px 8px !important;
+    font-size: 0.9em !important;
+    line-height: 1.2 !important;
+    white-space: nowrap;
+}
+
+.modhub-market-feedback-row {
+    display: flex;
+    justify-content: flex-end;
+    margin: -4px 0 8px;
 }
 
 .modhub-market-search-row .modhub-search-input {
@@ -291,7 +314,7 @@
     border: 1px solid var(--750, #333);
     border-radius: 4px;
     padding: 12px 14px;
-    height: 290px;
+    min-height: 290px;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -412,6 +435,7 @@
     margin-bottom: 12px;
     flex: 1;
     min-height: 0;
+    max-height: 7em;
     overflow-y: auto;
     scrollbar-width: none;
     -ms-overflow-style: none;
@@ -425,6 +449,7 @@
 /* 模组卡片底部操作栏 */
 .modhub-market-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
     margin-top: auto;
@@ -443,11 +468,364 @@
     align-items: center !important;
     justify-content: center !important;
     box-sizing: border-box !important;
+    flex: 1 1 0;
+    min-width: 0 !important;
+    max-width: none !important;
+    width: auto !important;
 }
 
-.modhub-market-actions .btn-market-install,
-.modhub-market-actions .btn-market-update {
-    flex: 1;
+.modhub-community-dialog {
+    width: 100%;
+    max-width: 620px;
+    max-height: calc(100vh - 92px);
+    max-height: calc(100dvh - 92px);
+    margin-bottom: 44px;
+}
+
+.modhub-community-dialog.is-form {
+    height: min(620px, calc(100vh - 92px));
+    height: min(620px, calc(100dvh - 92px));
+}
+
+.modhub-community-dialog.is-query .modhub-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    padding: 8px;
+}
+
+.modhub-community-dialog.is-form .modhub-modal-body,
+.modhub-community-dialog.is-form .modhub-modal-message,
+.modhub-community-form {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.modhub-community-dialog.is-form .modhub-modal-body {
+    overflow: hidden;
+    padding: 8px;
+}
+
+.modhub-community-fields {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 4px;
+}
+
+.modhub-community-safety {
+    flex: 0 0 auto;
+    min-width: 0;
+    padding: 8px 4px 0;
+    border-top: 1px solid var(--700, #444);
+}
+
+.modhub-community-status {
+    margin: 2px 4px 8px;
+    line-height: 1.5;
+}
+
+.modhub-community-status[hidden] {
+    display: none;
+}
+
+.modhub-community-form label,
+.modhub-community-my label {
+    display: block;
+    margin: 9px 0;
+    color: var(--300, #ddd);
+}
+
+.modhub-community-form input,
+.modhub-community-form textarea,
+.modhub-community-my input,
+.modhub-community-my select {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    box-sizing: border-box;
+    margin-top: 4px;
+    padding: 7px 9px;
+    border: 1px solid var(--600, #555);
+    border-radius: 3px;
+    background: var(--900, #111);
+    color: #eee;
+    font: inherit;
+}
+
+.modhub-community-form textarea {
+    min-height: 76px;
+    resize: vertical;
+}
+
+.modhub-community-form [hidden] {
+    display: none !important;
+}
+
+.modhub-community-form input:focus,
+.modhub-community-form textarea:focus,
+.modhub-community-my input:focus,
+.modhub-community-my select:focus {
+    border-color: var(--gold, #d4af37);
+    outline: none;
+}
+
+.modhub-community-challenge {
+    display: block;
+    width: 100%;
+    height: 86px;
+    border: 0;
+    background: transparent;
+}
+
+.modhub-community-challenge[data-size="compact"] {
+    height: 138px;
+}
+
+.modhub-community-challenge-wrap[hidden] {
+    display: none;
+}
+
+.modhub-community-actions,
+.modhub-community-saved {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+}
+
+.modhub-community-target {
+    display: grid;
+    gap: 5px;
+    margin: 8px 0 14px;
+    padding: 10px;
+    border: 1px solid var(--700, #444);
+    background: var(--850, #1b1b1b);
+    overflow-wrap: anywhere;
+}
+
+.modhub-community-list-tools {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
+    gap: 8px;
+}
+
+.modhub-community-list-tools label {
+    margin: 0;
+}
+
+.modhub-community-list-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin: 8px 0;
+}
+
+.modhub-community-list-actions button {
+    min-height: 32px;
+}
+
+.modhub-community-saved {
+    display: grid;
+    gap: 7px;
+    margin: 8px 0;
+}
+
+.modhub-community-record {
+    min-width: 0;
+    border: 1px solid var(--700, #444);
+    border-radius: 3px;
+    background: var(--850, #1b1b1b);
+}
+
+.modhub-community-record.is-selected {
+    border-color: var(--gold, #d4af37);
+}
+
+.modhub-community-record-open {
+    display: grid;
+    gap: 4px;
+    width: 100%;
+    min-width: 0;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: 0;
+    background: transparent;
+    color: #eee;
+    text-align: left;
+    font: inherit;
+    cursor: pointer;
+}
+
+.modhub-community-record-open strong,
+.modhub-community-record-open span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-community-pager {
+    display: grid;
+    grid-template-columns: minmax(80px, 1fr) auto minmax(80px, 1fr);
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0 12px;
+    text-align: center;
+}
+
+.modhub-community-pager button {
+    min-height: 32px;
+    min-width: 0 !important;
+}
+
+.modhub-community-backup {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--700, #444);
+    background: var(--850, #1b1b1b);
+}
+
+.modhub-community-backup summary {
+    min-height: 32px;
+    line-height: 32px;
+    color: var(--300, #ddd);
+    cursor: pointer;
+}
+
+.modhub-community-backup > p {
+    margin: 5px 0;
+}
+
+.modhub-community-empty {
+    margin: 8px 0;
+}
+
+.modhub-community-actions button,
+.modhub-community-saved button,
+.modhub-community-result button,
+.modhub-community-detail button {
+    min-height: 32px;
+    flex-shrink: 0;
+}
+
+.modhub-community-dialog.is-form .modhub-community-actions {
+    flex-wrap: nowrap;
+    margin: 8px 0 0;
+}
+
+.modhub-community-dialog.is-form .modhub-community-actions > button {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+    min-height: 36px;
+}
+
+.modhub-community-dialog.is-form .modhub-community-actions > .modhub-modal-btn-confirm {
+    flex: 0 0 90px;
+    background: transparent !important;
+    border: 1px solid var(--600, #555) !important;
+    color: #ddd !important;
+}
+
+.modhub-market-feedback-dialog {
+    max-width: 620px;
+    max-height: calc(100dvh - 92px);
+}
+
+.modhub-market-feedback-dialog .modhub-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.modhub-feedback-search-label {
+    display: block;
+    margin-bottom: 10px;
+}
+
+.modhub-feedback-search {
+    display: block;
+    width: 100%;
+    min-height: 36px;
+    box-sizing: border-box;
+    margin-top: 4px;
+    padding: 7px 9px;
+    background: var(--900, #111);
+    border: 1px solid var(--600, #555);
+    color: #eee;
+    font: inherit;
+}
+
+.modhub-market-feedback-dialog .modhub-modal-select {
+    min-height: 36px;
+    max-height: 35dvh;
+}
+
+.modhub-community-result,
+.modhub-community-detail {
+    overflow-wrap: anywhere;
+    margin-top: 12px;
+}
+
+.modhub-community-detail {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.modhub-community-detail > p {
+    flex: 0 0 100%;
+    margin: 0;
+}
+
+.modhub-community-detail > button {
+    flex: 1 1 120px;
+    min-width: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+    min-height: 36px;
+}
+
+.modhub-community-result[hidden] {
+    display: none;
+}
+
+.modhub-community-result details {
+    margin-top: 8px;
+}
+
+.modhub-community-result summary {
+    min-height: 32px;
+    line-height: 32px;
+    cursor: pointer;
+}
+
+.modhub-community-receipt {
+    display: block;
+    user-select: all;
+    overflow-wrap: anywhere;
+    margin: 8px 0;
+}
+
+@media (max-width: 420px) {
+    .modhub-community-actions button {
+        flex: 1 1 0;
+        min-width: 0;
+    }
+
+    .modhub-community-list-tools {
+        grid-template-columns: 1fr;
+    }
+
+    .modhub-community-pager {
+        grid-template-columns: 1fr 1fr;
+    }
+
+    .modhub-community-page {
+        grid-column: 1 / -1;
+        grid-row: 1;
+    }
 }
 
 .modhub-download-progress {
@@ -557,31 +935,40 @@
     }
 }
 
-@media (max-width: 600px) {
+@media (max-width: 768px) {
     .modhub-market-grid {
         grid-template-columns: 1fr;
     }
 
-    .modhub-market-search-row {
-        display: grid;
-        grid-template-columns: 1fr;
+    .modhub-market-card {
+        min-height: 0;
     }
 
-    .modhub-market-search-row .modhub-search-input {
-        grid-column: auto;
-    }
-
-    .modhub-market-selects {
-        grid-template-columns: 1fr;
-    }
-
-    .modhub-market-search-row button {
-        width: 100% !important;
+    .modhub-market-desc {
+        flex: 0 1 auto;
+        max-height: none;
+        overflow-y: visible;
     }
 }
 
-@media (max-width: 420px) {
-    .modhub-market-capsules {
+@media (max-width: 600px) {
+    .modhub-market-selects {
         grid-template-columns: 1fr;
+    }
+}
+
+@container (max-width: 768px) {
+    .modhub-market-search-row {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .modhub-market-search-row .modhub-search-input,
+    .modhub-market-search-row #modHubMarketBtnResetFilter {
+        grid-column: 1 / -1;
+    }
+
+    .modhub-market-search-row > button {
+        width: 100% !important;
     }
 }

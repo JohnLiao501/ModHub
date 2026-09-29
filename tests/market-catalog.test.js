@@ -1,7 +1,7 @@
 // ModHub 市场索引、身份、版本与来源解析。
 const {
     assert, fs, path, srcRoot, bootJson,
-    readStyles, loadScripts, loadManager, loadMarket,
+    readStyles, loadScripts, loadManager, loadMarket, createStubElement,
 } = require('./helpers');
 
 module.exports = async function() {
@@ -74,6 +74,481 @@ module.exports = async function() {
         };
         assert.equal((await market.loadMarketData(true))[0].version, '1.0.2', '手动刷新必须取代内存和本地的旧版本列表');
         assert.deepEqual(requestedUrls, Array.from(market.RELEASE_INDEX_MIRRORS), '主镜像失效后必须继续尝试备用镜像');
+    }
+
+    // 社区外链默认只开放原帖；审核通过的精确 GitHub 发布源才可自动安装。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        const sourceUrl = 'https://tieba.baidu.com/p/12345';
+        const manual = {
+            id: 'community-manual', name: '社区手动模组', description: '<img src=x onerror=alert(1)>',
+            author: '作者', catalogSource: 'community', sourcePlatform: 'tieba',
+            sourceUrl, otherUrl: sourceUrl, githubUrl: 'https://github.com/Other/Wrong',
+            autoInstall: false, version: '9.0.0', versionSource: 'github'
+        };
+        const [external] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [manual] });
+        assert.equal(external.githubUrl, null, '社区条目未获安装资格时不得使用投稿的 GitHub 仓库');
+        assert.equal(market.checkModInstallStatus(external, []), 'external_only');
+        assert.equal(market.checkModInstallStatus(external, [{ name: manual.name, version: '1.0.0', repository: 'https://github.com/Other/Else' }]),
+            'external_only', '未核实身份的同名社区条目不能声称本地已安装');
+        assert.equal(market.isBatchInstallEligible(external, []), false);
+        const [identified] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            ...manual, id: 'community-identified', identityId: 'verified-tech', bootNames: ['VerifiedTech']
+        }] });
+        assert.equal(market.checkModInstallStatus(identified, [{ name: 'VerifiedTech', version: '1.0.0' }]),
+            'external_installed', '核实技术名后可显示已安装，但人工版本不能触发更新');
+
+        const release = 'https://github.com/Owner/Verified/releases/tag/v2';
+        const [approved] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-approved', identityId: 'verified-github', name: '已核验 GitHub 模组', catalogSource: 'community',
+            repositoryKeys: ['Owner/Verified'], bootNames: ['VerifiedTech'],
+            sourcePlatform: 'github', sourceUrl: release, otherUrl: release,
+            githubUrl: release, autoInstall: true
+        }] });
+        assert.equal(approved.githubUrl, release, '已核验的精确发布源仍可沿用现有 GitHub 安装');
+        assert.equal(market.isBatchInstallEligible(approved, []), true);
+        const repositoryRoot = 'https://github.com/Owner/Verified';
+        const [unscoped] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-unscoped', identityId: 'verified-github', name: '仓库根地址',
+            repositoryKeys: ['Owner/Verified'], bootNames: ['VerifiedTech'],
+            catalogSource: 'community', sourcePlatform: 'github', sourceUrl: repositoryRoot,
+            githubUrl: repositoryRoot, autoInstall: true
+        }] });
+        assert.equal(unscoped.githubUrl, null, '社区安装资格必须指向明确的 GitHub Release 入口');
+        const [wrongRepo] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-wrong-repo', identityId: 'verified-github', name: '错误仓库',
+            repositoryKeys: ['Other/Repo'], bootNames: ['VerifiedTech'],
+            catalogSource: 'community', sourcePlatform: 'github', sourceUrl: release,
+            githubUrl: release, autoInstall: true
+        }] });
+        assert.equal(wrongRepo.githubUrl, null, '发布仓库必须属于已核验身份仓库');
+        const [badLink] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: 'community-bad', name: '非法链接', catalogSource: 'community',
+            sourcePlatform: 'tieba', sourceUrl: 'javascript:alert(1)', otherUrl: 'http://example.com/mod'
+        }] });
+        assert.equal(badLink.otherUrl, null, '市场外链必须是无凭据的 HTTPS URL');
+        assert.equal(market.checkModInstallStatus(badLink, []), 'unavailable');
+
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer',
+            'modHubCategoryCapsules'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        sb.modHubEscapeHtml = value => String(value).replace(/[&<>"']/g, char =>
+            ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [manual] }) });
+        await sb.modHubInitMarket(true);
+        const card = elements.get('modHubMarketCardsContainer').innerHTML;
+        const toolbar = elements.get('modHubModMarketContainer').innerHTML;
+        assert.ok(toolbar.includes('modHubMarketBtnSubmit') && toolbar.includes('modHubMarketBtnMy'), '市场必须提供游戏内投稿与查询入口');
+        assert.ok(toolbar.includes('modHubMarketBtnFeedback'), '纠错与下架申请应共用一个入口');
+        assert.ok(!toolbar.includes('issues/new'), '市场投稿不应再跳转 GitHub Issue');
+        assert.ok(card.includes('来源: 百度贴吧') && card.includes('前往原帖'));
+        assert.ok(!card.includes('btn-market-correct') && !card.includes('btn-market-withdraw'), '反馈入口不应挤占每张卡片的主操作区');
+        assert.ok(!card.includes('一键更新') && !card.includes('已是最新') && !card.includes('<img src=x'), '外链卡片不能承诺自动更新，也不能渲染投稿 HTML');
+        const opened = [];
+        let feedbackMode = 'correct';
+        sb.modHubConfirm = async options => {
+            opened.push(options);
+            if (opened.length === 1) return feedbackMode;
+            if (opened.length === 2) {
+                const search = { value: '', oninput: null };
+                const select = { size: 0, value: '', children: [], replaceChildren() { this.children = []; },
+                    appendChild(child) { this.children.push(child); } };
+                const confirm = { disabled: false };
+                options.onRender({ querySelector: selector => ({
+                    '.modhub-feedback-search': search, '.modhub-modal-select': select,
+                    '.modhub-modal-btn-confirm': confirm
+                })[selector] });
+                search.value = '没有结果';
+                search.oninput();
+                assert.equal(select.children.length, 1, '搜索无结果时不得保留旧目标');
+                assert.equal(confirm.disabled, true, '搜索后必须重新选择目标');
+                search.value = '作者';
+                search.oninput();
+                assert.equal(select.children.length, 2, '可按作者搜索完整目录');
+                return '0';
+            }
+            return false;
+        };
+        await market.openCommunityFeedback();
+        assert.equal(opened[2].title, '纠错', '公共入口应在选择类型和目标后打开对应表单');
+        assert.ok(opened[1].selectOptions[1].label.includes(sourceUrl), '目标列表应显示原始来源以区分同名模组');
+        opened.length = 0;
+        feedbackMode = 'withdraw';
+        let targetRequest = null;
+        let blockedMessage = '';
+        sb.modHubAlert = message => { blockedMessage = message; };
+        sb.fetch = async (url, options) => {
+            targetRequest = { path: new URL(url).pathname, body: JSON.parse(options.body) };
+            return { ok: true, json: async () => ({ targetStatus: 'active', activeDelistStatus: 'pending', canRequestDelist: false }) };
+        };
+        await market.openCommunityFeedback();
+        assert.equal(targetRequest.path, '/community-submissions/target-status', '下架入口必须向服务端确认目标当前状态');
+        assert.equal(targetRequest.body.catalogId, 'community-manual');
+        assert.ok(blockedMessage.includes('已有进行中的下架申请'));
+        assert.equal(opened.length, 2, '已有下架申请时不得打开重复申请表单');
+    }
+
+    // 下架快照按最大社区修订号更新；旧缓存不能复活下架条目，新修订可以恢复。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        const sharedUrl = 'https://github.com/Owner/Shared/releases/tag/v1';
+        const removed = { id: 'community-removed', catalogSource: 'community', name: '下架模组', sourceUrl: sharedUrl, otherUrl: sharedUrl };
+        const active = { id: 'community-active', catalogSource: 'community', name: '同源在架模组', sourceUrl: sharedUrl, otherUrl: sharedUrl };
+        const oldUrl = 'https://tieba.baidu.com/p/98765';
+        const index = { schemaVersion: 1, communityRevision: 2, withdrawnIds: [removed.id], withdrawnUrls: [`${oldUrl}/#reply`], mods: [removed, active] };
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex(index), mod => mod.id), [active.id], '共享来源仅下架指定 id');
+        const oldWiki = { name: '旧 Wiki 模组', otherUrl: oldUrl };
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 1, mods: [removed, active, oldWiki] }), mod => mod.name),
+            [active.name], '旧索引及 Wiki 回退不能复活已下架来源');
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [removed, active, oldWiki], timestamp: 1 }));
+        const requests = [];
+        sb.fetch = async url => { requests.push(url); throw new Error('模拟离线'); };
+        assert.deepEqual(Array.from(await market.loadMarketData(true), mod => mod.name), [active.name],
+            '手动刷新离线时仍应优先使用经过下架过滤的最后成功缓存');
+        assert.ok(!requests.some(url => String(url).includes('/w/api.php')), '已有成功缓存时无需退回 Wiki');
+        loadScripts(sb, ['javascript/modhub-market.js']);
+        assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [removed, active, oldWiki] }), mod => mod.name),
+            [active.name], '重启后仍保留下架墓碑');
+        assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 3,
+            withdrawnIds: [], withdrawnUrls: [], mods: [removed, active, oldWiki] }), mod => mod.name),
+            [removed.name, active.name, oldWiki.name], '新修订的完整快照可以恢复原下架条目');
+        assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex(index), mod => mod.name),
+            [removed.name, active.name], '恢复后旧镜像不能重新下架条目');
+    }
+
+    // 原生投稿表单持久化查询凭证；挑战消息须核对来源、窗口与 nonce。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        sb.crypto = require('node:crypto').webcrypto;
+        sb.btoa = value => Buffer.from(value, 'binary').toString('base64');
+        let listener = null;
+        sb.addEventListener = (name, handler) => { if (name === 'message') listener = handler; };
+        sb.removeEventListener = (name, handler) => { if (name === 'message' && listener === handler) listener = null; };
+        const opened = [];
+        function makeDialog() {
+            const inputs = Object.fromEntries(Object.entries({ name: 100, author: 100, sourceUrl: 1000, description: 1000, notes: 1000 })
+                .map(([name, maxLength]) => [name, { value: '', maxLength, disabled: false, addEventListener() {} }]));
+            const form = { elements: { namedItem: name => inputs[name] }, onsubmit: null };
+            const frame = { src: '', contentWindow: {}, dataset: {} };
+            const result = { hidden: true };
+            const resultTitle = { textContent: '' };
+            const status = { textContent: '' };
+            const receipt = { textContent: '' };
+            const submit = { disabled: false, textContent: '' };
+            const queryInput = { value: '' };
+            const query = { disabled: false, onclick: null };
+            const saved = createStubElement();
+            saved.replaceChildren = () => { saved.children = []; };
+            const detail = createStubElement();
+            detail.replaceChildren = () => { detail.children = []; };
+            const search = { value: '', oninput: null };
+            const filter = { value: '', onchange: null };
+            const refreshPage = { disabled: false, onclick: null };
+            const previousPage = { disabled: false, onclick: null };
+            const nextPage = { disabled: false, onclick: null };
+            const pageLabel = { textContent: '' };
+            const nodes = {
+                '.modhub-community-form': form, '.modhub-community-challenge': frame,
+                '.modhub-community-result': result, '.modhub-community-status': status,
+                '.modhub-community-result-title': resultTitle,
+                '.modhub-community-receipt': receipt, '.modhub-community-submit': submit,
+                '.modhub-community-copy': {}, '.modhub-community-query-input': queryInput,
+                '.modhub-community-query': query, '.modhub-community-saved': saved,
+                '.modhub-community-detail': detail,
+                '.modhub-community-search': search, '.modhub-community-filter': filter,
+                '.modhub-community-refresh-page': refreshPage, '.modhub-community-prev': previousPage,
+                '.modhub-community-next': nextPage, '.modhub-community-page': pageLabel,
+                '.modhub-community-actions': { appendChild() {} },
+                '.modhub-modal-btn-confirm': {}, '.modhub-modal-footer': { remove() {} },
+                '.modhub-community-challenge-wrap': { hidden: false }
+            };
+            return { inputs, form, frame, result, resultTitle, status, receipt, submit, queryInput, query, saved, detail,
+                search, filter, refreshPage, previousPage, nextPage, pageLabel,
+                dialog: { querySelector: selector => nodes[selector], addEventListener() {} } };
+        }
+        sb.modHubConfirm = options => new Promise(resolve => {
+            const current = makeDialog();
+            current.close = resolve;
+            current.html = options.trustedMessageHtml;
+            current.options = options;
+            opened.push(current);
+            options.onRender?.(current.dialog);
+        });
+        const origin = new URL(market.RELEASE_WORKER_API_BASE).origin;
+        let attempts = 0;
+        let queriedStatus = 'needs_info';
+        let queriedKind = 'add';
+        let queriedTargetStatus = '';
+        let queriedActiveDelistStatus = '';
+        let queriedCanRequestDelist = false;
+        let queriedDuplicate = false;
+        let queryErrorStatus = 0;
+        const posted = [];
+        sb.fetch = async (url, options) => {
+            const path = new URL(url).pathname;
+            const body = JSON.parse(options.body);
+            posted.push({ path, body });
+            if (path === '/community-submissions') {
+                attempts++;
+                if (attempts === 1) throw new Error('模拟响应丢失');
+                return { ok: true, json: async () => ({ id: 'sub-1', revision: 1, status: 'pending' }) };
+            }
+            if (path === '/community-submissions/query') {
+                if (queryErrorStatus) return { ok: false, status: queryErrorStatus,
+                    json: async () => ({ error: '投稿记录不存在' }) };
+                return { ok: true, json: async () => ({ id: 'sub-1', kind: queriedKind, catalogId: 'community-a',
+                    name: '测试模组', author: '作者', sourceUrl: 'https://tieba.baidu.com/p/123',
+                    description: '简介', notes: '', revision: queriedStatus === 'withdrawn' ? 2 : 1,
+                    status: queriedStatus, approvedCatalogId: queriedStatus === 'approved' ? 'community-a' : null,
+                    targetStatus: queriedTargetStatus || null, activeDelistStatus: queriedActiveDelistStatus || null,
+                    canRequestDelist: queriedCanRequestDelist,
+                    ...(queriedDuplicate ? { duplicateOf: 'older-submission', mergedProgress: { status: 'pending', updatedAt: '2026-09-29T00:00:00Z' } } : {}) }) };
+            }
+            if (path === '/community-submissions/query-batch') return { ok: true, json: async () => ({
+                results: body.receipts.map((value, index) => ({ index, submission: {
+                    id: `batch-${index}-${value.slice(0, 4)}`, kind: 'add', name: `批量记录 ${index + 1}`,
+                    status: 'pending', revision: 1, updatedAt: '2026-09-29T00:00:00Z',
+                    targetStatus: null, activeDelistStatus: null, canRequestDelist: false
+                } }))
+            }) };
+            if (path === '/community-submissions/amend') return { ok: true, json: async () => ({ id: 'sub-1', revision: 2, status: 'pending' }) };
+            if (path === '/community-submissions/withdraw') {
+                queriedStatus = 'withdrawn';
+                return { ok: true, json: async () => ({ id: 'sub-1', revision: 2, status: 'withdrawn' }) };
+            }
+            if (path === '/community-submissions/delete') return { ok: true, json: async () => ({ id: 'sub-1', deleted: true }) };
+            throw new Error('意外请求');
+        };
+        const firstTask = market.openCommunitySubmission('new');
+        const first = opened.at(-1);
+        assert.ok(first.html.includes('<form') && first.html.includes('modhub-community-challenge')
+            && !first.html.includes('community-submit?'), '玩家表单必须留在游戏原生弹窗');
+        assert.ok(first.html.includes('modhub-community-fields') && first.html.includes('modhub-community-safety')
+            && first.html.includes('title="安全验证"') && !first.html.includes('投稿验证'), '填写区单独滚动，验证提示统一为安全验证');
+        assert.equal(new URL(first.frame.src).searchParams.get('embedded'), '1', '嵌入验证页不能重复显示提示');
+        Object.assign(first.inputs.name, { value: '测试模组' });
+        Object.assign(first.inputs.author, { value: '作者' });
+        Object.assign(first.inputs.sourceUrl, { value: 'https://tieba.baidu.com/p/123' });
+        Object.assign(first.inputs.description, { value: '简介' });
+        let nonce = new URL(first.frame.src).searchParams.get('nonce');
+        listener({ origin: 'https://evil.example', source: first.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '伪造' } });
+        listener({ origin, source: {}, data: { type: 'modHubCommunityChallenge', nonce, token: '伪造' } });
+        listener({ origin, source: first.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce: 'wrong', token: '伪造' } });
+        await first.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, 0, '伪造挑战消息不得触发投稿');
+        listener({ origin, source: first.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '真实挑战' } });
+        listener({ origin, source: first.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: null } });
+        assert.equal(first.submit.disabled, true, '安全验证过期时应禁用提交');
+        await first.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, 0, '验证过期必须清空旧 token');
+        listener({ origin, source: first.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '新挑战' } });
+        await first.form.onsubmit({ preventDefault() {} });
+        const receipt = posted[0].body.receipt;
+        assert.match(receipt, /^[A-Za-z0-9_-]{43}$/);
+        assert.ok(first.status.textContent.includes('模拟响应丢失'), '提交失败的具体原因应留在外层状态区');
+        assert.equal(JSON.parse(sb.localStorage.getItem('modhub_market_submission_drafts_v1'))['new:'].pending.receipt, receipt,
+            '响应丢失后原查询凭证须保留在本机');
+        assert.ok(!sb.localStorage.getItem('modhub_market_submission_drafts_v1').includes('新挑战'), '挑战 token 不得落盘');
+        first.close(false);
+        await firstTask;
+        assert.equal(listener, null, '关闭弹窗须解绑挑战监听');
+
+        const retryTask = market.openCommunitySubmission('new');
+        const retry = opened.at(-1);
+        assert.equal(retry.inputs.name.value, '测试模组', '重开时恢复原申请内容');
+        assert.equal(retry.inputs.name.disabled, true, '未确认申请锁定内容以保证幂等重试');
+        assert.ok(retry.status.textContent.includes('上次提交结果尚未确认'), '待确认投稿重开后保留风险提示');
+        nonce = new URL(retry.frame.src).searchParams.get('nonce');
+        listener({ origin, source: retry.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '重试挑战' } });
+        await retry.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted[1].body.receipt, receipt, '超时重试须使用同一查询凭证');
+        assert.equal(retry.receipt.textContent, receipt, '成功后游戏内显示可复制凭证');
+        assert.ok(retry.html.includes('<details>') && retry.html.includes('查看完整查询凭证'), '完整凭证默认收进显式展开区');
+        assert.equal(retry.resultTitle.textContent, '投稿已保存到本机');
+        const savedSubmission = JSON.parse(sb.localStorage.getItem('modhub_market_submission_receipts_v1'))[0];
+        assert.equal(savedSubmission.name, '测试模组', '新记录应保存可读名称摘要');
+        assert.equal(savedSubmission.kind, 'add', '新记录应保存申请类型摘要');
+        const successStatus = retry.status.textContent;
+        listener({ origin, source: retry.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: null } });
+        assert.equal(retry.status.textContent, successStatus, '验证回调不能覆盖提交成功提示');
+        retry.close(false);
+        await retryTask;
+
+        const legacyRecords = JSON.parse(sb.localStorage.getItem('modhub_market_submission_receipts_v1'));
+        for (let index = 1; index <= 11; index++) {
+            legacyRecords.push({ id: `legacy-${index}`, receipt: Buffer.alloc(32, index).toString('base64url') });
+        }
+        sb.localStorage.setItem('modhub_market_submission_receipts_v1', JSON.stringify(legacyRecords));
+        const myTask = market.openCommunitySubmission('my');
+        const mine = opened.at(-1);
+        assert.ok(mine.html.includes('modhub-community-search') && mine.html.includes('modhub-community-filter'),
+            '投稿较多时提供名称搜索与状态筛选');
+        assert.ok(mine.html.includes('<details class="modhub-community-backup">'), '查询凭证入口默认收进备份与恢复区');
+        assert.equal(mine.saved.children.length, 10, '我的投稿每页最多显示十条');
+        assert.ok(mine.pageLabel.textContent.includes('共 12 条'));
+        mine.nextPage.onclick();
+        assert.equal(mine.saved.children.length, 2, '下一页显示剩余记录');
+        mine.previousPage.onclick();
+        mine.search.value = '测试模组';
+        mine.search.oninput();
+        assert.equal(mine.saved.children.length, 1, '名称搜索只保留匹配投稿');
+        mine.search.value = '';
+        mine.search.oninput();
+        await mine.refreshPage.onclick();
+        assert.equal(posted.at(-1).path, '/community-submissions/query-batch', '刷新本页使用最多十条的批量查询');
+        assert.equal(posted.at(-1).body.receipts.length, 10);
+        mine.queryInput.value = receipt;
+        await mine.query.onclick();
+        assert.equal(posted.at(-1).path, '/community-submissions/query', '允许手动输入凭证查询');
+        const refreshedLocal = JSON.parse(sb.localStorage.getItem('modhub_market_submission_receipts_v1'))
+            .find(item => item.receipt === receipt);
+        assert.equal(refreshedLocal.name, '测试模组', '旧记录查询成功后补齐可读摘要');
+        assert.ok(refreshedLocal.queriedAt > 0, '缓存状态记录最近查询时间');
+        assert.ok(mine.detail.children.some(child => child.textContent === '补充资料'), '待补充投稿提供补充入口');
+        const clickAction = button => button.onclick ? button.onclick() : button._listeners.click[0]({ preventDefault() {} });
+        const retractButton = mine.detail.children.find(child => child.textContent === '撤回投稿');
+        assert.ok(retractButton, '待审核投稿提供撤回入口');
+        assert.ok(mine.detail.children.some(child => child.textContent === '删除推荐'), '待审核推荐提供删除入口');
+        const canceled = clickAction(retractButton);
+        assert.equal(opened.at(-1).options.confirmType, 'danger', '撤回须先在暗黑对话框确认');
+        opened.at(-1).close(false);
+        await canceled;
+        assert.equal(posted.at(-1).path, '/community-submissions/query', '取消撤回不能发请求');
+        const retracting = clickAction(retractButton);
+        opened.at(-1).close(true);
+        await retracting;
+        assert.equal(posted.at(-1).path, '/community-submissions/withdraw');
+        assert.deepEqual(JSON.parse(JSON.stringify(posted.at(-1).body)), { receipt, revision: 1 });
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent === '删除推荐'), '撤回后仍可删除推荐');
+        assert.ok(!mine.detail.children.some(child => child.textContent === '补充资料'), '撤回后不得继续补充');
+        const deleting = clickAction(mine.detail.children.find(child => child.textContent === '删除推荐'));
+        assert.equal(opened.at(-1).options.confirmType, 'danger', '删除须先在暗黑对话框确认');
+        opened.at(-1).close(true);
+        await deleting;
+        assert.equal(posted.at(-1).path, '/community-submissions/delete');
+        assert.deepEqual(JSON.parse(JSON.stringify(posted.at(-1).body)), { receipt, revision: 2 });
+        assert.equal(mine.detail.children.length, 0, '删除后清空投稿详情');
+        assert.ok(!sb.localStorage.getItem('modhub_market_submission_receipts_v1').includes(receipt),
+            '删除后移除本机查询凭证');
+        queriedStatus = 'approved';
+        queriedTargetStatus = 'active';
+        queriedCanRequestDelist = true;
+        const approvedReceipt = Buffer.alloc(32, 19).toString('base64url');
+        sb.localStorage.setItem('modhub_market_submission_drafts_v1', JSON.stringify({ manual: {
+            pending: { receipt: approvedReceipt, payload: { name: '测试模组', kind: 'add' } }
+        } }));
+        mine.queryInput.value = approvedReceipt;
+        await mine.query.onclick();
+        assert.ok(!sb.localStorage.getItem('modhub_market_submission_drafts_v1').includes(approvedReceipt),
+            '手动凭证查询成功后保存正式记录并清理匹配的待确认草稿');
+        assert.ok(!mine.detail.children.some(child => child.textContent === '删除推荐'), '已批准推荐不能直接删除');
+        const delistButton = mine.detail.children.find(child => child.textContent === '申请下架');
+        assert.ok(delistButton, '已批准推荐提供下架申请入口');
+        const delisting = clickAction(delistButton);
+        const delist = opened.at(-1);
+        assert.ok(delist.html.includes('提交下架申请'));
+        assert.ok(delist.html.includes('下架原因') && !delist.html.includes('<label>模组名称'), '下架表单仅让玩家填写原因');
+        assert.equal(delist.inputs.name.value, '测试模组');
+        assert.equal(delist.inputs.name.disabled, true, '下架目标基础资料必须锁定');
+        assert.equal(delist.inputs.notes.disabled, false);
+        delist.close(false);
+        await delisting;
+        queriedActiveDelistStatus = 'pending';
+        queriedCanRequestDelist = false;
+        await mine.query.onclick();
+        assert.ok(!mine.detail.children.some(child => child.textContent === '申请下架'), '已有进行中下架申请时不得重复显示入口');
+        assert.ok(mine.detail.children.some(child => child.textContent.includes('下架申请：待审核')));
+        queriedStatus = 'pending';
+        queriedTargetStatus = '';
+        queriedActiveDelistStatus = '';
+        queriedDuplicate = true;
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent.includes('已归并到较早的申请')),
+            '归并副单显示主申请进度');
+        assert.ok(!mine.detail.children.some(child => ['补充资料', '撤回投稿', '删除推荐'].includes(child.textContent)),
+            '归并副单不得提供会产生无效写入的操作');
+        queriedDuplicate = false;
+        queriedKind = 'withdraw';
+        queriedStatus = 'approved';
+        queriedTargetStatus = 'withdrawn';
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent.includes('下架申请已通过')),
+            '已批准的下架申请使用明确状态文案');
+        queryErrorStatus = 404;
+        await mine.query.onclick();
+        const removeLocal = mine.detail.children.find(child => child.textContent === '从本机移除');
+        assert.ok(removeLocal, '服务端已不存在的投稿允许只移除本机记录');
+        const removingLocal = clickAction(removeLocal);
+        opened.at(-1).close(true);
+        await removingLocal;
+        assert.ok(!sb.localStorage.getItem('modhub_market_submission_receipts_v1').includes(approvedReceipt));
+        mine.close(false);
+        await myTask;
+
+        const row = { id: 'sub-1', kind: 'add', catalogId: 'community-a', name: '测试模组', author: '作者',
+            sourceUrl: 'https://tieba.baidu.com/p/123', description: '简介', notes: '', revision: 1 };
+        const amendTask = market.openCommunitySubmission('amend', row, receipt);
+        const amend = opened.at(-1);
+        nonce = new URL(amend.frame.src).searchParams.get('nonce');
+        listener({ origin, source: amend.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '补充挑战' } });
+        await amend.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).path, '/community-submissions/amend', '补充资料调用修订接口');
+        assert.equal(posted.at(-1).body.revision, 1, '补充资料必须带审核修订号');
+        amend.close(false);
+        await amendTask;
+
+        sb.innerWidth = 320;
+        const correctTask = market.openCommunitySubmission('correct', {
+            id: 'community-target', name: '待纠错模组', author: '作者',
+            sourceUrl: 'https://tieba.baidu.com/p/123', description: '原简介'
+        });
+        const correct = opened.at(-1);
+        assert.equal(new URL(correct.frame.src).searchParams.get('size'), 'compact', '窄屏验证控件应选紧凑尺寸');
+        nonce = new URL(correct.frame.src).searchParams.get('nonce');
+        listener({ origin, source: correct.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '纠错挑战' } });
+        await correct.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.catalogId, 'community-target', '纠错必须绑定实际目录条目 ID');
+        assert.equal(posted.at(-1).body.kind, 'correct');
+        correct.close(false);
+        await correctTask;
+    }
+
+    // 社区自动安装必须先拿到权威 Worker 的实时审核确认。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        sb.modHubShowToast = () => {};
+        const release = 'https://github.com/Owner/Verified/releases/tag/v1';
+        const entry = { id: 'community-install-check', identityId: 'verified-tech', name: '待重验模组',
+            catalogSource: 'community', sourcePlatform: 'github', sourceUrl: release, githubUrl: release,
+            repositoryKeys: ['Owner/Verified'], bootNames: ['VerifiedTech'], autoInstall: true, version: '1.0.0' };
+        const [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 1, mods: [entry] });
+        let requests = 0;
+        sb.fetch = async (url, options) => {
+            requests++;
+            assert.equal(url, `${market.RELEASE_WORKER_API_BASE}/release-index.json`, '安装只查询权威 Worker');
+            assert.equal(options.cache, 'no-store', '安装重验不得使用浏览器缓存');
+            return { ok: true, headers: { get: () => '0' }, json: async () => ({ schemaVersion: 1, communityRevision: 1, mods: [entry] }) };
+        };
+        assert.equal(await market.downloadAndInstallMod(mod), false, 'Worker 未确认 D1 最新修订时须停止自动安装');
+        assert.equal(requests, 1);
+        sb.fetch = async () => ({ ok: true, headers: { get: () => '1' }, json: async () => ({
+            schemaVersion: 1, communityRevision: 2, withdrawnIds: [entry.id], mods: [entry]
+        }) });
+        assert.equal(await market.downloadAndInstallMod(mod), false, '审核下架后旧市场卡片不得继续安装');
     }
 
     // README 在线线路失败后使用官方 API 或最后成功缓存，不能无限等待网络。

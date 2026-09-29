@@ -30,7 +30,7 @@ window.modHubToggleAutoBeautySetting = async function(checked) {
     });
 };
 
-window.modHubLoadBeautyState = async function(syncAuto = true) {
+window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames = []) {
     const bAddon = window.addonBeautySelectorAddon;
     if (!bAddon || typeof bAddon.getTypeOrder !== 'function') {
         window._modHubBeautyLoaded = true;
@@ -41,9 +41,6 @@ window.modHubLoadBeautyState = async function(syncAuto = true) {
     try {
         const allList = [...bAddon.getTypeOrder()];
         let usedList = Array.isArray(bAddon.typeOrderUsed) ? [...bAddon.typeOrderUsed] : [];
-        let usedTypeSet = new Set(usedList.map(item => item.type));
-        let disabledList = allList.filter(item => !usedTypeSet.has(item.type));
-
         const autoBeautyEnabled = window.modHubIsAutoBeautyEnabled();
         let beautyChanged = false;
 
@@ -64,13 +61,27 @@ window.modHubLoadBeautyState = async function(syncAuto = true) {
             } catch (_) {}
         }
 
+        const getModName = item => item.modRef?.name || item.mod || item.fromMod || '';
+        const blockedModNames = new Set([
+            ...(window._modHubModState?.sideDisabled || []),
+            ...(window._modHubBeautyState?.blockedModNames || []),
+            ...removedModNames
+        ].map(name => String(name).trim().toLowerCase()));
+        enabledSideMods.forEach(name => blockedModNames.delete(String(name).trim().toLowerCase()));
+        if (syncAuto) {
+            const stillEnabled = usedList.filter(item => !blockedModNames.has(String(getModName(item)).trim().toLowerCase()));
+            beautyChanged = stillEnabled.length !== usedList.length;
+            usedList = stillEnabled;
+        }
+        const usedTypeSet = new Set(usedList.map(item => item.type));
+        let disabledList = allList.filter(item => !usedTypeSet.has(item.type));
         const allMap = new Map(allList.map(item => [item.type, item]));
 
         if (syncAuto && autoBeautyEnabled && enabledSideMods.size > 0) {
             // 自动启用：属于已启用旁加载模组的美化项移入已启用列表
             const toEnable = [];
             disabledList = disabledList.filter(item => {
-                const modName = item.modRef?.name || item.mod || item.fromMod || '';
+                const modName = getModName(item);
                 if (modName && enabledSideMods.has(modName)) {
                     toEnable.push(item);
                     return false;
@@ -91,14 +102,15 @@ window.modHubLoadBeautyState = async function(syncAuto = true) {
 
         // 标记是否属于受保护的自动管理美化项
         allList.forEach(item => {
-            const modName = item.modRef?.name || item.mod || item.fromMod || '';
+            const modName = getModName(item);
             item.isAutoManaged = !!(autoBeautyEnabled && modName && enabledSideMods.has(modName));
         });
 
         window._modHubBeautyState = {
             enabledList: usedList,
             disabledList: disabledList,
-            allMap: allMap
+            allMap: allMap,
+            blockedModNames: blockedModNames
         };
 
         if (beautyChanged && !await window.modHubSaveBeautyState(false)) throw new Error('美化自动启用保存失败');
@@ -266,6 +278,12 @@ window.modHubToggleBeauty = async function(typeKey, enable) {
 
         const targetItem = state.allMap.get(typeKey);
         if (!targetItem) return false;
+
+        const modName = targetItem.modRef?.name || targetItem.mod || targetItem.fromMod || '';
+        if (enable && state.blockedModNames?.has(String(modName).trim().toLowerCase())) {
+            window.modHubShowToast(`请先启用所属模组，再启用美化包【${typeKey}】`, 'warning');
+            return false;
+        }
 
         if (!enable && window.modHubIsAutoBeautyEnabled() && targetItem.isAutoManaged) {
             window.modHubShowToast(`美化包【${typeKey}】已跟随旁加载模组自动启用，无需手动调整`, 'warning');

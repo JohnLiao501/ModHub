@@ -3,6 +3,7 @@ node_modules/
 dist/
 __pycache__/
 *.pyc
+.wrangler/
 
 # 独立部署的 Worker/Pages 站点仓库（独立 git 历史，不并入主仓库）
 dolmod-site/
