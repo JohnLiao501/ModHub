@@ -44,6 +44,7 @@ window.modHubConfirm = function(options) {
 
     let customResult = null;
     let onRender = null;
+    let validateConfirm = null;
 
     if (typeof options === 'string') {
         message = options;
@@ -62,6 +63,7 @@ window.modHubConfirm = function(options) {
         if (Number(options.confirmDelay) > 0) confirmDelay = Math.ceil(Number(options.confirmDelay));
         if (typeof options.customResult === 'function') customResult = options.customResult;
         if (typeof options.onRender === 'function') onRender = options.onRender;
+        if (typeof options.canConfirm === 'function') validateConfirm = options.canConfirm;
     }
 
     // 针对非 DOM / Node 单元测试环境的安全回退
@@ -123,6 +125,7 @@ window.modHubConfirm = function(options) {
         const canConfirm = () => {
             if (isDelaying) return false;
             if (requireSelection && !select?.value) return false;
+            if (validateConfirm && !validateConfirm(dialog)) return false;
             return true;
         };
 
@@ -135,6 +138,7 @@ window.modHubConfirm = function(options) {
                 }
             }
         };
+        dialog.modHubSyncConfirmState = syncConfirmState;
 
         if (confirmDelay > 0) {
             delayTimer = setInterval(() => {
@@ -208,9 +212,9 @@ window.modHubConfirm = function(options) {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closeWith(false);
-            } else if (e.key === 'Enter' && canConfirm()) {
+            } else if (e.key === 'Enter') {
                 e.preventDefault();
-                closeWith(getConfirmResult());
+                if (canConfirm()) closeWith(getConfirmResult());
             }
         };
 
@@ -239,7 +243,7 @@ window.modHubConfirm = function(options) {
             }
         });
 
-        if (confirmBtn && !isDelaying && typeof confirmBtn.focus === 'function') {
+        if (confirmBtn && !confirmBtn.disabled && !isDelaying && typeof confirmBtn.focus === 'function') {
             confirmBtn.focus();
         } else {
             const cancelBtn = dialog.querySelector('.modhub-modal-btn-cancel');

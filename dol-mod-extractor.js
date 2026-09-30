@@ -18,6 +18,7 @@ const WIKI_PAGE = '模组列表';
 const IDENTITY_FILE = './mod-identities.json';
 const CACHE_PREFIX = 'dol_mod_release_v2_';
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 小时
+const MODHUB_RELEASE_API_BASE = 'https://dolmod-release-index.johnliao381658675.workers.dev';
 
 // ==================== 通用工具 ====================
 
@@ -66,6 +67,30 @@ function getModDependencies(mod, identity) {
     ['maplebirch', /(?:^|[（(，,：:\s])依赖(?:于)?\s*(?:模组)?\s*秋枫白桦框架/i],
   ].filter(([, pattern]) => pattern.test(description)).map(([id]) => ({ id }));
   return normalizeDependencies([...(identity?.dependencies || []), ...inferred]);
+}
+
+export function modHubNormalizeReleaseCompatibility(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.flatMap(record => {
+    const releaseTag = typeof record?.releaseTag === 'string' ? record.releaseTag.trim() : '';
+    const assetName = typeof record?.assetName === 'string' ? record.assetName.trim() : '';
+    const gameVersionRange = typeof record?.gameVersionRange === 'string' ? record.gameVersionRange.trim() : '';
+    let evidenceUrl;
+    try {
+      const url = new URL(record?.evidenceUrl);
+      if (url.protocol !== 'https:' || url.username || url.password) return [];
+      evidenceUrl = url.toString();
+    } catch { return []; }
+    const key = `${releaseTag}\n${assetName}`;
+    if (!releaseTag || releaseTag.length > 200 || /[\u0000-\u001f]/u.test(releaseTag)
+        || (record.assetName !== undefined && (!assetName || assetName.length > 500 || /[\\/\u0000-\u001f]/u.test(assetName)))
+        || gameVersionRange.length > 200 || !/^(?:(?:>=|<=|>|<|=|\^|~)\s*)?\d+(?:\.\d+)*(?:\s*(?:&&|\|\|)\s*(?:(?:>=|<=|>|<|=|\^|~)\s*)?\d+(?:\.\d+)*)*$/.test(gameVersionRange)
+        || seen.has(key)) return [];
+    seen.add(key);
+    return [{ releaseTag, ...(assetName ? { assetName } : {}), gameVersionRange, evidenceUrl,
+      ...(Array.isArray(record.dependencies) ? { dependencies: normalizeDependencies(record.dependencies) } : {}) }];
+  });
 }
 
 function getIdentityNameKeys(identity) {
@@ -140,6 +165,7 @@ export function mergeModIdentities(mods, catalog) {
       category: typeof identity.category === 'string' ? identity.category : null,
       tags: uniqueStrings(identity.tags),
       dependencies: getModDependencies(mod, identity),
+      releaseCompatibility: modHubNormalizeReleaseCompatibility(identity.releaseCompatibility),
     };
   });
 }
@@ -427,6 +453,27 @@ export function clearReleaseCache() {
   return keys.length;
 }
 
+/** 按当前目录来源读取历史发布，缓存及下架检查统一交给 Worker。 */
+export async function modHubFetchModReleases(mod, { page = 1, signal } = {}) {
+  const id = mod?.id || mod?.identityId;
+  if (!id || !Number.isSafeInteger(page) || page < 1) throw new Error('模组缺少目录身份或页码无效，请核对原始发布页');
+  const params = new URLSearchParams({ id, page: String(page) });
+  const response = await fetch(`${MODHUB_RELEASE_API_BASE}/mod-releases?${params}`, { cache: 'no-cache', signal });
+  const payload = await response.json();
+  if (!response.ok) throw Object.assign(new Error(payload.error || '历史发布暂时无法读取'), { code: payload.code, status: response.status });
+  const normalizeSource = value => {
+    const url = new URL(value);
+    url.hash = '';
+    url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+    return url.toString();
+  };
+  if (payload?.schemaVersion !== 1 || payload.id !== id || payload.page !== page || !Array.isArray(payload.releases)
+      || normalizeSource(payload.sourceUrl) !== normalizeSource(mod.githubUrl)) {
+    throw Object.assign(new Error('发布来源与当前目录不一致，请刷新目录后重试'), { code: 'RELEASE_SOURCE_CHANGED', status: 409 });
+  }
+  return payload;
+}
+
 // ==================== 获取 GitHub Release（按需 + 缓存） ====================
 
 function parseGithubUrl(value) {
@@ -476,20 +523,25 @@ export function parseGithubReleaseTarget(value) {
   }
 }
 
+export function modHubIsModPackageName(name) {
+  return /\.(?:zip|mod|modpack(?:\.crypt)?)$/i.test(name || '')
+    && !/(?:^|[\s._-])(?:source(?:[\s._-]*code)?|src|apk|outdated?|obsolete)(?=[\s._-]|$)|源码|整合包|过时版/i.test(name || '');
+}
+
 function pickDownloadAsset(assets) {
   if (!assets || !assets.length) return null;
-  const prefer = [/\.zip$/i, /\.7z$/i, /\.rar$/i, /\.mod$/i, /\.jar$/i, /\.tar\.gz$/i];
+  const prefer = [/\.zip$/i, /\.mod$/i, /\.modpack$/i, /\.modpack\.crypt$/i];
   for (const re of prefer) {
     const found = assets.filter((a) => re.test(a.name));
     if (found.length) return found.length === 1 ? found[0] : null;
   }
-  return assets.find((a) => a.downloadUrl) || null;
+  return null;
 }
 
 // 与 Mod 端保持一致，只按完整产品系列匹配，避免主包、扩展与依赖之间的子串误认。
 function getAssetSeries(name) {
-  return String(name || '').replace(/\.(?:zip|mod)$/ig, '')
-    .replace(/(?:for[\s._-]*)?dol[\s._-]*\d+(?:\.\d+)+/ig, '')
+  return String(name || '').replace(/\.(?:zip|mod|modpack(?:\.crypt)?)$/ig, '')
+    .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+/ig, '')
     .replace(/(?:version|ver|v)?\d+(?:\.\d+)+/ig, '')
     .replace(/(?:^|[\s._-])build[\s._-]*\d+/ig, '')
     .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '').replace(/(?:mod)+$/, '');
@@ -528,7 +580,7 @@ export async function fetchModRelease(mod, options = {}) {
 
   const sharedRepository = !!mod.sharedRepository && !parsed.tag;
   const releasePath = parsed.tag ? `tags/${encodeURIComponent(parsed.tag)}` : 'latest';
-  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || []]))}`;
+  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], 'modpack-v1']))}`;
 
   if (useCache) {
     const cached = readCache(cacheKey);
@@ -559,12 +611,12 @@ export async function fetchModRelease(mod, options = {}) {
   if (sharedRepository) {
     // ponytail: 最多检索最近 100 个发布，无可信匹配时转作者主页，确有需求再增加分页。
     releaseData = (Array.isArray(releaseData) ? releaseData : []).filter(release => !release.draft && !release.prerelease
-      && (release.assets || []).some(asset => matchesAssetIdentity(asset, mod)))
+      && (release.assets || []).some(asset => modHubIsModPackageName(asset.name) && matchesAssetIdentity(asset, mod)))
       .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0];
     if (!releaseData) throw new Error('共享仓库中未找到当前模组的发布，请前往原始主页核对');
   }
   if (parsed.tag && releaseData.tag_name !== parsed.tag) throw new Error('返回的 Release 标签与模组来源不一致');
-  const assets = (releaseData.assets || []).filter((a) => (!parsed.assetName || a.name === parsed.assetName)
+  const assets = (releaseData.assets || []).filter((a) => modHubIsModPackageName(a.name) && (!parsed.assetName || a.name === parsed.assetName)
     && (!sharedRepository || matchesAssetIdentity(a, mod))).map((a) => ({
     name: a.name,
     size: a.size,

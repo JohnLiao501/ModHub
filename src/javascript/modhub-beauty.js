@@ -27,7 +27,7 @@ window.modHubToggleAutoBeautySetting = async function(checked) {
         window.modHubShowToast(checked ? '已开启【自动启用旁加载模组美化】' : '已关闭【自动启用旁加载模组美化】', 'info');
         await window.modHubLoadBeautyState();
 
-    });
+    }, undefined, { trackReload: true });
 };
 
 window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames = []) {
@@ -267,7 +267,7 @@ window.modHubMoveBeauty = async function(index, deltaOrPosition) {
         } else if (deltaOrPosition === 'bottom') {
             window.modHubShowToast(`已将美化包【${type}】置底（最低覆盖优先级）`, 'success');
         }
-    });
+    }, undefined, { trackReload: true });
 };
 
 // 美化项启用/禁用
@@ -304,7 +304,7 @@ window.modHubToggleBeauty = async function(typeKey, enable) {
 
         if (!await window.modHubSaveBeautyState()) throw new Error('美化配置保存失败');
 
-    });
+    }, undefined, { trackReload: true });
 };
 
 // 保存美化排序与设置

@@ -5,6 +5,32 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    {
+        const sb = loadManager();
+        const boot = { name: 'ModLoader DoL ImageLoaderHook', version: '2.101.0', alias: ['ImageLoaderHook', 'ImageLoaderHookCore'],
+            dependenceInfo: [{ modName: 'ModLoader', version: '^2.100.0' }, { modName: 'GameVersion', version: '>=0.5.6' }] };
+        const mod = { name: boot.name, alias: boot.alias, bootJson: boot };
+        const cache = [{ name: boot.name, from: 'Local', mod, zip: {} }];
+        sb.modHubGetGui = () => ({ gModUtils: {
+            getModLoader: () => ({ getModCacheArray: () => cache }),
+            getModListNameNoAlias: () => [boot.name],
+            getMod: name => name === boot.name || boot.alias.includes(name) ? mod : null
+        } });
+        sb._modHubModState = { builtInMods: [boot.name], sideEnabled: [], sideDisabled: [], sideMods: [] };
+        loadScripts(sb, ['javascript/modhub-market.js']);
+        assert.equal(sb.modHubGetModInfo('ImageLoaderHook'), null, '原生别名不能污染管理器的真实名称查找');
+        const profiles = sb.modHubMarket.getLocalInstalledProfiles();
+        assert.equal(profiles.length, 1, '包装缓存、规范名称列表与内置状态必须按真实名称去重');
+        assert.equal(profiles[0].name, boot.name);
+        assert.equal(profiles[0].bootJson, boot, '本地档案必须保留规范名称核验后的真实 boot 及递归前置');
+        assert.deepEqual([...sb.modHubMarketInstaller.getDependencyBootNames(profiles[0].bootJson)], [boot.name, ...boot.alias]);
+        assert.equal(sb.modHubMarketInstaller.satisfiesDependency(profiles[0].bootJson, { bootName: 'ImageLoaderHook', version: '^2.18.0' }), true);
+        assert.equal(sb.modHubMarket.checkModInstallStatus({ id: 'unrelated', name: 'ImageLoaderHook', bootNames: ['UnrelatedProvider'], githubUrl: 'https://github.com/ModHubTests/UnrelatedProvider', version: '2.101.0' }, profiles), 'not_installed', '仅依赖别名匹配不能扩散为市场安装身份');
+        cache.push({ name: boot.name, from: 'Side', mod: { name: boot.name, bootJson: { ...boot, version: '2.102.0', alias: ['CurrentAlias'] } } });
+        const updated = sb.modHubMarket.getLocalInstalledProfiles()[0];
+        assert.equal(updated.version, '2.102.0', '同名新缓存必须覆盖旧运行时声明');
+        assert.deepEqual([...updated.bootJson.alias], ['CurrentAlias']);
+    }
     /* =========================================================================
      * 10. 统一索引契约（网站 release-index / 身份目录 <-> Mod 端消费）
      * ========================================================================= */
@@ -30,6 +56,12 @@ module.exports = async function() {
             assert.ok(typeof mod.category === 'string', `身份条目 ${mod.id} 必须声明分类`);
             // 10.3 分类必须落在市场分类表内，否则 applyIdentityCatalog 会静默丢弃
             assert.ok(market.MARKET_CATEGORIES.includes(mod.category), `身份条目 ${mod.id} 的分类「${mod.category}」必须存在于 MARKET_CATEGORIES`);
+            for (const rule of mod.releaseCompatibility || []) {
+                assert.ok(typeof rule.releaseTag === 'string' && rule.releaseTag, '兼容记录必须绑定精确发布标签');
+                assert.ok(typeof rule.gameVersionRange === 'string' && rule.gameVersionRange, '兼容记录必须包含明确范围');
+                assert.match(rule.evidenceUrl, /^https:\/\/github\.com\/[^/]+\/[^/]+\/releases\/tag\//, '兼容证据必须指向作者精确发布');
+                if (rule.dependencies !== undefined) assert.ok(Array.isArray(rule.dependencies), '历史前置缺失与显式空数组必须可区分');
+            }
         }
         // 10.4 身份目录可被 Mod 端正确消费（应用数量与别名注册）
         const applied = market.applyIdentityCatalog(JSON.parse(JSON.stringify(catalog)));
@@ -47,7 +79,9 @@ module.exports = async function() {
             githubUrls: ['https://github.com/JohnLiao501/ModHub', 'https://github.com/NEEDMEET/ModHub'],
             wikiVersion: '1.0.1', wikiDate: '2026-09-26',
             version: '1.0.2', versionSource: 'github', updateDate: '2026-09-27',
-            releaseUrl: 'https://github.com/JohnLiao501/ModHub/releases/tag/v1.0.2'
+            releaseUrl: 'https://github.com/JohnLiao501/ModHub/releases/tag/v1.0.2',
+            releaseCompatibility: [{ releaseTag: 'v1.0.1', gameVersionRange: '=0.5.10.12',
+                evidenceUrl: 'https://github.com/JohnLiao501/ModHub/releases/tag/v1.0.1', dependencies: [] }]
         };
         const splitIndex = {
             schemaVersion: 1, catalogUpdatedAt: '2026-09-27T00:02:00.000Z',
@@ -59,6 +93,7 @@ module.exports = async function() {
         }
         assert.deepEqual(Array.from(normalizedMod.githubUrls), indexedMod.githubUrls, '必须保留 Wiki 原始仓库链接集合');
         assert.deepEqual(Array.from(normalizedMod.bootNames), indexedMod.bootNames, '独立刷新不得丢失模组身份名称');
+        assert.equal(JSON.stringify(normalizedMod.releaseCompatibility), JSON.stringify(indexedMod.releaseCompatibility), 'v1 索引必须保留精确发布的兼容声明与空前置列表');
         assert.equal(splitIndex.catalogUpdatedAt, '2026-09-27T00:02:00.000Z', '归一化不得改写目录刷新时间');
 
         // 10.6 手动刷新绕过列表缓存，并重新验证各镜像的 HTTP 缓存
@@ -129,6 +164,14 @@ module.exports = async function() {
         }] });
         assert.equal(badLink.otherUrl, null, '市场外链必须是无凭据的 HTTPS URL');
         assert.equal(market.checkModInstallStatus(badLink, []), 'unavailable');
+        const [catalogOnly] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
+            id: '惩罚礼顿-external', name: '惩罚礼顿++', author: 'lyjjl', description: '无来源的目录条目',
+            catalogSource: 'community', sourcePlatform: 'catalog', sourceUrl: '', autoInstall: true,
+            identityId: null, githubUrl: null, otherUrl: null
+        }] });
+        assert.equal(catalogOnly.sourceUrl, null, '目录型条目允许没有来源 URL，不构造虚假链接');
+        assert.equal(catalogOnly.autoInstall, false, '无来源目录条目不能获得一键安装资格');
+        assert.equal(market.checkModInstallStatus(catalogOnly, []), 'unavailable');
 
         const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer',
             'modHubCategoryCapsules'].map(id => [id, createStubElement()]));
@@ -187,6 +230,31 @@ module.exports = async function() {
         assert.equal(targetRequest.body.catalogId, 'community-manual');
         assert.ok(blockedMessage.includes('已有进行中的下架申请'));
         assert.equal(opened.length, 2, '已有下架申请时不得打开重复申请表单');
+
+        const linkless = { id: '惩罚礼顿-external', name: '惩罚礼顿++', author: 'lyjjl',
+            description: '目录中已有的无链接模组', identityId: null, githubUrl: null, otherUrl: null,
+            catalogSource: 'community', sourcePlatform: 'catalog', sourceUrl: '', autoInstall: false };
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [linkless] }) });
+        await sb.modHubInitMarket(true);
+        assert.ok(elements.get('modHubMarketCardsContainer').innerHTML.includes('目录资料已审核，暂无来源链接'),
+            '无来源目录条目不能误称出处已核验');
+        opened.length = 0;
+        sb.fetch = async (url, options) => {
+            targetRequest = { path: new URL(url).pathname, body: JSON.parse(options.body) };
+            return { ok: true, json: async () => ({ targetStatus: 'active', canRequestDelist: true }) };
+        };
+        await market.openCommunityFeedback();
+        assert.equal(targetRequest.body.catalogId, linkless.id, '无链接下架申请仍绑定实际目录 ID');
+        assert.equal(targetRequest.body.sourceUrl, '');
+        assert.equal(targetRequest.body.targetName, linkless.name, '目标状态检查携带原目录名称防止旧缓存误选');
+        assert.equal(targetRequest.body.targetAuthor, linkless.author);
+        assert.equal(opened[2].title, '申请下架', '无来源条目可从公共入口进入下架表单');
+        assert.ok(opened[2].trustedMessageHtml.includes('暂无来源链接，按目录条目核对'));
+        feedbackMode = 'correct';
+        opened.length = 0;
+        await market.openCommunityFeedback();
+        assert.equal(opened[2].title, '纠错', '无来源条目可从公共入口进入纠错表单');
+        assert.ok(opened[2].trustedMessageHtml.includes('没有来源链接也可提交'));
     }
 
     // 下架快照按最大社区修订号更新；旧缓存不能复活下架条目，新修订可以恢复。
@@ -216,6 +284,38 @@ module.exports = async function() {
             [removed.name, active.name, oldWiki.name], '新修订的完整快照可以恢复原下架条目');
         assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex(index), mod => mod.name),
             [removed.name, active.name], '恢复后旧镜像不能重新下架条目');
+    }
+
+    // 无链接墓碑保留原目录指纹；Wiki 重用同一编号时不能被旧缓存误隐藏。
+    {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        const old = { id: '惩罚礼顿-external', name: '惩罚礼顿++', author: 'lyjjl',
+            sourceUrl: null, githubUrl: null, otherUrl: null };
+        const target = { id: old.id, wikiName: old.name, wikiAuthor: old.author };
+        market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 4, withdrawnIds: [old.id], mods: [] });
+        const nextAuthor = { ...old, author: '新作者' };
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 4,
+            withdrawnIds: [], withdrawnCatalogTargets: [target], mods: [old, nextAuthor] }), mod => mod.author),
+            ['新作者'], '相同修订也须接入目录指纹，旧 ID 不能误下架同名新作者');
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 3,
+            mods: [old, nextAuthor] }), mod => mod.author), ['新作者'], '旧镜像不清空目录指纹');
+        const idlessOld = { name: old.name, author: old.author };
+        const idlessNew = { name: old.name, author: nextAuthor.author };
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [idlessOld, idlessNew], timestamp: 1 }));
+        sb.fetch = async () => { throw new Error('模拟无链接条目离线'); };
+        assert.deepEqual(Array.from(await market.loadMarketData(true), mod => mod.author), ['新作者'],
+            '没有目录 ID 的 Wiki 回退也按原名称与作者过滤，避免复活旧条目');
+        loadScripts(sb, ['javascript/modhub-market.js']);
+        assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [old, nextAuthor] }),
+            mod => mod.author), ['新作者'], '重启后原目标指纹仍生效');
+        assert.equal(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [
+            { ...old, sourceUrl: 'https://tieba.baidu.com/p/123' }
+        ] }).length, 1, '原无来源墓碑不能误隐藏后来有来源的条目');
+        assert.equal(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 5,
+            withdrawnIds: [], withdrawnCatalogTargets: [], mods: [old] }).length, 1, '新修订恢复上架清理原目录墓碑');
+        assert.throws(() => sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1,
+            withdrawnCatalogTargets: {}, mods: [] }), /格式异常/);
     }
 
     // 原生投稿表单持久化查询凭证；挑战消息须核对来源、窗口与 nonce。
@@ -281,6 +381,8 @@ module.exports = async function() {
         let attempts = 0;
         let queriedStatus = 'needs_info';
         let queriedKind = 'add';
+        let queriedApprovedKind = '';
+        let queriedPublished = false;
         let queriedTargetStatus = '';
         let queriedActiveDelistStatus = '';
         let queriedCanRequestDelist = false;
@@ -302,7 +404,8 @@ module.exports = async function() {
                 return { ok: true, json: async () => ({ id: 'sub-1', kind: queriedKind, catalogId: 'community-a',
                     name: '测试模组', author: '作者', sourceUrl: 'https://tieba.baidu.com/p/123',
                     description: '简介', notes: '', revision: queriedStatus === 'withdrawn' ? 2 : 1,
-                    status: queriedStatus, approvedCatalogId: queriedStatus === 'approved' ? 'community-a' : null,
+                    status: queriedStatus, approvedCatalogId: queriedStatus === 'approved' || queriedPublished ? 'community-a' : null,
+                    approvedKind: queriedApprovedKind || null,
                     targetStatus: queriedTargetStatus || null, activeDelistStatus: queriedActiveDelistStatus || null,
                     canRequestDelist: queriedCanRequestDelist,
                     ...(queriedDuplicate ? { duplicateOf: 'older-submission', mergedProgress: { status: 'pending', updatedAt: '2026-09-29T00:00:00Z' } } : {}) }) };
@@ -485,6 +588,34 @@ module.exports = async function() {
         await mine.query.onclick();
         assert.ok(mine.detail.children.some(child => child.textContent.includes('下架申请已通过')),
             '已批准的下架申请使用明确状态文案');
+        queriedKind = 'correct';
+        queriedApprovedKind = 'withdraw';
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent.includes('下架申请已通过')),
+            '纠错投稿批准下架时按实际审核动作显示');
+        assert.ok(JSON.parse(sb.localStorage.getItem('modhub_market_submission_receipts_v1'))
+            .some(record => record.approvedKind === 'withdraw'), '实际审核动作须保存到本机记录');
+        queriedApprovedKind = 'restore';
+        queriedTargetStatus = 'active';
+        queriedCanRequestDelist = true;
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent.includes('恢复上架已通过')),
+            '原始投稿类型不能遮盖后续恢复上架结果');
+        queriedPublished = true;
+        queriedStatus = 'needs_info';
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent === '补充资料'),
+            '曾批准的申请退回补充后仍可补充草稿');
+        assert.ok(!mine.detail.children.some(child => ['撤回投稿', '删除投稿'].includes(child.textContent)),
+            '退回补充不解锁已执行目录操作记录的撤回或删除');
+        queriedStatus = 'rejected';
+        await mine.query.onclick();
+        assert.ok(mine.detail.children.some(child => child.textContent === '当前目录状态：仍在架'),
+            '后续拒绝不隐藏仍在架条目的真实目录状态');
+        assert.ok(mine.detail.children.some(child => child.textContent === '申请下架'),
+            '曾批准后又拒绝的申请仍可按当前目录状态申请下架');
+        assert.ok(!mine.detail.children.some(child => child.textContent === '删除投稿'),
+            '后续拒绝不能让玩家删除已发布记录');
         queryErrorStatus = 404;
         await mine.query.onclick();
         const removeLocal = mine.detail.children.find(child => child.textContent === '从本机移除');
@@ -509,6 +640,27 @@ module.exports = async function() {
         amend.close(false);
         await amendTask;
 
+        const withdrawAmendTask = market.openCommunitySubmission('amend', {
+            ...row, kind: 'withdraw', author: '', description: '', notes: '下架原因', approvedCatalogId: 'community-a'
+        }, receipt);
+        const withdrawAmend = opened.at(-1);
+        assert.ok(withdrawAmend.html.includes('<label>作者') && withdrawAmend.html.includes('<label>简介'),
+            '下架类别退回补充后须允许补齐其他审核动作需要的基础资料');
+        assert.equal(withdrawAmend.inputs.author.disabled, false);
+        assert.equal(withdrawAmend.inputs.description.disabled, false);
+        assert.equal(withdrawAmend.inputs.sourceUrl.disabled, true, '补充已审核或目标固定的申请不能改来源');
+        withdrawAmend.inputs.author.value = '补充作者';
+        withdrawAmend.inputs.description.value = '补充简介';
+        nonce = new URL(withdrawAmend.frame.src).searchParams.get('nonce');
+        listener({ origin, source: withdrawAmend.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '下架补充挑战' } });
+        await withdrawAmend.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).path, '/community-submissions/amend');
+        assert.equal(posted.at(-1).body.author, '补充作者');
+        assert.equal(posted.at(-1).body.description, '补充简介');
+        withdrawAmend.close(false);
+        await withdrawAmendTask;
+
         sb.innerWidth = 320;
         const correctTask = market.openCommunitySubmission('correct', {
             id: 'community-target', name: '待纠错模组', author: '作者',
@@ -524,6 +676,78 @@ module.exports = async function() {
         assert.equal(posted.at(-1).body.kind, 'correct');
         correct.close(false);
         await correctTask;
+
+        const linkless = { id: '惩罚礼顿-external', name: '惩罚礼顿++', author: 'lyjjl', description: '目录简介' };
+        const noSourceCorrectTask = market.openCommunitySubmission('correct', linkless);
+        const noSourceCorrect = opened.at(-1);
+        assert.equal(noSourceCorrect.inputs.sourceUrl.value, '');
+        assert.equal(noSourceCorrect.inputs.sourceUrl.disabled, true, '纠错来源由目录绑定，不要求用户补造链接');
+        noSourceCorrect.inputs.name.value = '惩罚礼顿修正显示名';
+        noSourceCorrect.inputs.description.value = '纠正后的简介';
+        nonce = new URL(noSourceCorrect.frame.src).searchParams.get('nonce');
+        listener({ origin, source: noSourceCorrect.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '无来源纠错挑战' } });
+        const beforeInvalidSource = posted.length;
+        noSourceCorrect.inputs.sourceUrl.value = 'http://invalid.example/mod';
+        await noSourceCorrect.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, beforeInvalidSource, '即使目标反馈允许空来源，也不能提交非 HTTPS 链接');
+        noSourceCorrect.inputs.sourceUrl.value = '';
+        await noSourceCorrect.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.kind, 'correct');
+        assert.equal(posted.at(-1).body.catalogId, linkless.id);
+        assert.equal(posted.at(-1).body.sourceUrl, '');
+        assert.equal(posted.at(-1).body.targetName, linkless.name, '可编辑的纠错正文不能替换原目标指纹');
+        assert.equal(posted.at(-1).body.targetAuthor, linkless.author);
+        assert.equal(posted.at(-1).body.name, '惩罚礼顿修正显示名');
+        assert.equal(posted.at(-1).body.description, '纠正后的简介');
+        noSourceCorrect.close(false);
+        await noSourceCorrectTask;
+
+        const noSourceWithdrawTask = market.openCommunitySubmission('withdraw', {
+            ...linkless, name: '更正后的目录显示名', author: '更正后的作者显示',
+            catalogTarget: { id: linkless.id, wikiName: linkless.name, wikiAuthor: linkless.author }
+        });
+        const noSourceWithdraw = opened.at(-1);
+        noSourceWithdraw.inputs.notes.value = '没有公开发布版，申请下架';
+        nonce = new URL(noSourceWithdraw.frame.src).searchParams.get('nonce');
+        listener({ origin, source: noSourceWithdraw.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '无来源下架挑战' } });
+        await noSourceWithdraw.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.kind, 'withdraw');
+        assert.equal(posted.at(-1).body.catalogId, linkless.id);
+        assert.equal(posted.at(-1).body.sourceUrl, '');
+        assert.equal(posted.at(-1).body.targetName, linkless.name, '更正后的目录仍携带原 Wiki 名称');
+        assert.equal(posted.at(-1).body.targetAuthor, linkless.author, '更正后的目录仍携带原 Wiki 作者');
+        noSourceWithdraw.close(false);
+        await noSourceWithdrawTask;
+
+        const emptyOriginalAuthorTask = market.openCommunitySubmission('withdraw', {
+            ...linkless, author: '已审核补上的展示作者', wikiName: linkless.name, wikiAuthor: null
+        });
+        const emptyOriginalAuthor = opened.at(-1);
+        emptyOriginalAuthor.inputs.notes.value = '核对原无作者目录条目';
+        nonce = new URL(emptyOriginalAuthor.frame.src).searchParams.get('nonce');
+        listener({ origin, source: emptyOriginalAuthor.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '原作者为空挑战' } });
+        await emptyOriginalAuthor.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.targetAuthor, '', '原 Wiki 作者为空时不能回退到已更正的展示作者');
+        emptyOriginalAuthor.close(false);
+        await emptyOriginalAuthorTask;
+
+        const missingNewSourceTask = market.openCommunitySubmission('new');
+        const missingNewSource = opened.at(-1);
+        missingNewSource.inputs.name.value = '新推荐';
+        missingNewSource.inputs.author.value = '作者';
+        missingNewSource.inputs.description.value = '简介';
+        nonce = new URL(missingNewSource.frame.src).searchParams.get('nonce');
+        listener({ origin, source: missingNewSource.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '无来源推荐挑战' } });
+        const beforeMissingNewSource = posted.length;
+        await missingNewSource.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, beforeMissingNewSource, '新推荐仍必须提供有效来源');
+        assert.ok(missingNewSource.status.textContent.includes('推荐模组须填写'));
+        missingNewSource.close(false);
+        await missingNewSourceTask;
     }
 
     // 社区自动安装必须先拿到权威 Worker 的实时审核确认。
@@ -754,10 +978,11 @@ module.exports = async function() {
     {
         const sb = loadMarket();
         const anchor = (textContent, href) => ({ textContent, getAttribute: () => href });
-        const cell = (textContent, links = []) => ({ textContent, querySelectorAll: () => links });
+        const cell = (textContent, links = []) => ({ textContent, querySelectorAll: () => links, cloneNode: () => cell(textContent, links) });
         const cells = [
             [cell('主模组', [anchor('主模组', 'https://github.com/Owner/Shared')]), cell('介绍', [anchor('依赖', 'https://github.com/Other/Dependency')]), cell('作者'), cell('2026-09-27 (v1.0)')],
-            [cell('扩展 / 独立工具', [anchor('扩展', 'https://github.com/Owner/Shared'), anchor('独立工具', 'https://github.com/Owner/Tool')]), cell('介绍'), cell('作者'), cell('2026-09-27')]
+            [cell('扩展 / 独立工具', [anchor('扩展', 'https://github.com/Owner/Shared'), anchor('独立工具', 'https://github.com/Owner/Tool')]), cell('介绍'), cell('作者'), cell('2026-09-27')],
+            [cell('未署名条目'), cell('介绍'), cell(''), cell('')]
         ];
         const header = { querySelectorAll: () => ['名称', '简介', '作者', '更新'].map(text => cell(text)) };
         const rows = cells.map(tds => ({ querySelectorAll: () => tds, querySelector: () => null }));
@@ -768,10 +993,12 @@ module.exports = async function() {
             querySelectorAll: () => [table]
         }; } };
         const mods = sb.modHubMarket.parseModsFromHtml('');
-        assert.deepEqual(Array.from(mods, mod => mod.name), ['主模组', '扩展', '独立工具']);
+        assert.deepEqual(Array.from(mods, mod => mod.name), ['主模组', '扩展', '独立工具', '未署名条目']);
         assert.deepEqual(Array.from(mods[0].githubUrls), ['https://github.com/Owner/Shared'], '不得采集介绍中的依赖仓库');
         assert.equal(mods[0].otherUrl, null);
-        assert.deepEqual(Array.from(mods, mod => mod.sharedRepository), [true, true, false]);
+        assert.deepEqual(Array.from(mods, mod => mod.sharedRepository), [true, true, false, false]);
+        assert.equal(mods[3].author, '未知作者');
+        assert.equal(mods[3].wikiAuthor, '', 'Wiki 原作者须独立保留，不能用展示兜底文字匹配目录指纹');
         assert.notEqual(sb.modHubMarket.getMarketModKey(mods[0]), sb.modHubMarket.getMarketModKey(mods[1]), 'Wiki回退无ID时共享仓库多项不能被批量合并');
         const cached = sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: mods.map(mod => ({
             ...mod, sharedRepository: undefined, version: '99.0', versionSource: 'github', wikiVersion: '1.0',
@@ -781,6 +1008,9 @@ module.exports = async function() {
         assert.equal(cached[0].version, '1.0', '共享仓库的旧latest版本必须清除');
         assert.equal(cached[0].releaseUrl, null);
         assert.equal(cached[2].version, '99.0', '独立仓库版本仍可正常使用');
+        assert.deepEqual(Array.from(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 9,
+            withdrawnCatalogTargets: [{ id: '未署名条目-external', wikiName: '未署名条目', wikiAuthor: '' }], mods }), mod => mod.name),
+            ['主模组', '扩展', '独立工具'], '空作者的无链接条目也不能从实际 Wiki 解析回退复活');
     }
 
     // 同名、子串和仓库尾名都不能跨模组建立身份。
@@ -788,6 +1018,37 @@ module.exports = async function() {
         const market = loadMarket().modHubMarket;
         const catalog = JSON.parse(fs.readFileSync(path.join(srcRoot, '..', 'mod-identities.json'), 'utf8'));
         market.applyIdentityCatalog(catalog);
+        for (const identity of catalog.mods.filter(item => item.bootNames.length)) {
+            const target = { ...identity, identityId: identity.id, githubUrl: identity.repositoryKeys?.[0]
+                ? `https://github.com/${identity.repositoryKeys[0]}` : 'https://github.com/ModHubTests/Fixture' };
+            const nicknameProvider = { name: 'UnrelatedNativeProvider', version: '99.0',
+                bootJson: { name: 'UnrelatedNativeProvider', version: '99.0', nickName: identity.name, alias: identity.bootNames },
+                displayNames: [identity.name, ...identity.bootNames], normalizedNames: identity.bootNames, repos: [],
+                repositoryKeys: target.repositoryKeys || [] };
+            market.checkModInstallStatus(target, [nicknameProvider]);
+            assert.equal(target._matchedLocal, null, `身份 ${identity.id} 不能由另一技术名的昵称、展示别名或依赖 alias 冒充`);
+        }
+        for (const localIdentity of catalog.mods.filter(item => item.bootNames.length)) {
+            for (const bootName of localIdentity.bootNames) {
+                for (const identity of catalog.mods.filter(item => item.bootNames.length)) {
+                    const target = { ...identity, identityId: identity.id,
+                        githubUrl: identity.repositoryKeys?.[0] ? `https://github.com/${identity.repositoryKeys[0]}` : 'https://github.com/ModHubTests/Fixture' };
+                    market.checkModInstallStatus(target, [{ name: bootName }]);
+                    assert.equal(Boolean(target._matchedLocal), identity.id === localIdentity.id,
+                        `全目录技术名边界：${bootName} 只能归属 ${localIdentity.id}，不能归属 ${identity.id}`);
+                }
+            }
+        }
+        const maple = { ...catalog.mods.find(item => item.id === 'maplebirch'), githubUrl: 'https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchFramework' };
+        const actualMapleBoot = { name: 'maplebirch', version: '5.1.3', alias: ['Simple Frameworks'] };
+        market.checkModInstallStatus(maple, [{ name: actualMapleBoot.name, version: actualMapleBoot.version, bootJson: actualMapleBoot }]);
+        assert.equal(maple._matchedLocal.bootJson, actualMapleBoot, '精确身份匹配必须保留原生 boot 别名，供依赖代供核验而非身份扩散');
+        const simple = { ...catalog.mods.find(item => item.id === 'simple-framework'), githubUrl: 'https://github.com/emicoto/SCMLSimpleFramework' };
+        market.checkModInstallStatus(simple, [{ name: actualMapleBoot.name, version: actualMapleBoot.version, bootJson: actualMapleBoot }]);
+        assert.equal(simple._matchedLocal, null, 'maplebirch 的原生 alias 不代表已安装简易框架目录身份');
+        const avatars = { ...catalog.mods.find(item => item.id === 'eden-visuals'), githubUrl: 'https://github.com/LooopSpiner/Eden-Visuals-Mod' };
+        market.checkModInstallStatus(avatars, [{ name: '伊甸头像互动', version: '1.2.0' }]);
+        assert.equal(avatars._matchedLocal?.name, '伊甸头像互动', 'Wiki 展示名与包内中文词序不同必须仍按真实 bootNames 精确识别');
         const main = { ...catalog.mods.find(item => item.id === 'woven-realm'), githubUrl: 'https://github.com/Kanna-hanabi/WovenRealm', sharedRepository: true };
         const child = { ...catalog.mods.find(item => item.id === 'woven-realm-cooking'), githubUrl: main.githubUrl, sharedRepository: true };
         for (const [target, other] of [[main, child], [child, main]]) {
@@ -914,8 +1175,8 @@ module.exports = async function() {
         // 11.3 分支结构断言：keepCurrentTab 分支只提示不跳页，本地导入分支保留原高亮跳转设计
         const keepBranch = managerSource.match(/else if \(options\.keepCurrentTab\) \{[\s\S]*?\} else \{/);
         assert.ok(keepBranch, '稍后重载分支必须包含 keepCurrentTab 专用处理');
-        assert.ok(!keepBranch[0].includes("modHubSwitchTab('模组管理')"), 'keepCurrentTab 分支严禁切换页签');
-        const legacyBranch = managerSource.match(/\} else \{\s*window\._modHubHighlightMods[\s\S]*?modHubSwitchTab\('模组管理'\)/);
+        assert.ok(!keepBranch[0].includes('modHubSwitchTab('), 'keepCurrentTab 分支严禁切换页签');
+        const legacyBranch = managerSource.match(/\} else \{\s*window\._modHubHighlightMods[\s\S]*?modHubSwitchTab\('模组管理', \{ skipReloadPrompt: true \}\)/);
         assert.ok(legacyBranch, '本地导入分支必须保留「切换管理页并高亮」的原有设计');
     }
 

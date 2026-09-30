@@ -9,26 +9,63 @@ window._modHubStartupErrors = window._modHubStartupErrors || [];
 if (typeof window !== 'undefined' && !window._modHubGlobalErrorHooked) {
     window._modHubGlobalErrorHooked = true;
 
-    // 三种错误入口共用格式化，保留异常类型及调用堆栈。
+    // 资源事件的字段通常不可枚举，逐项读取并防止失效对象的 getter 抛错。
+    const modHubReadErrorField = (value, key) => {
+        try { return value == null ? undefined : value[key]; } catch (_) { return undefined; }
+    };
+    const modHubGetResourceEvent = value => {
+        const type = modHubReadErrorField(value, 'type');
+        if (type !== 'error') return null;
+        const targets = [modHubReadErrorField(value, 'target'), modHubReadErrorField(value, 'currentTarget')];
+        for (const target of targets) {
+            const rawTag = modHubReadErrorField(target, 'tagName');
+            const tag = typeof rawTag === 'string' ? rawTag.toUpperCase() : '';
+            if (!['IMG', 'SCRIPT', 'LINK'].includes(tag)) continue;
+            const source = tag === 'LINK' ? modHubReadErrorField(target, 'href') :
+                (tag === 'IMG' && modHubReadErrorField(target, 'currentSrc')) || modHubReadErrorField(target, 'src');
+            let resourcePath = typeof source === 'string' ? source : '';
+            if (/^data:/i.test(resourcePath)) {
+                const mime = resourcePath.match(/^data:([a-z0-9.+-]{1,64}\/[a-z0-9.+-]{1,64})(?:[;,]|$)/i)?.[1] || '';
+                resourcePath = `data:${mime}（内联资源）`;
+            } else if (/^blob:/i.test(resourcePath)) {
+                resourcePath = 'blob:（临时资源）';
+            }
+            return { type, tag, source: resourcePath };
+        }
+        return null;
+    };
+
+    // 三种错误入口共用格式化，保留异常类型、调用堆栈及资源事件的目标路径。
     const modHubFormatError = value => {
         if (typeof value === 'string') return value;
-        if (typeof value?.message === 'string') {
-            const summary = `${value.name || 'Error'}: ${value.message}`;
-            const stack = typeof value.stack === 'string' ? value.stack : '';
+        const resource = modHubGetResourceEvent(value);
+        if (resource) return `资源加载失败: ${resource.tag} ${resource.type} ${resource.source || '（未提供资源路径）'}`;
+        const message = modHubReadErrorField(value, 'message');
+        if (typeof message === 'string') {
+            const name = modHubReadErrorField(value, 'name');
+            const summary = `${typeof name === 'string' && name ? name : 'Error'}: ${message}`;
+            const rawStack = modHubReadErrorField(value, 'stack');
+            const stack = typeof rawStack === 'string' ? rawStack : '';
             return stack.startsWith(summary) ? stack : [summary, stack].filter(Boolean).join('\n');
         }
+        const type = modHubReadErrorField(value, 'type');
+        if (typeof type === 'string' && (modHubReadErrorField(value, 'target') !== undefined ||
+            typeof modHubReadErrorField(value, 'preventDefault') === 'function')) return `Event: ${type}`;
         try {
             return JSON.stringify(value) || '';
         } catch (_) {
-            return String(value);
+            try { return String(value); } catch (_) { return '无法格式化的异常对象'; }
         }
     };
 
     // 1. 监听全局脚本未捕获错误
     window.addEventListener?.('error', (event) => {
-        const msg = event?.message || '';
-        if (msg && !msg.includes('ResizeObserver loop')) {
-            const detail = event.error?.stack ? modHubFormatError(event.error) : `${msg} (${event.filename || ''}:${event.lineno || 0}:${event.colno || 0})`;
+        const msg = modHubReadErrorField(event, 'message');
+        if (typeof msg === 'string' && msg && !msg.includes('ResizeObserver loop')) {
+            const error = modHubReadErrorField(event, 'error');
+            const stack = modHubReadErrorField(error, 'stack');
+            const detail = typeof stack === 'string' && stack ? modHubFormatError(error) :
+                `${msg} (${modHubReadErrorField(event, 'filename') || ''}:${modHubReadErrorField(event, 'lineno') || 0}:${modHubReadErrorField(event, 'colno') || 0})`;
             window._modHubStartupErrors.push(`[脚本异常] ${detail}`);
             window._modHubHasDetectedStartupError = true;
             window._modHubPendingAutoOpenErrorLog = true;
@@ -171,6 +208,7 @@ window.modHubIsCloseButton = function(elementOrText) {
 
 // 模组管理器顶栏标签初始化（过滤并保留管理 Tab 及移动端左侧关闭按钮）
 window.modHubInitOverlayTabs = function() {
+    window.modHubBindReloadReminder();
     if (typeof $ === 'undefined') return;
     var tabs = $("#overlayTabs.modhub-modloader-tabs");
     if (!tabs.length) return;
@@ -204,20 +242,30 @@ window.modHubGetModInfo = function(modName) {
     const key = String(modName || '').trim().toLowerCase();
     if (!key) return null;
     const isExact = mod => String(mod?.bootJson?.name || mod?.name || '').trim().toLowerCase() === key;
+    let hasCache = false;
     try {
         const cache = utils?.getModLoader?.()?.getModCacheArray?.() ||
-            window.modSC2DataManager?.getModLoader?.()?.getModCacheArray?.() || [];
-        for (let i = cache.length - 1; i >= 0; i--) {
-            const mod = cache[i]?.mod || cache[i];
-            if (isExact(mod)) return mod;
+            window.modSC2DataManager?.getModLoader?.()?.getModCacheArray?.();
+        hasCache = Array.isArray(cache);
+        if (hasCache) {
+            for (let i = cache.length - 1; i >= 0; i--) {
+                const mod = cache[i]?.mod || cache[i];
+                if (isExact(mod)) return mod;
+            }
         }
-    } catch (_) {}
-    const exactMod = utils?.getAnyModByNameNoAlias?.(modName);
-    if (isExact(exactMod)) return exactMod;
+    } catch (_) { hasCache = false; }
     const storedMod = window._modHubDisabledModInfo.get(key);
     if (isExact(storedMod)) return storedMod;
-    const legacyMod = utils?.getMod?.(modName);
-    return isExact(legacyMod) ? legacyMod : null;
+    // 现代缓存已包含全部运行时档案；未命中是正常可选查询，不再调用会记录错误的旧接口。
+    if (hasCache) return null;
+    try {
+        const exactMod = utils?.getAnyModByNameNoAlias?.(modName);
+        if (isExact(exactMod)) return exactMod;
+    } catch (_) {}
+    try {
+        const legacyMod = utils?.getMod?.(modName);
+        return isExact(legacyMod) ? legacyMod : null;
+    } catch (_) { return null; }
 };
 
 // 禁用或刚安装尚未加载的模组，直接从 IndexedDB 安装包读取真实 boot.json。
@@ -644,9 +692,15 @@ window.modHubGetModSubtext = function(modName, modInfo, isBuiltin = false, skipM
     return nick && nick !== modName ? nick : '';
 };
 
+// 移动文件提供器可能将 ModPack 标为二进制类型；实际格式仍由原生接口校验。
+const MODHUB_IMPORT_ACCEPT = '.zip,.modpack,.modpack.crypt,application/zip,application/octet-stream';
+const MODHUB_PACKAGE_EXTENSION = /(?:(?:\.mod)?\.zip|\.modpack(?:\.crypt)?)$/i;
+const MODHUB_NATIVE_PACKAGE_EXTENSION = /\.modpack(?:\.crypt)?$/i;
+const MODHUB_ZIP_PACKAGE_EXTENSION = /\.zip$/i;
+
 window.modHubResolveImportedModName = function(fileName, modNames, preferredName = '') {
     const normalize = value => String(value || '')
-        .replace(/(?:\.mod)?\.zip$/i, '')
+        .replace(MODHUB_PACKAGE_EXTENSION, '')
         .toLowerCase()
         .replace(/[^a-z0-9\u3400-\u9fff]+/g, '');
     const names = window.modHubUniqueModNames(modNames);
@@ -693,13 +747,13 @@ window.modHubResolveImportedModName = function(fileName, modNames, preferredName
  * ========================================================================= */
 // 全局重新载入游戏方法
 window.modHubRestartGame = function() {
-    if (window._modHubManagerBusy || window._modHubModLoading || window._modHubManagerSaveFailed) {
+    if (window.modHubIsReloadBlocked()) {
         window.modHubShowToast('请等待操作完成；保存失败时请先刷新列表核实配置。', 'warning');
         return false;
     }
     window.modHubShowToast('正在重新载入游戏...', 'warning');
     setTimeout(() => {
-        if (!window._modHubManagerBusy && !window._modHubModLoading && !window._modHubManagerSaveFailed) location.reload();
+        if (!window.modHubIsReloadBlocked()) location.reload();
     }, 450);
 };
 
@@ -919,12 +973,14 @@ window.modHubUpdateGeneralInfo = async function() {
 };
 
 // 通用 Tab 切换接口
-window.modHubSwitchTab = function(tabName) {
+window.modHubSwitchTab = function(tabName, options = {}) {
     if (typeof document === 'undefined') return false;
     const tabs = document.querySelectorAll('#overlayTabs button');
     for (const btn of tabs) {
         if (btn.textContent.trim().includes(tabName)) {
-            btn.click();
+            if (options.skipReloadPrompt) window._modHubSkipReloadPrompt = (window._modHubSkipReloadPrompt || 0) + 1;
+            try { btn.click(); }
+            finally { if (options.skipReloadPrompt) window._modHubSkipReloadPrompt--; }
             return true;
         }
     }
@@ -1087,7 +1143,7 @@ window.modHubInitGlobalDragDrop = function() {
 // 立即在顶层启动全局拖拽安全拦截器
 window.modHubInitGlobalDragDrop();
 
-// 单模组安装核心方法：直接通过底层 ModLoadController 将 Zip 数据写入 IndexedDB
+// 单模组安装核心方法：通过原生校验接口识别 Zip / ModPack，原样写入 IndexedDB。
 // 返回 { modName, bootJson, version, verified }；任一步骤无法确认落盘都会抛出可读异常。
 window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') {
     const controller = window.modHubGetController();
@@ -1099,8 +1155,13 @@ window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') 
         ? await fileOrBlob.arrayBuffer()
         : fileOrBlob;
     const u8Data = new Uint8Array(arrayBuffer);
+    const fileName = preferredFileName || fileOrBlob.name || '';
+    const isNativePackage = MODHUB_NATIVE_PACKAGE_EXTENSION.test(fileName);
+    if (!MODHUB_ZIP_PACKAGE_EXTENSION.test(fileName) && typeof controller.checkModZipFileIndexDB !== 'function') {
+        throw new Error('当前 ModLoader 未提供 ModPack 校验接口，无法核验此二进制安装包；请使用支持该格式的加载器或作者提供的 Zip 包。');
+    }
 
-    // 1. 优先调用 ModLoader 官方接口校验并解析 boot.json
+    // 官方接口先尝试 ModPack 适配器，再回退 Zip；不转换格式或自行解码。
     let modName = null;
     let bootJson = null;
     let checkFailed = '';
@@ -1109,25 +1170,28 @@ window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') 
             const checkResult = await controller.checkModZipFileIndexDB(u8Data);
             if (checkResult && typeof checkResult === 'object' && !Array.isArray(checkResult)) {
                 bootJson = checkResult;
-                modName = String(checkResult.name || '').trim() || null;
-            } else if (checkResult) {
-                checkFailed = typeof checkResult === 'string' ? checkResult : '安装包结构校验未通过';
+                modName = typeof checkResult.name === 'string' ? checkResult.name.trim() || null : null;
+                if (!modName) checkFailed = '模组清单缺少有效名称';
+            } else {
+                checkFailed = typeof checkResult === 'string' && checkResult ? checkResult : '未读取到有效模组清单';
             }
         } catch (err) {
-            console.warn('[ModHub] checkModZipFileIndexDB 校验异常，使用回退解析:', err);
+            checkFailed = err?.message || '当前加载器无法读取此安装包';
         }
     }
 
     // 安装包缺少合法 boot.json 时，ModLoader 重启后绝不会加载它，
     // 此处必须直接失败并给出原因，避免留下永远无法生效的幽灵安装包。
     if (checkFailed) {
-        throw new Error(`安装包校验失败（${checkFailed}），该文件不是可用的模组压缩包`);
+        const hint = /\.modpack\.crypt$/i.test(fileName)
+            ? '当前导入接口不提供密码输入，请使用作者提供的无需密码安装包。'
+            : isNativePackage ? '请核对文件完整性及 ModLoader 是否支持此 ModPack。' : '该文件不是可用的模组安装包。';
+        throw new Error(`安装包校验失败（${checkFailed}）。${hint}`);
     }
 
-    // 2. 备用兜底解析技术模组名
-    const fileName = preferredFileName || fileOrBlob.name || '';
+    // 旧加载器缺少校验接口时仅保留原有 Zip 名称回退，其余格式必须经过原生校验。
     if (!modName) {
-        modName = fileName.replace(/(?:\.mod)?\.zip$/i, '') || 'UnknownMod';
+        modName = fileName.replace(MODHUB_PACKAGE_EXTENSION, '') || 'UnknownMod';
     }
 
     // 3. 写入 IndexedDB（addModIndexDB 同时将模组追加到启用列表）
@@ -1185,11 +1249,11 @@ window.modHubTriggerImport = function() {
         input = document.createElement('input');
         input.type = 'file';
         input.id = 'modHubImportFileInput';
-        input.accept = '.zip';
         input.multiple = true;
         input.style.display = 'none';
         document.body.appendChild(input);
     }
+    input.accept = MODHUB_IMPORT_ACCEPT;
     input.onchange = async () => {
         await window.modHubHandleAddMod(input, { askRestart: true });
     };
@@ -1213,16 +1277,21 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
     window.modHubShowToast(isBatch ? `正在解析并批量导入 ${fileCount} 个模组文件...` : '正在解析并导入模组文件...', 'warning');
     try {
         const imported = await window.modHubRunManagerAction(async () => {
+            let installedNames = [];
             const beforeSide = new Set([
                 ...(gui.listSideLoadModNameOnly ? await gui.listSideLoadModNameOnly() : []),
                 ...(gui.listSideLoadHiddenModNameOnly ? await gui.listSideLoadHiddenModNameOnly() : [])
             ]);
-            // 优先使用官方原版 GUI 的 loadAndAddMod 接口
-            // 当其不存在（或处于无 GUI / 极简环境）时，无缝回退至直写 IndexedDB 安装器
-            if (typeof gui.loadAndAddMod === 'function') {
+            // 旧 GUI 可能仅支持 Zip；ModPack 及移动端 BIN 等文件统一走原生校验接口。
+            const needsNativeCheck = files.some(file => !MODHUB_ZIP_PACKAGE_EXTENSION.test(file.name || ''));
+            if (needsNativeCheck && typeof window.modHubGetController()?.checkModZipFileIndexDB !== 'function') {
+                throw new Error('当前 ModLoader 未提供 ModPack 校验接口，无法核验此二进制安装包；请使用支持该格式的加载器或作者提供的 Zip 包。');
+            }
+            if (!needsNativeCheck && typeof gui.loadAndAddMod === 'function') {
                 await gui.loadAndAddMod(fileInput);
             } else if (typeof window.modHubInstallFilesViaIndexDB === 'function') {
-                await window.modHubInstallFilesViaIndexDB(files);
+                const installed = await window.modHubInstallFilesViaIndexDB(files);
+                installedNames = (installed || []).map(result => result.modName).filter(Boolean);
             } else {
                 throw new Error('未找到可用的模组安装接口');
             }
@@ -1241,6 +1310,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             }
             return {
                 beforeSide,
+                installedNames,
                 afterEnabled: state?.sideEnabled || [],
                 afterDisabled: state?.sideDisabled || []
             };
@@ -1251,9 +1321,11 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             return false;
         }
         window._modHubLastInstallError = '';
-        const { beforeSide, afterEnabled, afterDisabled } = imported;
+        const { beforeSide, installedNames, afterEnabled, afterDisabled } = imported;
         const afterAll = [...afterEnabled, ...afterDisabled];
         const newlyAdded = afterAll.filter(name => !beforeSide.has(name));
+        const verifiedNames = (installedNames || []).filter(name => afterAll.some(item => item.toLowerCase() === name.toLowerCase()));
+        const affectedNames = window.modHubUniqueModNames([...verifiedNames, ...newlyAdded]);
 
         // 确定目标模组名称：仅采用可验证来源，禁止误取启用列表末项。
         const expectedName = String(options.targetModName || '').trim();
@@ -1261,7 +1333,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             ? afterAll.find(name => name.toLowerCase() === expectedName.toLowerCase())
             : null;
         const sourceFileName = files[0]?.name || '';
-        const targetModName = exactExpected || newlyAdded[newlyAdded.length - 1] ||
+        const targetModName = exactExpected || verifiedNames[verifiedNames.length - 1] || newlyAdded[newlyAdded.length - 1] ||
             window.modHubResolveImportedModName(sourceFileName, afterAll, options.displayName || expectedName);
         const targetDisplayName = String(options.displayName || '').trim() || targetModName;
 
@@ -1274,15 +1346,15 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
 
         // ===== 快捷添加模式：导入后询问是否立即重启游戏生效 =====
         if (options && (options.askRestart || options.promptReload) && !options.skipReloadOffer) {
-            const isFramework = (newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : [])).some(name => window.modHubIsFrameworkMod(name)) || window.modHubIsFrameworkMod(targetDisplayName);
+            const isFramework = (affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : [])).some(name => window.modHubIsFrameworkMod(name)) || window.modHubIsFrameworkMod(targetDisplayName);
             const label = isBatch ? `${fileCount} 个模组` : (targetDisplayName ? `模组【${targetDisplayName}】` : '模组');
             if (isFramework) {
                 await window.modHubOfferReload(`${label}已成功添加并完成配置。`, { isFramework: true });
                 if (options.keepCurrentTab) {
-                    window._modHubHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+                    window._modHubHighlightMods = new Set(affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : []));
                 } else {
-                    window._modHubHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
-                    const switched = window.modHubSwitchTab ? window.modHubSwitchTab('模组管理') : false;
+                    window._modHubHighlightMods = new Set(affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : []));
+                    const switched = window.modHubSwitchTab ? window.modHubSwitchTab('模组管理', { skipReloadPrompt: true }) : false;
                     if (!switched || document.getElementById('modHubModManageContainer')) {
                         if (typeof window.initModManage === 'function') {
                             await window.initModManage();
@@ -1292,6 +1364,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
                 return true;
             }
 
+            const reloadRevision = window._modHubReloadRevision;
             const ok = await window.modHubConfirm({
                 title: '重新载入游戏',
                 message: `${label}已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`,
@@ -1299,18 +1372,19 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
                 cancelText: '稍后重载',
                 confirmType: 'primary'
             });
+            window.modHubAcknowledgeReloadPrompt(reloadRevision);
             if (ok) {
                 window.modHubShowToast('正在重新载入游戏...', 'warning');
                 window.modHubRestartGame();
             } else if (options.keepCurrentTab) {
                 // 模组市场安装场景：玩家通常需要连续安装多个模组，
                 // 「稍后重载」后必须停留在市场页签，绝不切走打断浏览。
-                window._modHubHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+                window._modHubHighlightMods = new Set(affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : []));
                 window.modHubShowToast(`${label}已添加完成。全部安装完成后可手动点击【重新载入游戏】生效。`, 'info');
             } else {
-                window._modHubHighlightMods = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+                window._modHubHighlightMods = new Set(affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : []));
                 window.modHubShowToast(`${label}已添加完成，已在列表中标出。全部操作完成后可手动点击【重新载入游戏】生效。`, 'info');
-                const switched = window.modHubSwitchTab ? window.modHubSwitchTab('模组管理') : false;
+                const switched = window.modHubSwitchTab ? window.modHubSwitchTab('模组管理', { skipReloadPrompt: true }) : false;
                 if (!switched || document.getElementById('modHubModManageContainer')) {
                     if (typeof window.initModManage === 'function') {
                         await window.initModManage();
@@ -1330,7 +1404,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
 
         if (isBatch) {
             // ===== 批量导入场景：坚决不强行切页面，全量高亮保留在模组管理界面 =====
-            const highlightSet = new Set(newlyAdded.length > 0 ? newlyAdded : (targetModName ? [targetModName] : []));
+            const highlightSet = new Set(affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : []));
             window._modHubHighlightMods = highlightSet;
 
             // 统计包含 ReadMe 的模组数量
@@ -1350,7 +1424,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             window.modHubShowToast(`已成功导入 ${highlightSet.size || fileCount} 个模组${readmeNote}，已在列表中高亮标出。`, 'success');
 
             if (!options?.keepCurrentTab) {
-                const switched = window.modHubSwitchTab('模组管理');
+                const switched = window.modHubSwitchTab('模组管理', { skipReloadPrompt: true });
                 if (!switched || document.getElementById('modHubModManageContainer')) {
                     if (typeof window.initModManage === 'function') {
                         await window.initModManage();
@@ -1381,7 +1455,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             } else if (hasReadme) {
                 window._modHubSelectedMod = targetModName;
                 window.modHubShowToast(`模组【${targetDisplayName || targetModName}】导入成功，已为您打开说明文档。`, 'success');
-                window.modHubSwitchTab('模组说明');
+                window.modHubSwitchTab('模组说明', { skipReloadPrompt: true });
                 if (typeof window.modHubSelectReadmeMod === 'function') {
                     window.modHubSelectReadmeMod(targetModName);
                 }
@@ -1389,7 +1463,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
                 window._modHubHighlightMods = new Set(targetModName ? [targetModName] : []);
                 const label = targetDisplayName ? `模组【${targetDisplayName}】` : '模组';
                 window.modHubShowToast(`${label}导入成功，已在列表中高亮定位。`, 'success');
-                const switched = window.modHubSwitchTab('模组管理');
+                const switched = window.modHubSwitchTab('模组管理', { skipReloadPrompt: true });
                 if (!switched || document.getElementById('modHubModManageContainer')) {
                     if (typeof window.initModManage === 'function') {
                         await window.initModManage();
@@ -1446,7 +1520,7 @@ window.modHubReorderList = async function(listType, fromIndex, targetIndex, isAf
 
             window.modHubShowToast(`已将美化包【${moved.type}】覆盖优先级调整至第 ${toIndex + 1} 位`, 'success');
         }
-    });
+    }, undefined, { trackReload: true });
 };
 
 // 保证模组状态中 sideMods 与 sideEnabled/sideDisabled 双向同步
@@ -1564,7 +1638,10 @@ window.modHubLoadModManageState = function(refresh = false) {
         const pendingInfo = sideEnabled.filter(name => !window.modHubGetModInfo(name));
         await window.modHubLoadDisabledModInfo([...sideDisabled, ...pendingInfo], refresh);
         return window._modHubModState;
-    })().finally(() => { window._modHubModLoading = null; });
+    })().finally(() => {
+        window._modHubModLoading = null;
+        if (window._modHubReloadExitPending) window.modHubPromptPendingReload();
+    });
     return window._modHubModLoading;
 };
 
@@ -1579,7 +1656,7 @@ window.modHubUpdateManagerStatus = function() {
 };
 
 // ponytail: 共用一把操作锁；确有并行操作需求时再按存储资源拆分。
-window.modHubRunManagerAction = async function(action, message = '正在保存，请稍候...') {
+window.modHubRunManagerAction = async function(action, message = '正在保存，请稍候...', options = {}) {
     if (window._modHubManagerBusy || window._modHubModLoading || window._modHubManagerStateUncertain) {
         window.modHubShowToast(window._modHubManagerStateUncertain ? '请先刷新列表核实配置，再进行修改。' : '上一项操作尚未完成，请稍候。', 'warning');
         return false;
@@ -1592,6 +1669,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
     };
     const beauty = window._modHubBeautyState;
     const beforeBeauty = beauty && { ...beauty, enabledList: [...beauty.enabledList], disabledList: [...beauty.disabledList] };
+    const beforeReload = modHubReloadConfigSnapshot(beforeMod, beforeBeauty);
     const previousStatus = window._modHubManagerStatus;
     window._modHubManagerBusy = true;
     window._modHubManagerStatus = message;
@@ -1600,6 +1678,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
         const result = await action();
         window._modHubManagerStatus = result === false ? previousStatus : '已保存，重新载入后生效';
         if (result !== false) window._modHubManagerSaveFailed = false;
+        if (result !== false && options.trackReload) modHubRecordReloadChange(beforeReload);
         return result === undefined ? true : result;
     } catch (error) {
         window._modHubModState = beforeMod;
@@ -1609,6 +1688,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
             await window.modHubLoadModManageState(true);
             await window.modHubLoadBeautyState(false);
             window._modHubManagerStateUncertain = false;
+            if (options.trackReload) modHubRecordReloadChange(beforeReload);
         } catch (_) {
             window._modHubModState = beforeMod;
             window._modHubManagerStateUncertain = true;
@@ -1624,10 +1704,12 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
         window._modHubManagerBusy = false;
         window.modHubRenderModManageUI();
         window.modHubUpdateManagerStatus();
+        if (window._modHubReloadExitPending && !options.immediateReload) window.modHubPromptPendingReload();
     }
 };
 
 window.initModManage = async function(refresh = false) {
+    window.modHubBindReloadReminder();
     const container = document.getElementById('modHubModManageContainer');
     if (!container) return;
     if (window._modHubModState) window.modHubRenderModManageUI();
@@ -1669,6 +1751,7 @@ window.initModManage = async function(refresh = false) {
             window._modHubManagerBusy = false;
             window.modHubRenderModManageUI();
             window.modHubUpdateManagerStatus();
+            if (window._modHubReloadExitPending) window.modHubPromptPendingReload();
         }
     })().finally(() => { window._modHubManagerInit = null; });
     return window._modHubManagerInit;
@@ -1710,14 +1793,14 @@ window.modHubRenderModManageUI = function() {
             <div class="modhub-group-header">
                 <span class="gold">模组与美化顺序管理</span>
                 <div class="modhub-header-actions">
-                    <button id="modHubImportModBtn" class="macro-button modhub-btn-primary" type="button" title="从本地选择或直接拖拽 Zip 模组文件导入" onclick="window.modHubTriggerImport()">导入模组</button>
+                    <button id="modHubImportModBtn" class="macro-button modhub-btn-primary" type="button" title="从本地选择或直接拖拽 Zip / ModPack 模组文件导入" onclick="window.modHubTriggerImport()">导入模组</button>
                     <button id="modHubRestartGameBtn" class="macro-button modhub-btn-primary" type="button" title="重新载入游戏以使最新模组和美化配置生效" onclick="window.modHubRestartGame()">重新载入游戏</button>
                     <button id="modHubSmartSortAllBtn" class="macro-button modhub-btn-primary" type="button" title="根据明确依赖，同时整理已安装模组的加载顺序和美化包的覆盖顺序" onclick="window.modHubSmartSortAll()">智能整理模组与美化顺序</button>
                     <button id="modHubRefreshListBtn" class="macro-button modhub-btn-primary" type="button" title="在原版管理器修改后，重新读取列表与模组资料" onclick="window.initModManage(true)">刷新列表</button>
                 </div>
             </div>
         </div>
-        <input type="file" id="modHubImportFileInput" accept=".zip" multiple style="display:none;" />
+        <input type="file" id="modHubImportFileInput" accept="${MODHUB_IMPORT_ACCEPT}" multiple style="display:none;" />
         <details class="modhub-collapsible-section" data-section="side"${isSectionOpen('side', true) ? ' open' : ''}>
             <summary class="modhub-section-summary">已安装模组 - 共 ${totalSideCount} 个</summary>
             <div class="modhub-section-content">
@@ -1725,7 +1808,7 @@ window.modHubRenderModManageUI = function() {
 
     // 旁加载模组（启用与禁用归入同排序组，全量参与排序）
     if (!sideMods || sideMods.length === 0) {
-        html += '<div class="mod-empty grey">当前暂无已安装模组，可点击上方【导入模组】添加 Zip 文件。</div>';
+        html += '<div class="mod-empty grey">当前暂无已安装模组，可点击上方【导入模组】添加 Zip / ModPack 文件。</div>';
     } else {
         const updatableMap = window._modHubUpdatableMap;
         html += '<ul class="modhub-list">';
@@ -1963,7 +2046,77 @@ window.modHubIsFrameworkMod = function(modName) {
     return false;
 };
 
+// ponytail: 按成功操作记录提醒批次；需要识别整轮操作改回原状时，再保存会话基准配置。
+window._modHubReloadRevision = window._modHubReloadRevision || 0;
+window._modHubReloadPromptedRevision = window._modHubReloadPromptedRevision || 0;
+
+function modHubReloadConfigSnapshot(modState, beautyState) {
+    return JSON.stringify([
+        modState?.sideMods?.map(item => [item.name, item.enabled]) || [],
+        modState?.sideEnabled || [], modState?.sideDisabled || [],
+        beautyState?.enabledList?.map(item => item.type) || []
+    ]);
+}
+
+function modHubRecordReloadChange(before) {
+    if (before !== modHubReloadConfigSnapshot(window._modHubModState, window._modHubBeautyState)) {
+        window._modHubReloadRevision++;
+    }
+}
+
+window.modHubIsReloadBusy = function() {
+    return !!(window._modHubManagerBusy || window._modHubModLoading || window.modHubMarket?.isInstallBusy?.());
+};
+
+window.modHubIsReloadBlocked = function() {
+    return window.modHubIsReloadBusy() || !!(window._modHubManagerSaveFailed || window._modHubManagerStateUncertain);
+};
+
+window.modHubAcknowledgeReloadPrompt = function(revision) {
+    if (window._modHubManagerSaveFailed || window._modHubManagerStateUncertain) return false;
+    window._modHubReloadPromptedRevision = Math.max(window._modHubReloadPromptedRevision, revision);
+    window._modHubReloadExitPending = false;
+    return true;
+};
+
+window.modHubPromptPendingReload = function() {
+    if (window._modHubReloadPromptPromise) return window._modHubReloadPromptPromise;
+    if (window.modHubIsReloadBusy() || window._modHubReloadDialogPending) {
+        window._modHubReloadExitPending = true;
+        return false;
+    }
+    if (window.modHubIsReloadBlocked()) return false;
+    window._modHubReloadExitPending = false;
+    if (window._modHubReloadRevision <= window._modHubReloadPromptedRevision) return false;
+    window._modHubReloadPromptPromise = Promise.resolve().then(() =>
+        window.modHubOfferReload('模组或美化配置已保存，重新载入后生效。')
+    ).finally(() => { window._modHubReloadPromptPromise = null; });
+    return window._modHubReloadPromptPromise;
+};
+
+window.modHubBindReloadReminder = function() {
+    if (!window._modHubReloadClickBound && document?.addEventListener) {
+        window._modHubReloadClickBound = true;
+        const isManageVisible = () => {
+            const overlay = document.getElementById('customOverlay');
+            return overlay?.dataset?.overlay === 'modloader' && !overlay.classList.contains('hidden') &&
+                !overlay.parentElement?.classList.contains('hidden') && !!document.getElementById('modHubModManageContainer');
+        };
+        document.addEventListener('click', event => {
+            if (window._modHubSkipReloadPrompt || event.target?.closest?.('.modhub-modal-backdrop') || !isManageVisible()) return;
+            queueMicrotask(() => { if (!isManageVisible()) window.modHubPromptPendingReload(); });
+        }, true);
+    }
+    if (!window._modHubReloadCloseBound && typeof $ === 'function') {
+        window._modHubReloadCloseBound = true;
+        $(document).on(':oncloseoverlay', (_event, key) => {
+            if (key === 'modloader' && !window._modHubSkipReloadPrompt) window.modHubPromptPendingReload();
+        });
+    }
+};
+
 window.modHubOfferReload = async function(message = '配置已更新。', options = {}) {
+    const revision = window._modHubReloadRevision;
     const isFramework = Boolean(options.isFramework);
     const title = isFramework ? '重新载入游戏（强烈建议）' : '重新载入游戏';
     const confirmText = isFramework ? '立即重新载入' : '立即重载';
@@ -1988,15 +2141,21 @@ window.modHubOfferReload = async function(message = '配置已更新。', option
     } else {
         promptMsg = `${message}\n\n是否立即重新载入游戏以使配置生效？`;
     }
+    const saveNotice = '重新载入可能丢失尚未存档的游戏进度，请先存档。';
+    promptMsg += `\n\n${saveNotice}`;
+    if (trustedMessageHtml) trustedMessageHtml += `<div class="grey" style="margin-top: 10px;">${saveNotice}</div>`;
 
-    const ok = await window.modHubConfirm({
+    window._modHubReloadDialogPending = true;
+    let ok;
+    try { ok = await window.modHubConfirm({
         title,
         message: promptMsg,
         trustedMessageHtml: trustedMessageHtml || undefined,
         confirmText,
         cancelText,
         confirmType: isFramework ? 'danger' : 'primary'
-    });
+    }); } finally { window._modHubReloadDialogPending = false; }
+    if (!window.modHubAcknowledgeReloadPrompt(revision)) return false;
     if (!ok) return false;
     window.modHubShowToast('正在重新载入游戏...', 'warning');
     setTimeout(() => {
@@ -2134,8 +2293,7 @@ window.modHubSmartSortAll = async function() {
                 button.textContent = '智能整理模组与美化顺序';
             }
         }
-    });
-    if (typeof saved === 'string') window.modHubOfferReload(`${saved}。配置已保存。`);
+    }, undefined, { trackReload: true });
     return saved;
 };
 
@@ -2172,17 +2330,44 @@ window.modHubMoveSideMod = async function(index, deltaOrPosition) {
         } else if (deltaOrPosition === 'bottom') {
             window.modHubShowToast(`已将【${name}】置底`, 'success');
         }
-    });
+    }, undefined, { trackReload: true });
 };
 
-// 检测即将启用的模组与当前本地已启用的其它模组是否存在互斥冲突
+// 两个框架共用真实包体声明；原生别名代供与两个包同时提供别名须区别展示。
+window.modHubGetFrameworkPairRisk = function(maple, simple) {
+    const mapleBoot = maple?.bootJson;
+    const simpleBoot = simple?.bootJson;
+    const canonical = value => String(value || '').trim().toLowerCase();
+    if (mapleBoot?.name && simpleBoot?.name && canonical(mapleBoot.name) === canonical(simpleBoot.name)) return null;
+    let providesSimple = Array.isArray(mapleBoot?.alias)
+        && mapleBoot.alias.some(alias => canonical(alias) === 'simple frameworks');
+    // 预检前仅允许已审计的精确发布预览，不能把目录最新版套到所选历史包。
+    if (!mapleBoot) {
+        const release = maple?.releaseInfo;
+        const source = release?.githubUrl || maple?.githubUrl;
+        const tag = String(release?.tag || release?.tagName || '');
+        providesSimple = String(release?.version || '') === '5.1.3' && tag === 'maplebirch-release-v5.1.3'
+            && /^https:\/\/github\.com\/MaplebirchLeaf\/SCML-DOL-maplebirchframework(?:\/|$)/i.test(String(source || ''));
+    }
+    return providesSimple ? {
+        ruleId: 'framework-alias-provider-overlap', kind: 'alias-provider-overlap', level: 'warning',
+        reason: '秋枫白桦框架通过原生 alias 声明提供 Simple Frameworks。两个独立框架包同时启用会重复提供这一技术名，ModLoader 的依赖解析可能选中不同提供者。',
+        advice: '通常只需启用一个提供者。请按模组作者要求选择框架，并核对版本范围；原生别名代供不代表两个框架必须同时加载。'
+    } : {
+        ruleId: 'maplebirch-vs-simpleframework', kind: 'unverified-framework-pair', level: 'warning',
+        reason: '当前秋枫白桦框架包没有可核验的 Simple Frameworks 原生别名声明，尚不能确认这两个框架同时加载的兼容性。',
+        advice: '请核对这两个实际版本的作者说明；没有明确兼容依据时，建议先只启用模组要求的框架。'
+    };
+};
+
+// 检测即将启用的框架与当前已启用提供者，保留原始技术名与包体边界。
 window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
     if (!targetModName || !Array.isArray(activeMods) || !activeMods.length) return null;
 
     const conflictRules = window.modHubMarket?.KNOWN_MOD_CONFLICT_RULES || [
         {
             id: 'maplebirch-vs-simpleframework',
-            name: '秋枫白桦框架 与 简易框架 互斥',
+            name: '秋枫白桦框架 与 简易框架 提供者检查',
             conflictingGroups: [
                 {
                     key: 'maplebirch',
@@ -2203,7 +2388,7 @@ window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
                     ]
                 }
             ],
-            reason: '两者底层挂钩机制与核心段落重写逻辑互斥，同时启用可能导致脚本报错、界面错乱或存档损坏。',
+            reason: '需要按实际包体核对框架提供者与兼容依据。',
             level: 'danger'
         }
     ];
@@ -2223,8 +2408,8 @@ window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
         const stripped = normalize(stripPrefix(rawName));
 
         // 1. 直接名称高精比对（Direct Literal Match）：最高优先级，杜绝跨组别名串门
-        const directA = keysA.some(k => norm === k || stripped === k || (k.length >= 4 && (norm.includes(k) || stripped.includes(k))));
-        const directB = keysB.some(k => norm === k || stripped === k || (k.length >= 4 && (norm.includes(k) || stripped.includes(k))));
+        const directA = keysA.some(k => norm === k || stripped === k);
+        const directB = keysB.some(k => norm === k || stripped === k);
 
         if (directA && !directB) return groupA;
         if (directB && !directA) return groupB;
@@ -2241,8 +2426,8 @@ window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
         if (boot) {
             const bootName = boot.name ? normalize(boot.name) : '';
             const bootStripped = boot.name ? normalize(stripPrefix(boot.name)) : '';
-            const bootA = keysA.some(k => bootName === k || bootStripped === k || (k.length >= 4 && (bootName.includes(k) || bootStripped.includes(k))));
-            const bootB = keysB.some(k => bootName === k || bootStripped === k || (k.length >= 4 && (bootName.includes(k) || bootStripped.includes(k))));
+            const bootA = keysA.some(k => bootName === k || bootStripped === k);
+            const bootB = keysB.some(k => bootName === k || bootStripped === k);
             if (bootA && !bootB) return groupA;
             if (bootB && !bootA) return groupB;
         }
@@ -2260,6 +2445,9 @@ window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
         const subtext = window.modHubGetModSubtext(modName, window.modHubGetModInfo?.(modName), false, true);
         return subtext || group.name || modName;
     };
+    const profileFor = (name, item) => ({ name,
+        bootJson: item?.bootJson || window._modHubDisabledModInfo?.get(String(name).toLowerCase())?.bootJson
+            || window.modHubGetModInfo?.(name)?.bootJson });
 
     for (const rule of conflictRules) {
         if (!Array.isArray(rule.conflictingGroups) || rule.conflictingGroups.length < 2) continue;
@@ -2272,19 +2460,23 @@ window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
 
         for (const active of activeMods) {
             const activeName = typeof active === 'string' ? active : active?.name;
-            if (!activeName || activeName === targetModName) continue;
+            if (!activeName || activeName === targetModName || active?.enabled === false) continue;
 
             const activeGroup = resolveModConflictGroup(activeName, rule);
             if (activeGroup === opponentGroup) {
+                const target = profileFor(targetModName);
+                const local = profileFor(activeName, active);
+                const risk = window.modHubGetFrameworkPairRisk(targetGroup.key === 'maplebirch' ? target : local,
+                    targetGroup.key === 'simpleframework' ? target : local);
+                if (!risk) continue;
                 return {
-                    ruleId: rule.id,
+                    ...risk,
                     targetDisplayName: getCleanDisplayName(targetModName, targetGroup),
                     conflictDisplayName: getCleanDisplayName(activeName, opponentGroup),
                     targetModName,
                     conflictModName: activeName,
                     targetRawName: targetModName,
                     conflictRawName: activeName,
-                    reason: rule.reason
                 };
             }
         }
@@ -2488,9 +2680,9 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
         if (conflict) {
             const proceed = await window.modHubConfirm({
                 title: '模组冲突风险确认',
-                message: `检测到即将启用的模组与当前已启用的模组存在已知兼容性冲突：\n\n· 即将启用：【${conflict.targetDisplayName}】\n· 当前已启用冲突模组：【${conflict.conflictDisplayName}】\n\n原因：${conflict.reason}\n\n两者底层挂钩逻辑互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。\n\n是否确认继续启用？`,
+                message: `检测到即将启用的框架与当前提供者需要进一步核对：\n\n· 即将启用：【${conflict.targetDisplayName}】\n· 当前已启用冲突模组：【${conflict.conflictDisplayName}】\n\n原因：${conflict.reason}\n\n请核对上述包体声明、版本要求与提供者选择。\n\n是否确认继续启用？`,
                 trustedMessageHtml: `
-                    <div class="modhub-modal-conflict-intro">检测到即将启用的模组与当前已启用的模组存在已知兼容性冲突：</div>
+                    <div class="modhub-modal-conflict-intro">检测到即将启用的框架与当前提供者需要进一步核对：</div>
                     <div class="modhub-modal-conflict-alert-box" style="margin: 12px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
                         <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
                             · 即将启用：【${window.modHubEscapeHtml(conflict.targetDisplayName)}】<br>
@@ -2505,7 +2697,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
                             </button>
                         </div>
                     </div>
-                    <div class="modhub-modal-conflict-question grey">两者底层挂钩逻辑互斥，强行同时启用可能导致脚本报错、界面错乱或存档损坏。<br>是否确认继续启用？</div>
+                    <div class="modhub-modal-conflict-question grey">请核对上述包体声明、版本要求与提供者选择。<br>是否确认继续启用？</div>
                 `,
                 confirmText: '继续启用',
                 cancelText: '暂不启用',
@@ -2571,7 +2763,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
                         disableBtn.textContent = '正在禁用...';
 
                         try {
-                            if (!await window.modHubToggleSideMod(rawName, false, { skipConfirm: true, silentOfferReload: true })) throw new Error('快捷禁用未完成');
+                            if (!await window.modHubToggleSideMod(rawName, false, { skipConfirm: true, silentOfferReload: true, trackReload: true })) throw new Error('快捷禁用未完成');
 
                             if (typeof dialog.modHubClearDelay === 'function') {
                                 dialog.modHubClearDelay();
@@ -2588,7 +2780,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
                                         · 冲突模组：【${escape(conflict.conflictDisplayName)}】<span style="color: #4ade80; font-size: 0.85em; font-weight: normal;">（已快捷禁用 · 风险已排除）</span>
                                     </div>
                                     <div class="grey" style="font-size: 0.9em; line-height: 1.4;">
-                                        互斥冲突已排除，可安全启用【${escape(conflict.targetDisplayName)}】。
+                                        框架同时加载风险已排除，可继续启用【${escape(conflict.targetDisplayName)}】。
                                     </div>
                                 `;
                             }
@@ -2662,7 +2854,9 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
         }
     }
 
-    return window.modHubRunManagerAction(async () => {
+    const isFramework = window.modHubIsFrameworkMod(modName);
+    const immediateReload = !options.silentOfferReload && isFramework;
+    const saved = await window.modHubRunManagerAction(async () => {
         const currentState = window._modHubModState;
         const currentItem = currentState?.sideMods?.find(m => m.name === modName);
         if (!currentItem || currentItem.enabled === targetEnable) return false;
@@ -2674,19 +2868,21 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
         // 禁用时始终同步停用所属图包；自动启用开关只控制启用方向。
         await window.modHubLoadBeautyState();
 
-        window.modHubShowToast(`模组【${modName}】已${targetEnable ? '启用' : '禁用'}`, 'success');
-        if (!options.silentOfferReload && window.modHubIsFrameworkMod(modName)) {
-            const modInfo = window.modHubGetModInfo(modName);
-            const subtext = window.modHubGetModSubtext(modName, modInfo, false, true);
-            const modDisplayName = subtext ? `${modName}（${subtext}）` : modName;
-            window.modHubOfferReload(`核心框架【${modDisplayName}】已${targetEnable ? '启用' : '禁用'}。`, { isFramework: true });
-        }
+        window.modHubShowToast(`模组【${modName}】已${targetEnable ? '启用' : '禁用'}，重新载入后生效`, 'success');
         return true;
-    });
+    }, undefined, { trackReload: options.trackReload ?? !options.silentOfferReload, immediateReload });
+    if (saved && immediateReload) {
+        const modInfo = window.modHubGetModInfo(modName);
+        const subtext = window.modHubGetModSubtext(modName, modInfo, false, true);
+        const modDisplayName = subtext ? `${modName}（${subtext}）` : modName;
+        await window.modHubOfferReload(`核心框架【${modDisplayName}】已${targetEnable ? '启用' : '禁用'}。`, { isFramework: true });
+    }
+    return saved;
 };
 
 // 永久删除旁加载模组
 window.modHubDeleteSideMod = async function(modName) {
+    const isFramework = window.modHubIsFrameworkMod(modName);
     const affectedMods = await window.modHubFindDependentMods(modName);
     const modInfo = window.modHubGetModInfo(modName);
     const subtext = window.modHubGetModSubtext(modName, modInfo, false, true);
@@ -2751,11 +2947,10 @@ window.modHubDeleteSideMod = async function(modName) {
         if (controller && typeof controller.removeModIndexDB === 'function') {
             await controller.removeModIndexDB(modName);
         }
-    });
+    }, undefined, { trackReload: true, immediateReload: isFramework });
     if (saved) {
         window.modHubShowToast(`已删除模组【${modName}】，重新载入后生效`, 'warning');
-        const isFramework = window.modHubIsFrameworkMod(modName);
-        window.modHubOfferReload(`模组【${modDisplayName || modName}】已从模组列表中删除。`, { isFramework });
+        if (isFramework) await window.modHubOfferReload(`模组【${modDisplayName || modName}】已从模组列表中删除。`, { isFramework: true });
     }
     return saved;
 };

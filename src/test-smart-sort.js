@@ -16,10 +16,13 @@ process.on('beforeExit', () => {
     await require('../tests/market-catalog.test')();
     await require('../tests/diagnostics-conflicts.test')();
     await require('../tests/market-install.test')();
+    await require('../tests/market-versions.test')();
+    await require('../tests/market-preparation.test')();
+    await require('../tests/market-version-install.test')();
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.1.0 全部测试通过');
+    console.log('ModHub v1.1.1 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

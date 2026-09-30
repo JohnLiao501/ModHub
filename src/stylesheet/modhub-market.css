@@ -913,6 +913,272 @@
     cursor: default !important;
 }
 
+/* 多版本下载沿用原生暗黑弹窗，列表和按钮在窄屏下各自保留触控面积。 */
+.modhub-version-dialog {
+    width: 100%;
+    min-width: 0;
+    max-height: calc(100vh - 32px);
+    max-height: calc(100dvh - 32px);
+}
+
+.modhub-version-dialog .modhub-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+}
+
+.modhub-version-dialog .modhub-modal-footer {
+    flex-shrink: 0;
+    padding-bottom: max(60px, env(safe-area-inset-bottom, 0px));
+}
+
+.modhub-version-list {
+    max-height: 40vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    margin: 12px 0;
+    padding: 2px;
+}
+
+.modhub-version-option {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    margin: 6px 0;
+    border: 1px solid var(--600, #444);
+    background: var(--850, #181818);
+    cursor: pointer;
+    min-height: 32px;
+    box-sizing: border-box;
+    border-radius: 3px;
+}
+
+.modhub-version-option > input {
+    flex-shrink: 0;
+    margin: 4px 0 0;
+}
+
+.modhub-version-option > span,
+.modhub-version-content,
+.modhub-version-plan,
+.modhub-version-batch-row {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-option > span,
+.modhub-version-content {
+    flex: 1 1 0;
+}
+
+.modhub-version-option.modhub-version-selected,
+.modhub-version-option:has(> input:checked) {
+    border-color: var(--gold, #d4af37);
+    background: var(--800, #222);
+    box-shadow: inset 0 0 0 1px var(--gold, #d4af37);
+}
+
+.modhub-version-option:focus-within {
+    outline: 1px solid var(--gold, #d4af37);
+    outline-offset: 1px;
+}
+
+.modhub-version-heading,
+.modhub-install-plan-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px 10px;
+    min-width: 0;
+    margin: 0;
+}
+
+.modhub-version-number {
+    min-width: 0;
+    font-size: 1.05em;
+    font-weight: 600;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-badge {
+    display: inline-block;
+    flex-shrink: 0;
+    max-width: 100%;
+    padding: 1px 6px;
+    border: 1px solid currentColor;
+    border-radius: 3px;
+    background: var(--900, #111);
+    font-size: 0.78em;
+    line-height: 1.5;
+    box-sizing: border-box;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-meta {
+    display: block;
+    margin: 3px 0;
+    color: var(--400, #aaa);
+    font-size: 0.84em;
+    line-height: 1.5;
+}
+
+.modhub-version-description {
+    display: block;
+    margin: 5px 0;
+    font-size: 0.88em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-assets {
+    margin-top: 4px;
+    color: var(--400, #aaa);
+    font-size: 0.84em;
+    line-height: 1.5;
+    min-width: 0;
+}
+
+.modhub-version-assets > summary {
+    min-height: 32px;
+    padding: 4px 0;
+    box-sizing: border-box;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-asset-name {
+    display: block;
+    margin: 3px 0;
+    padding: 4px 8px;
+    border-left: 1px solid var(--600, #444);
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.modhub-version-content > a {
+    display: inline-block;
+    min-height: 32px;
+    padding: 4px 0;
+    box-sizing: border-box;
+}
+
+.modhub-version-loading,
+.modhub-version-status {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 10px;
+    min-width: 0;
+    margin: 8px 0;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-loading {
+    padding: 10px 12px;
+    border: 1px solid var(--600, #444);
+    background: var(--850, #181818);
+}
+
+.modhub-version-status {
+    font-size: 0.88em;
+}
+
+.modhub-version-loading[hidden],
+.modhub-version-status[hidden] {
+    display: none;
+}
+
+.modhub-version-loading > *,
+.modhub-version-status > *,
+.modhub-install-plan-heading > * {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-install-plan {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-install-plan-item {
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--600, #444);
+    background: var(--850, #181818);
+    border-radius: 3px;
+}
+
+.modhub-install-plan-heading {
+    font-size: 0.95em;
+    line-height: 1.5;
+}
+
+.modhub-install-plan-meta {
+    display: block;
+    margin: 4px 0 0;
+    color: var(--400, #aaa);
+    font-size: 0.86em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.modhub-install-plan-warning {
+    min-width: 0;
+    margin: 4px 0;
+    padding: 8px 10px;
+    border-left: 3px solid var(--gold, #d4af37);
+    background: var(--850, #181818);
+    font-size: 0.88em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-batch-row {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid var(--600, #444);
+    background: var(--850, #181818);
+    border-radius: 3px;
+}
+
+.modhub-version-batch-select {
+    width: 100%;
+    min-width: 0;
+    min-height: 32px;
+    box-sizing: border-box;
+    background: var(--900, #111);
+    color: var(--000, #eee);
+    border: 1px solid var(--600, #444);
+}
+
+.modhub-version-dialog button,
+.modhub-version-load-more {
+    min-height: 32px;
+    flex-shrink: 0;
+}
+
+@media (max-width: 768px) {
+    .modhub-version-option,
+    .modhub-install-plan-item,
+    .modhub-version-loading {
+        padding: 8px;
+    }
+
+    .modhub-version-heading,
+    .modhub-install-plan-heading {
+        gap: 5px 8px;
+    }
+}
+
 .modhub-btn-sub {
     background-color: transparent !important;
     border: 1px solid var(--600, #555) !important;

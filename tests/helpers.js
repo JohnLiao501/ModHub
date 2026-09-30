@@ -114,7 +114,7 @@ function loadManager(overrides = {}) {
 
 function loadMarket() {
     const sandbox = createBaseSandbox();
-    loadScripts(sandbox, ['javascript/modhub-market.js']);
+    loadScripts(sandbox, ['javascript/modhub-manager.js', 'javascript/modhub-market.js']);
     return sandbox;
 }
 

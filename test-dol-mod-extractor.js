@@ -5,7 +5,14 @@ const path = require('node:path');
 async function main() {
   const source = await readFile(path.join(__dirname, 'dol-mod-extractor.js'), 'utf8');
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
-  const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories } = await import(moduleUrl);
+  const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories,
+    modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName } = await import(moduleUrl);
+  for (const name of ['Example.modpack', 'Example.MODPACK.CRYPT', 'Example.mod.zip', 'Example.mod']) {
+    assert.equal(modHubIsModPackageName(name), true, `原生模组包后缀应识别：${name}`);
+  }
+  for (const name of ['Example.modpack.exe', 'Example.modpack.crypt.txt', 'Example.crypt', 'source-code.modpack', 'Example.apk.zip', 'Example.jar', 'README.md']) {
+    assert.equal(modHubIsModPackageName(name), false, `非模组附件不得进入安装包选择：${name}`);
+  }
   const catalog = JSON.parse(await readFile(path.join(__dirname, 'mod-identities.json'), 'utf8'));
   assert.equal(catalog.schemaVersion, 1);
   assert.equal(new Set(catalog.mods.map((mod) => mod.id)).size, catalog.mods.length, '身份 ID 不得重复');
@@ -14,6 +21,26 @@ async function main() {
   assert.ok(catalog.mods.every((mod) => Array.isArray(mod.tags) && mod.tags.length <= 3), '每个身份最多保留三个内容标签');
   const identityIds = new Set(catalog.mods.map((mod) => mod.id));
   assert.ok(catalog.mods.every((mod) => (mod.dependencies || []).every((dependency) => identityIds.has(dependency.id))), '每个依赖都必须指向现有身份 ID');
+  for (const identity of catalog.mods) {
+    assert.deepEqual(modHubNormalizeReleaseCompatibility(identity.releaseCompatibility),
+      (identity.releaseCompatibility || []).map(rule => ({ ...rule, ...(rule.dependencies ? {
+        dependencies: rule.dependencies.map(item => ({ ...item, version: item.version || '' })),
+      } : {}) })), '发布适配规则必须符合契约且不会丢失审核证据');
+    assert.ok((identity.releaseCompatibility || []).every(rule => (rule.dependencies || []).every(item => identityIds.has(item.id))), '历史发布前置必须指向已收录身份');
+  }
+  const [locket] = mergeModIdentities([{ name: '同心吊坠文本拓展', githubUrl: 'https://github.com/koooooiCarp/DOL-Love-Locket-Text-Expansion-Mod' }], catalog);
+  assert.equal(locket.releaseCompatibility.length, 2, 'Wiki 回退身份合并必须保留历史适配规则');
+  assert.equal(locket.releaseCompatibility[1].dependencies[0].id, 'simple-framework', '旧版不能套用新版框架前置');
+  const originalHistoryFetch = globalThis.fetch;
+  try {
+    const sourceUrl = 'https://github.com/Owner/Repo';
+    globalThis.fetch = async url => {
+      assert.match(url, /\/mod-releases\?id=sample&page=2$/);
+      return Response.json({ schemaVersion: 1, id: 'sample', sourceUrl, page: 2, hasMore: false, stale: false, releases: [] });
+    };
+    assert.equal((await modHubFetchModReleases({ id: 'sample', githubUrl: `${sourceUrl}/#tab` }, { page: 2 })).page, 2);
+    await assert.rejects(modHubFetchModReleases({ id: 'sample', githubUrl: 'https://github.com/Other/Repo' }, { page: 2 }), /发布来源/);
+  } finally { globalThis.fetch = originalHistoryFetch; }
   assert.ok(catalog.mods.every((mod) => !mod.repositories.length
     || (Array.isArray(mod.repositoryKeys) && mod.repositoryKeys.every((key) => /^[^/]+\/[^/]+$/.test(key)))),
   '带仓库别名的身份必须声明所有者/仓库完整键');
@@ -125,6 +152,15 @@ async function main() {
     githubUrls: [],
   }], catalog);
   assert.deepEqual(inferred[0].dependencies, [{ id: 'simple-framework', version: '' }]);
+  const edenVisuals = mergeModIdentities([{
+    name: '伊甸互动头像', githubUrl: 'https://github.com/LooopSpiner/Eden-Visuals-Mod',
+    description: '伊甸相关剧情添加立绘或 CG（依赖简易框架）',
+  }], catalog)[0];
+  assert.equal(edenVisuals.identityId, 'eden-visuals', 'Wiki 名称与作者 boot 中文词序不同也须通过已核验身份关联');
+  assert.deepEqual(edenVisuals.bootNames, ['伊甸头像互动']);
+  assert.deepEqual(edenVisuals.dependencies, [{ id: 'simple-framework', version: '' }], '目录依赖必须保留简易框架身份，不能因提供者 alias 改成秋枫框架');
+  assert.equal(mergeModIdentities([{ name: '伊甸互动头像', githubUrl: 'https://github.com/Another/Avatar' }], catalog)[0].identityId,
+    null, '同名头像条目不能继承另一作者的真实技术名');
   const au = mergeModIdentities(['AU美化', 'AU面部扩展', 'AU染发优化'].map(name => ({
     name, githubUrl: 'https://github.com/AOKIUTAGE/UTAGEsDOL3.0',
   })), catalog);
@@ -219,18 +255,34 @@ async function main() {
     responses.set(`${apiUrl}?per_page=100`, [
       { tag_name: 'other-newest', published_at: '2026-09-27', assets: [{ name: 'Other.v99.0.zip' }] },
       { tag_name: 'shared-products', published_at: '2026-09-20', assets: [
-        { name: 'First.v1.2.zip', browser_download_url: 'https://example.test/first.zip' },
+        { name: 'First-DoL-v0.5.3.6-v1.2.zip', browser_download_url: 'https://example.test/first.zip' },
         { name: 'Second.v2.3.zip', browser_download_url: 'https://example.test/second.zip' },
       ] },
     ]);
     const first = await fetchModRelease({ githubUrl: repoUrl, name: '产品甲', sharedRepository: true, bootNames: ['First'] });
     const second = await fetchModRelease({ githubUrl: repoUrl, name: '产品乙', sharedRepository: true, bootNames: ['Second'] });
-    assert.equal(first.assetName, 'First.v1.2.zip');
+    assert.equal(first.assetName, 'First-DoL-v0.5.3.6-v1.2.zip', '游戏版本的 DoL-v 前缀不能破坏产品身份匹配');
     assert.equal(first.version, '1.2');
     assert.equal(second.assetName, 'Second.v2.3.zip', '同仓库不同产品不得复用对方缓存');
     assert.equal(second.version, '2.3');
     assert.equal(first.assets.length, 1, '网站不得给当前产品展示同仓库的其他模组作为下载');
     await assert.rejects(fetchModRelease({ githubUrl: repoUrl, name: '未知产品', sharedRepository: true }), /未找到当前模组/);
+    responses.set(`${apiUrl}/tags/native`, { tag_name: 'native', assets: [
+      { name: 'First-v1.0.modpack', browser_download_url: 'https://example.test/first.modpack' },
+      { name: 'Second-v2.0.modpack.crypt', browser_download_url: 'https://example.test/second.modpack.crypt' },
+      { name: 'First-v1.0.modpack.exe', browser_download_url: 'https://example.test/installer.exe' },
+      { name: 'source-code.modpack', browser_download_url: 'https://example.test/source.modpack' },
+    ] });
+    const native = await fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/native` });
+    assert.deepEqual(native.assets.map(item => item.name), ['First-v1.0.modpack', 'Second-v2.0.modpack.crypt'], '网站最新发布仅保留真实模组包后缀');
+    assert.equal(native.assetName, 'First-v1.0.modpack');
+    const crypted = await fetchModRelease({ githubUrl: `${repoUrl}/releases/download/native/Second-v2.0.modpack.crypt` });
+    assert.equal(crypted.assetName, 'Second-v2.0.modpack.crypt', '加密包固定附件不能切换同标签的普通包');
+    responses.set(`${apiUrl}?per_page=100`, [responses.get(`${apiUrl}/tags/native`)]);
+    const sharedNative = await fetchModRelease({ githubUrl: repoUrl, sharedRepository: true, bootNames: ['Second'], name: '产品乙' }, { useCache: false });
+    assert.deepEqual(sharedNative.assets.map(item => item.name), ['Second-v2.0.modpack.crypt'], '加密包尾缀不得破坏共享仓库产品隔离');
+    responses.set(`${apiUrl}/tags/unsupported`, { tag_name: 'unsupported', assets: [{ name: 'Installer.exe', browser_download_url: 'https://example.test/installer.exe' }] });
+    assert.equal((await fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/unsupported` })).assetUrl, null, '不支持的附件不得成为默认下载');
     console.log('GitHub Release 标签与缓存测试通过');
   } finally {
     global.fetch = originalFetch;

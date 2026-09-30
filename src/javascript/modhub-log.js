@@ -33,8 +33,28 @@ window.modHubToggleAutoOpenLogSetting = function(checked) {
     if (toggleInput) toggleInput.checked = checked;
 };
 
+// 天气图像异常需同时匹配渲染上下文和具体失败，不能把任意 NaN 归因于缺图。
+const modHubIsWeatherImageFailure = line => {
+    const weatherContext = /\bWeather\.Renderer\.Sky\b/i.test(line) ||
+        /Error during effect\s*['"]\s*(?:bannerCirrusClouds|bannerOvercastClouds|bannerClouds|bannerPrecipitation|bannerStarField|rainbow|moon|location)\s*['"]/i.test(line);
+    if (!weatherContext) return false;
+    return (/randomInt called with invalid parameters/i.test(line) && /\b(?:NaN|undefined)\b/i.test(line)) ||
+        (/drawImage/i.test(line) && /provided value is not of type/i.test(line));
+};
+
 // 常见模组加载错误通俗化诊断知识库 (0 Emoji)
 const MODHUB_ERROR_PATTERNS = [
+    {
+        id: 'weather-image-error',
+        title: '原版天气图像加载或渲染失败',
+        keywords: ['randomint called with invalid parameters', 'drawimage'],
+        resolve: line => modHubIsWeatherImageFailure(line) ? {
+            id: 'weather-image-error',
+            title: '原版天气图像加载或渲染失败',
+            desc: '天气渲染收到了无效图像尺寸或图像类型。这组 randomInt / drawImage 报错可能是图片加载失败后的连锁异常，需要先核实原版图像资源。',
+            solution: '检查与当前 DoL 版本对应的原版 img 资源是否完整且可访问，或使用包含原版图片的完整整合包；ModHub 本身不提供原版图包。若使用 GameOriginalImagePack，请确认已启用并完整重载游戏。若日志包含【资源加载失败】，请按记录的目标路径检查缺失或损坏的图片。资源完整时再核查游戏与图像加载框架的版本兼容，并保留原始堆栈反馈。'
+        } : null
+    },
     {
         id: 'game-version-mismatch',
         title: '游戏版本不满足模组要求',
@@ -94,6 +114,13 @@ const MODHUB_ERROR_PATTERNS = [
                 solution: `在模组管理中把【${match[2]}】移动到【${match[1]}】之前，或使用智能整理，然后重新载入游戏。`
             };
         }
+    },
+    {
+        id: 'mod-name-lookup-miss',
+        title: '模组名称或别名查询未命中',
+        keywords: ['modordercontainer getbynameonewithalias() cannot find name/alias.'],
+        desc: 'ModLoader 按名称或别名查找模组时未找到匹配项。可能与目标未安装或未启用、名称不一致、兼容探测有关。仅凭这条日志，不能确认是否影响游戏。',
+        solution: '核对原始日志中的查询名称、安装和启用状态，以及相关调用上下文；若同时出现依赖校验失败或脚本异常，请结合对应错误继续排查。'
     },
     {
         id: 'missing-dep',
@@ -220,10 +247,10 @@ const MODHUB_ERROR_PATTERNS = [
     },
     {
         id: 'asset-missing',
-        title: '立绘或多媒体资源缺失 (404)',
+        title: '图片或多媒体资源加载失败',
         keywords: ['404', 'failed to load resource', 'img/', 'image pack'],
-        desc: '游戏请求了模组图像或音效，但在对应路径下未能找到对应资源文件。',
-        solution: '检查美化包是否完整，并确认在【美化管理】中已启用了对应的美化图像包。'
+        desc: '原版或模组资源可能缺失、损坏或暂时不可访问；仅凭此日志不能断定是 404，也不能确定来自某个美化包。',
+        solution: '先检查日志中的目标资源路径、原版图片包是否完整，以及资源与当前游戏版本是否匹配；若路径属于模组或美化，再检查对应包体和启用状态。'
     }
 ];
 
@@ -455,6 +482,8 @@ window.modHubAnalyzeLogs = function(rawContent) {
             line.includes('[ERROR]') ||
             line.includes('[错误]') ||
             line.includes('[控制台报错]') ||
+            line.includes('[脚本异常]') ||
+            line.includes('[异步异常]') ||
             lineLower.includes('logerror') ||
             line.includes('Error:') ||
             line.includes('error:') ||
@@ -542,7 +571,10 @@ window.modHubAnalyzeLogs = function(rawContent) {
             foundModsInLine.forEach(m => errorMods.add(m));
             foundFilesInLine.forEach(f => errorFiles.add(f));
 
+            const isWeatherImageFailure = modHubIsWeatherImageFailure(cleanMsg);
             MODHUB_ERROR_PATTERNS.forEach(pattern => {
+                // 特定天气行使用图像诊断，独立的其他 TypeError 和资源错误仍照常保留。
+                if (isWeatherImageFailure && ['type-error', 'asset-missing'].includes(pattern.id)) return;
                 if (pattern.keywords.some(kw => lineLower.includes(kw.toLowerCase()))) {
                     const issue = typeof pattern.resolve === 'function' ? pattern.resolve(cleanMsg) : pattern;
                     if (issue && !matchedIssuesMap.has(issue.id)) {
@@ -668,9 +700,9 @@ window.modHubRenderLogDiagnosis = function(analysis) {
         html += `
             <div class="modhub-diag-issues">
                 <div class="modhub-issue-item">
-                    <div class="issue-title gold">【常规运行时异常】</div>
-                    <div class="issue-desc grey">模组在执行代码逻辑或生命周期注入时抛出了未捕获的错误。</div>
-                    <div class="issue-solution"><span class="green">[排查建议]</span> 请点击上方“定位首处错误”查看报错具体位置，排查最近安装的第三方模组。</div>
+                    <div class="issue-title gold">【未分类的错误日志】</div>
+                    <div class="issue-desc grey">控制台或加载器记录了错误信息，尚未匹配到专项诊断。是否影响游戏，需要结合原始日志和调用上下文确认。</div>
+                    <div class="issue-solution"><span class="green">[排查建议]</span> 请点击上方“定位首处错误”查看完整内容，并保留相关日志排查。</div>
                 </div>
             </div>
         `;

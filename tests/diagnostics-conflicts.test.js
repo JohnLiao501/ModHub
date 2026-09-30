@@ -104,6 +104,58 @@ module.exports = async function() {
         assert.equal(forwarded.length, 7, '不同堆栈格式不得影响原日志转发');
     }
 
+    // 外部名称或别名查询日志保留错误级别，只修正诊断解释，不认定查询无害。
+    {
+        const forwarded = [];
+        const manager = loadManager({ console: { error(...args) { forwarded.push(args); } } });
+        const message = 'ModOrderContainer getByNameOneWithAlias() cannot find name/alias.';
+        const details = ['Remy Love Mod', { source: '外部查询' }];
+        manager.console.error(message, details);
+        const rawLogs = manager.modHubGetRawModLoaderLogs();
+        const analysis = manager.modHubAnalyzeLogs(rawLogs);
+        assert.equal(analysis.errorCount, 1, '外部查询未命中仍须计入错误，不得静默隐藏');
+        assert.ok(analysis.lines[0].message.includes(message) && analysis.lines[0].message.includes('Remy Love Mod'), '必须保留原查询日志与目标名称');
+        assert.deepEqual(Array.from(analysis.matchedIssues, issue => issue.id), ['mod-name-lookup-miss'], '完整来源和查询签名必须命中专项诊断');
+        assert.equal(forwarded.length, 1, '原控制台日志只能转发一次');
+        assert.equal(forwarded[0][0], message, '控制台消息必须原样转发');
+        assert.equal(forwarded[0][1], details, '控制台附加参数必须原样转发');
+        assert.equal(manager._modHubPendingAutoOpenErrorLog, true, '外部查询日志仍须保留自动提示');
+
+        const diagnosis = createStubElement();
+        manager.document.getElementById = id => id === 'modHubLogDiagnosisContainer' ? diagnosis : null;
+        manager.modHubRenderLogDiagnosis(analysis);
+        assert.ok(diagnosis.innerHTML.includes('模组名称或别名查询未命中'), '界面必须显示具体查询诊断');
+        assert.ok(diagnosis.innerHTML.includes('不能确认是否影响游戏'), '诊断不得把未命中认定为无害');
+        assert.ok(!diagnosis.innerHTML.includes('抛出了未捕获的错误'), '普通控制台查询日志不得被解释为未捕获异常');
+        manager.modHubIsGameStartupReady = () => true;
+        const openedTabs = [];
+        manager.modHubOpenManager = tab => { openedTabs.push(tab); return true; };
+        assert.equal(manager.modHubCheckAndAutoOpenErrorLog(), true, '专项诊断不得关闭既有自动提示流程');
+        assert.deepEqual(openedTabs, ['加载日志'], '外部查询报错仍须自动打开加载日志');
+
+        const mixed = manager.modHubAnalyzeLogs([
+            ...rawLogs,
+            '[错误] cannot find mod RequiredFramework',
+            '[错误] TypeError: Cannot read properties of undefined',
+            '[错误] [TweeReplacer] do_patch() cannot find findString: [剧情模组] findString: [待替换] in: [Example]'
+        ]);
+        assert.equal(mixed.errorCount, 4, '查询未命中不得掩盖同时出现的其他错误');
+        for (const id of ['mod-name-lookup-miss', 'missing-dep', 'type-error', 'twee-patch-mismatch']) {
+            assert.ok(mixed.matchedIssues.some(issue => issue.id === id), `混合日志必须保留 ${id} 诊断`);
+        }
+
+        const unmatched = manager.modHubAnalyzeLogs([
+            '[控制台报错] Error: 未分类启动失败',
+            '[控制台报错] 其他组件 cannot find name/alias. Unknown Mod'
+        ]);
+        assert.equal(unmatched.errorCount, 2, '未分类错误仍须保留错误计数');
+        assert.equal(unmatched.matchedIssues.length, 0, '相似关键词不得误套特定查询来源的诊断');
+        manager.modHubRenderLogDiagnosis(unmatched);
+        assert.ok(diagnosis.innerHTML.includes('未分类的错误日志'), '未命中知识库时必须显示中性回退');
+        assert.ok(diagnosis.innerHTML.includes('需要结合原始日志和调用上下文确认'), '通用回退必须保留影响不确定性');
+        assert.ok(!diagnosis.innerHTML.includes('抛出了未捕获的错误') && !diagnosis.innerHTML.includes('最近安装的第三方模组'), '通用回退不得臆断异常类型或来源');
+    }
+
     // 模组附加档案里的函数、依赖和补丁字段不得制造控制台启动报错。
     {
         const forwarded = [];
@@ -161,6 +213,208 @@ module.exports = async function() {
         delete noStackError.stack;
         events.get('unhandledrejection')({ reason: noStackError });
         assert.equal(manager._modHubStartupErrors[4], '[异步异常] ReferenceError: 异步变量未定义', '无堆栈异步异常仍必须保留类型和消息');
+    }
+
+    // 已有异常中的资源事件保留不可枚举的目标路径，不新增浏览器资源错误捕获。
+    {
+        const events = new Map();
+        const forwarded = [];
+        let prevented = 0;
+        let stopped = 0;
+        const manager = loadManager({
+            console: { error(...args) { forwarded.push({ context: this, args }); return '资源日志已转发'; } },
+            addEventListener: (name, handler, options) => events.set(name, { handler, options }),
+        });
+        const makeEvent = target => Object.defineProperties(typeof Event === 'function' ? new Event('error') : {}, {
+            type: { value: 'error', configurable: true },
+            target: { value: target, configurable: true },
+            currentTarget: { value: null, configurable: true },
+            preventDefault: { value: () => { prevented++; } },
+            stopPropagation: { value: () => { stopped++; } },
+        });
+        const imgEvent = makeEvent({ tagName: 'IMG', currentSrc: 'img/misc/sky/clouds/cirrus/0.png', src: 'img/misc/sky/clouds/overcast/0.png' });
+        assert.equal(Object.getOwnPropertyDescriptor(imgEvent, 'target').enumerable, false, '资源事件目标必须不可枚举');
+        assert.ok(!JSON.stringify(imgEvent).includes('img/misc/sky/clouds/cirrus/0.png'), '普通 JSON 序列化不能读取资源事件目标路径');
+        if (typeof Event === 'function') assert.ok(imgEvent instanceof Event, 'Node 支持 Event 时必须使用外部上下文的原生 Event 验证');
+        const errorListener = events.get('error');
+        assert.ok(errorListener.options === undefined || errorListener.options === false, '脚本错误监听不得扩展到资源错误捕获阶段');
+        const resourceEvents = [
+            [imgEvent, 'IMG error img/misc/sky/clouds/cirrus/0.png'],
+            [makeEvent({ tagName: 'SCRIPT', src: 'javascript/weather.js' }), 'SCRIPT error javascript/weather.js'],
+            [makeEvent({ tagName: 'LINK', href: 'stylesheet/weather.css' }), 'LINK error stylesheet/weather.css'],
+        ];
+        for (const [event] of resourceEvents) {
+            assert.doesNotThrow(() => errorListener.handler(event), '无 message 的资源事件不得影响原脚本错误监听');
+        }
+        assert.equal(manager._modHubStartupErrors.length, 0, '无 message 的 IMG、SCRIPT、LINK 资源事件不得升级为启动异常');
+        assert.equal(Boolean(manager._modHubHasDetectedStartupError), false, '资源错误不得单独设置启动异常标志');
+        assert.equal(Boolean(manager._modHubPendingAutoOpenErrorLog), false, '资源错误不得单独触发启动日志弹窗');
+        imgEvent.circular = imgEvent;
+        const originalError = vm.runInContext("new TypeError('天气渲染异常')", manager, { filename: 'weather-renderer.js' });
+        const originalContext = {};
+        assert.equal(manager.console.error.call(originalContext, originalError, imgEvent), '资源日志已转发', '循环资源事件不得影响原 console.error 返回值');
+        assert.ok(manager._modHubStartupErrors[0].includes(originalError.stack), '资源事件附加参数不得改写异常堆栈');
+        assert.ok(manager._modHubStartupErrors[0].includes('资源加载失败: IMG error img/misc/sky/clouds/cirrus/0.png'), '不可枚举的资源事件必须保留 currentSrc 路径');
+        assert.ok(!manager._modHubStartupErrors[0].includes('img/misc/sky/clouds/overcast/0.png'), 'IMG 已有 currentSrc 时不得改用 src');
+        assert.equal(forwarded[0].context, originalContext, '资源摘要不得改变原 console.error 的 this');
+        assert.equal(forwarded[0].args[0], originalError, '原控制台必须收到同一异常对象');
+        assert.equal(forwarded[0].args[1], imgEvent, '原控制台必须收到同一循环事件对象');
+
+        for (const [event, expected] of resourceEvents) {
+            assert.doesNotThrow(() => events.get('unhandledrejection').handler({ reason: event }), 'Promise 拒绝中的资源事件必须安全格式化');
+            assert.equal(manager._modHubStartupErrors.at(-1), `[异步异常] 资源加载失败: ${expected}`, '必须区分 IMG、SCRIPT、LINK 并保留真实资源路径');
+        }
+        const resourceAnalysis = manager.modHubAnalyzeLogs(manager.modHubGetRawModLoaderLogs());
+        assert.ok(resourceAnalysis.errorFiles.includes('img/misc/sky/clouds/cirrus/0.png'), '合并日志分析必须保留资源事件路径');
+        assert.ok(resourceAnalysis.errorFiles.includes('javascript/weather.js'), '脚本资源路径必须可供诊断检索');
+        assert.ok(resourceAnalysis.errorFiles.includes('stylesheet/weather.css'), '样式资源路径必须可供诊断检索');
+
+        const fallbackImage = { tagName: 'IMG', src: 'img/misc/sky/clouds/overcast/0.png' };
+        Object.defineProperty(fallbackImage, 'currentSrc', { get() { throw new Error('资源 getter 已失效'); } });
+        const fallbackEvent = makeEvent(null);
+        Object.defineProperties(fallbackEvent, {
+            target: { get() { throw new Error('target getter 已失效'); } },
+            currentTarget: { value: fallbackImage },
+            message: { get() { throw new Error('message getter 已失效'); } },
+        });
+        assert.doesNotThrow(() => events.get('unhandledrejection').handler({ reason: fallbackEvent }), '失效的事件和图像 getter 不得使异常格式化失败');
+        assert.equal(manager._modHubStartupErrors.at(-1), '[异步异常] 资源加载失败: IMG error img/misc/sky/clouds/overcast/0.png', '失效的 target 和 currentSrc 必须回退至 currentTarget.src');
+        assert.doesNotThrow(() => manager.console.error.call(originalContext, fallbackEvent), '失效 getter 不得阻断原控制台');
+        assert.equal(forwarded[1].context, originalContext, 'getter 异常时仍须保留原控制台调用上下文');
+        assert.equal(forwarded[1].args[0], fallbackEvent, 'getter 异常时仍须原样且仅一次转发事件');
+
+        const ordinaryEvent = makeEvent({ tagName: 'DIV', src: 'img/irrelevant.png' });
+        const beforeOrdinary = manager._modHubStartupErrors.length;
+        errorListener.handler(ordinaryEvent);
+        manager.console.error(ordinaryEvent);
+        assert.equal(manager._modHubStartupErrors.length, beforeOrdinary, '普通非资源 Event 不得制造全局资源或控制台异常');
+        events.get('unhandledrejection').handler({ reason: ordinaryEvent });
+        assert.equal(manager._modHubStartupErrors.at(-1), '[异步异常] Event: error', 'Promise 拒绝中的普通 Event 必须保留事件类型');
+        const eventAnalysis = manager.modHubAnalyzeLogs([manager._modHubStartupErrors.at(-1)]);
+        assert.equal(eventAnalysis.errorCount, 1, '不含 Error 字样的异步事件也必须按异常前缀计为错误');
+        assert.equal(eventAnalysis.errorFiles.length, 0, '普通 Event 不得伪造资源路径');
+        assert.equal(eventAnalysis.matchedIssues.length, 0, '普通 Event 不得被归因于天气或美化缺图');
+
+        const inlineEvent = makeEvent({ tagName: 'IMG', src: `data:image/png;base64,${'A'.repeat(100000)}` });
+        events.get('unhandledrejection').handler({ reason: inlineEvent });
+        assert.equal(manager._modHubStartupErrors.at(-1), '[异步异常] 资源加载失败: IMG error data:image/png（内联资源）', '巨大 data URI 必须只保留资源类型，不能复制完整 base64');
+        events.get('unhandledrejection').handler({ reason: makeEvent({ tagName: 'IMG', src: `data:${'A'.repeat(100000)};base64,AAAA` }) });
+        assert.equal(manager._modHubStartupErrors.at(-1), '[异步异常] 资源加载失败: IMG error data:（内联资源）', '畸形超长媒体类型也不得扩大内联资源摘要');
+        const blobEvent = makeEvent({ tagName: 'IMG', src: 'blob:https://game.example/private-resource-token' });
+        events.get('unhandledrejection').handler({ reason: blobEvent });
+        assert.equal(manager._modHubStartupErrors.at(-1), '[异步异常] 资源加载失败: IMG error blob:（临时资源）', 'blob URI 不得带出临时资源标识');
+        for (const source of ['https://game.example/img/misc/sky/clouds/cirrus/0.png', 'file:///game/img/misc/sky/clouds/cirrus/0.png']) {
+            events.get('unhandledrejection').handler({ reason: makeEvent({ tagName: 'IMG', src: source }) });
+            assert.equal(manager._modHubStartupErrors.at(-1), `[异步异常] 资源加载失败: IMG error ${source}`, 'HTTP 与本地文件资源必须保留可定位的完整路径');
+        }
+
+        const invalidEvent = makeEvent(null);
+        Object.defineProperties(invalidEvent, {
+            type: { get() { throw new Error('type getter 已失效'); } },
+            target: { get() { throw new Error('target getter 已失效'); } },
+            currentTarget: { get() { throw new Error('currentTarget getter 已失效'); } },
+            message: { get() { throw new Error('message getter 已失效'); } },
+        });
+        const beforeInvalid = manager._modHubStartupErrors.length;
+        assert.doesNotThrow(() => errorListener.handler(invalidEvent), '全部事件字段失效时监听器仍不得抛错');
+        assert.equal(manager._modHubStartupErrors.length, beforeInvalid, '无法识别的事件不得伪造资源异常');
+        assert.equal(manager.console.error.call(originalContext, invalidEvent), '资源日志已转发', '无法读取的事件仍须返回原控制台结果');
+        assert.equal(forwarded.length, 4, '资源、普通与失效事件均只能原样转发一次');
+        assert.equal(forwarded[3].args[0], invalidEvent, '全部 getter 失效时仍必须保留事件对象引用');
+        assert.equal(prevented, 0, '诊断监听器不得调用 preventDefault 改变浏览器错误处理');
+        assert.equal(stopped, 0, '诊断监听器不得阻止事件传播');
+    }
+
+    // 天气连锁错误只合并诊断卡片，保留每条错误；其他模块与美化错误仍独立诊断。
+    {
+        const manager = loadManager({ console: { error() {}, warn() {}, log() {} } });
+        const effects = ['bannerCirrusClouds', 'bannerOvercastClouds', 'rainbow', 'bannerClouds', 'location', 'bannerPrecipitation'];
+        const weatherRows = effects.map((effect, index) => ({
+            level: 'error',
+            message: `Error during effect '${effect}': Error: randomInt called with invalid parameters: ${index % 2 ? 'undefined, NaN' : 'NaN, NaN'}`,
+        }));
+        weatherRows[0].message = `Error during effect ' bannerCirrusClouds ' init function. Error: Error: randomInt called with invalid parameters, {"0":["(revive:eval)","NaN"],"1":["(revive:eval)","NaN"]} at Weather.Renderer.Sky.setupCanvas`;
+        weatherRows[1].message = `Error during effect ' bannerOvercastClouds ' init function. Error: Error: randomInt called with invalid parameters, {"0":["(revive:eval)","0"],"1":["(revive:eval)","undefined"]} at Weather.Renderer.Sky.setupCanvas`;
+        weatherRows.push(
+            { level: 'error', message: 'Weather.Renderer.Sky Error: randomInt called with invalid parameters: 0, undefined' },
+            { level: 'error', message: "Weather.Renderer.Sky TypeError: Failed to execute 'drawImage' on 'CanvasRenderingContext2D': The provided value is not of type HTMLImageElement at img/misc/sky/clouds/overcast/0.png" },
+        );
+        const weather = manager.modHubAnalyzeLogs(weatherRows);
+        assert.equal(weather.errorCount, weatherRows.length, '多种天气 effect、参数范围和 drawImage 错误必须全部计数');
+        assert.equal(weather.lines.length, weatherRows.length, '合并诊断不得删除或压缩原始错误行');
+        assert.deepEqual(Array.from(weather.lines, line => line.message), weatherRows.map(row => row.message), '每条天气错误的 effect、参数与图像路径必须原样保留');
+        assert.deepEqual(Array.from(weather.matchedIssues, issue => issue.id), ['weather-image-error'], '同一组天气错误只显示一条具体诊断，不附通用 TypeError 或美化缺图卡片');
+        assert.ok(weather.errorFiles.includes('img/misc/sky/clouds/overcast/0.png'), '天气专用分类不能隐藏原始图像路径');
+        assert.ok(weather.matchedIssues[0].desc.includes('可能'), '天气诊断必须保留图片加载原因尚待核实的边界');
+
+        const independentRows = [
+            { level: 'error', message: "TypeError: Cannot read properties of undefined (reading 'isTrusted') at tw-user-script-0.js:12" },
+            { level: 'error', message: 'NPCPetSlot.mount failed to load resource img/hands/left.png 404' },
+        ];
+        const mixed = manager.modHubAnalyzeLogs([...weatherRows, ...independentRows]);
+        assert.equal(mixed.errorCount, weatherRows.length + independentRows.length, '独立脚本和美化错误必须继续计数');
+        assert.deepEqual(Array.from(mixed.matchedIssues, issue => issue.id).sort(), ['asset-missing', 'type-error', 'weather-image-error'], '天气分类不得遮蔽独立的 TypeError 和美化资源缺失');
+        assert.ok(mixed.errorFiles.includes('img/hands/left.png'), '独立美化资源错误仍必须保留路径');
+
+        const unrelatedRows = [
+            { level: 'error', message: 'Inventory Error: randomInt called with invalid parameters: NaN, undefined' },
+            { level: 'error', message: "Avatar TypeError: drawImage: The provided value is not of type HTMLImageElement at img/avatar.png" },
+            { level: 'error', message: "Error during effect 'bannerCloudsExtra': Error: randomInt called with invalid parameters: NaN, NaN" },
+            { level: 'error', message: 'Weather.Renderer.Sky Error: randomInt called with invalid parameters: 0, 0' },
+            { level: 'error', message: 'Weather.Renderer.Sky Error: drawImage canvas is unavailable' },
+            { level: 'error', message: "Error during effect 'rainbow': Error: undefined state" },
+        ];
+        const unrelated = manager.modHubAnalyzeLogs(unrelatedRows);
+        assert.equal(unrelated.errorCount, unrelatedRows.length, '未匹配天气诊断的异常仍全部保留');
+        assert.ok(!unrelated.matchedIssues.some(issue => issue.id === 'weather-image-error'), '其他模块的 NaN、drawImage 及不完整天气线索不得误判为天气缺图');
+        assert.ok(unrelated.matchedIssues.some(issue => issue.id === 'type-error'), '其他模块的 drawImage TypeError 仍须使用通用诊断');
+        assert.ok(unrelated.matchedIssues.some(issue => issue.id === 'asset-missing'), '其他模块的图像路径仍须参与资源诊断');
+    }
+
+    // 诊断模块只读取资源信息，不改写游戏图像构造器、画布方法或随机数状态。
+    {
+        function TestImage() {}
+        function TestHTMLImageElement() {}
+        function TestHTMLCanvasElement() {}
+        function TestCanvasRenderingContext2D() {}
+        const drawImage = function() { return '原画布方法'; };
+        TestCanvasRenderingContext2D.prototype.drawImage = drawImage;
+        const randomInt = () => 7;
+        const random = () => 0.25;
+        const math = Object.create(Math);
+        math.random = random;
+        const prng = { seed: '诊断测试', pull: 12, random };
+        const state = { prng };
+        const sugarCube = { State: state };
+        const sandbox = createBaseSandbox({
+            console: { error() {}, warn() {}, log() {} },
+            Image: TestImage,
+            HTMLImageElement: TestHTMLImageElement,
+            HTMLCanvasElement: TestHTMLCanvasElement,
+            CanvasRenderingContext2D: TestCanvasRenderingContext2D,
+            Math: math,
+            randomInt,
+            State: state,
+            SugarCube: sugarCube,
+        });
+        const defineProperty = vm.runInContext('Object.defineProperty', sandbox);
+        const imagePrototype = Object.getOwnPropertyDescriptors(TestImage.prototype);
+        const canvasPrototype = Object.getOwnPropertyDescriptors(TestCanvasRenderingContext2D.prototype);
+        loadScripts(sandbox, bootJson.scriptFileList.filter(file => file !== 'javascript/modhub-market.js'));
+        assert.equal(sandbox.Image, TestImage, '诊断模块不得代理或替换 Image');
+        assert.equal(sandbox.HTMLImageElement, TestHTMLImageElement, '诊断模块不得替换 HTMLImageElement');
+        assert.equal(sandbox.HTMLCanvasElement, TestHTMLCanvasElement, '诊断模块不得替换 HTMLCanvasElement');
+        assert.equal(sandbox.CanvasRenderingContext2D, TestCanvasRenderingContext2D, '诊断模块不得替换画布上下文构造器');
+        assert.deepEqual(Object.getOwnPropertyDescriptors(TestImage.prototype), imagePrototype, '诊断模块不得修改 Image 原型');
+        assert.deepEqual(Object.getOwnPropertyDescriptors(TestCanvasRenderingContext2D.prototype), canvasPrototype, '诊断模块不得修改 drawImage 或画布原型');
+        assert.equal(vm.runInContext('Object.defineProperty', sandbox), defineProperty, '诊断模块不得改写 Object.defineProperty');
+        assert.equal(sandbox.Math, math, '诊断模块不得替换 Math');
+        assert.equal(sandbox.Math.random, random, '诊断模块不得拦截 Math.random');
+        assert.equal(sandbox.randomInt, randomInt, '诊断模块不得替换游戏 randomInt');
+        assert.equal(sandbox.State, state, '诊断模块不得替换 SugarCube 状态');
+        assert.equal(sandbox.SugarCube, sugarCube, '诊断模块不得替换 SugarCube');
+        assert.equal(sandbox.SugarCube.State.prng, prng, '诊断模块不得替换 PRNG 状态');
+        assert.deepEqual(prng, { seed: '诊断测试', pull: 12, random }, '诊断模块不得消耗或改写 PRNG 种子与计数');
     }
 
     // 13.5 截图明确显示筛选后总数与省略数，保留前一百行截取策略
@@ -347,7 +601,7 @@ module.exports = async function() {
         const conflictHtml = market.formatConflictWarningHtml(conflicts);
         assert.ok(conflictHtml.includes('modhub-install-conflict-card'), '必须包含冲突警告卡片容器');
         assert.ok(conflictHtml.includes('兼容性警告'), '必须包含兼容性警告标签');
-        assert.ok(conflictHtml.includes('本地冲突已启用·高风险'), '启用冲突必须包含高风险警示');
+        assert.ok(conflictHtml.includes('本地冲突已启用·兼容性未确认'), '启用冲突必须包含高风险警示');
         assert.ok(conflictHtml.includes('秋枫白桦框架'), '必须包含秋枫白桦框架名称');
         assert.ok(conflictHtml.includes('简易框架'), '必须包含简易框架名称');
 
@@ -365,7 +619,7 @@ module.exports = async function() {
         assert.ok(disabledHtml.includes('本地已安装·当前禁用'), '未启用模组必须显示当前禁用标签');
         assert.ok(disabledHtml.includes('is-resolved'), '冲突已全部排除时卡片容器必须携带 is-resolved 类名');
         assert.ok(disabledHtml.includes('检查通过'), '冲突已全部排除时卡片徽章必须显示【检查通过】');
-        assert.ok(disabledHtml.includes('冲突已排除 · 兼容性检查通过'), '冲突已全部排除时卡片标题必须切换为检查通过文本');
+        assert.ok(disabledHtml.includes('框架同时加载风险已排除'), '冲突已全部排除时卡片标题必须切换为检查通过文本');
         assert.ok(!disabledHtml.includes('modhub-conflict-disable-btn'), '已禁用模组无需再渲染快捷禁用按钮');
 
         // 14.4 场景 4：目标模组自身直接为冲突模组（如本地有秋枫，直接安装简易框架）
@@ -388,6 +642,73 @@ module.exports = async function() {
         assert.equal(market.isModMatchingConflictGroup({ githubUrl: 'https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchframework' }, mapleGroup), true, '仅给出完整秋枫框架仓库时仍须匹配权威身份');
         assert.equal(market.isModMatchingConflictGroup({ githubUrl: 'https://github.com/emicoto/SCMLSimpleFramework' }, simpleGroup), true, '仅给出完整简易框架仓库时仍须匹配权威身份');
         assert.equal(market.isModMatchingConflictGroup({ githubUrl: longerCombat.githubUrl }, mapleGroup), false, '仓库回退必须匹配完整身份，不能只匹配作者名');
+        const catalog = JSON.parse(fs.readFileSync(path.join(srcRoot, '..', 'mod-identities.json'), 'utf8'));
+        market.applyIdentityCatalog(catalog);
+        for (const identity of catalog.mods) {
+            const mod = { ...identity, identityId: identity.id, bootJson: identity.bootNames.length
+                ? { name: identity.bootNames[0], nickName: '简易框架' } : undefined };
+            assert.equal(market.isModMatchingConflictGroup(mod, mapleGroup), identity.id === 'maplebirch',
+                `目录身份 ${identity.id} 不能因 ID、昵称或别名子串被归入秋枫框架`);
+            assert.equal(market.isModMatchingConflictGroup(mod, simpleGroup), identity.id === 'simple-framework',
+                `目录身份 ${identity.id} 不能因昵称或别名被归入简易框架`);
+        }
+        assert.equal(market.isModMatchingConflictGroup({ id: 'unknown-maplebirch-helper', name: '普通框架辅助包' }, mapleGroup),
+            false, '未知条目的 ID 含框架名称也不能认定其为框架本体');
+        assert.equal(market.isModMatchingConflictGroup({ name: 'UnknownProvider',
+            bootJson: { name: 'UnknownProvider', nickName: '简易框架' }, displayNames: ['简易框架'], normalizedNames: ['simpleframework'] }, simpleGroup),
+            false, '真实未知技术名不能凭本地昵称和展示别名充当已知框架本体');
+
+        // 选版预检后按真实主包、附属包和本地前置识别框架，不能只看市场展示名。
+        const unnamedFramework = { id: 'framework-package', name: '作者安装包' };
+        const preparedAction = { type: 'install', role: '目标模组', mod: unnamedFramework,
+            prepared: { boots: [{ name: 'Simple Frameworks', version: '2.0.5' }] } };
+        const actualBootConflicts = market.detectModInstallationConflicts(unnamedFramework, [preparedAction], localProfiles, new Set());
+        assert.equal(actualBootConflicts.length, 1, '目标先登记目录身份后仍必须补真实 boot 的框架身份');
+        assert.equal(actualBootConflicts[0].incomingMod.role, '目标模组');
+        assert.equal(actualBootConflicts[0].localConflictMod.rawName, 'maplebirch');
+        const companionAction = { type: 'install', mod: longerCombat,
+            prepared: { boots: [{ name: 'LongerCombat' }, { name: 'Simple Frameworks' }] } };
+        const companionConflicts = market.detectModInstallationConflicts(null, [companionAction], localProfiles, new Set());
+        assert.equal(companionConflicts.length, 1, '实际附属包为框架时必须提示其与已安装框架的互斥');
+        assert.equal(companionConflicts[0].incomingMod.role, '附属包');
+        assert.equal(market.detectModInstallationConflicts(null, [{ type: 'enable', mod: unnamedFramework,
+            local: { name: 'Simple Frameworks', bootJson: { name: 'Simple Frameworks' } } }], localProfiles, new Set()).length,
+            1, '待启用前置的本地真实 boot 必须参与框架互斥检测');
+        assert.equal(market.detectModInstallationConflicts(null, [preparedAction], localProfiles, new Set(['maplebirch']))[0].localConflictMod.isEnabled,
+            false, '真实 boot 路径仍必须区分本地已启用与已禁用框架');
+        assert.equal(market.detectModInstallationConflicts(null, [{ type: 'install', mod: longerCombat,
+            prepared: { boots: [{ name: 'LongerCombat' }] } }], [], new Set()).length,
+            0, '普通同作者模组的真实 boot 不能造成框架误报');
+        const replacementActions = [preparedAction, { type: 'update', mod: { id: 'other-package', name: '另一安装包' },
+            prepared: { boots: [{ name: 'maplebirch' }] } }];
+        const replacementConflicts = market.detectModInstallationConflicts(null, replacementActions,
+            [...localProfiles, { name: 'Simple Frameworks', bootJson: { name: 'Simple Frameworks' } }], new Set());
+        assert.equal(replacementConflicts.length, 1, '同技术名重装应按新安装集合检查，不能重复当作旧本地框架');
+        assert.equal(replacementConflicts[0].localConflictMod.isIncoming, true, '两项重装互斥必须标为安装项内部冲突');
+        assert.ok(!market.formatConflictWarningHtml(replacementConflicts).includes('modhub-conflict-disable-btn'),
+            '将被替换的旧包不能展示快捷禁用来误示新包冲突已消除');
+
+        // 兼容确认使用持久状态回读；弹窗期间新增的已启用框架必须再次展示。
+        const live = loadMarket();
+        const names = ['maplebirch'];
+        live._modHubModState = { sideMods: [{ name: 'maplebirch', enabled: false }], sideDisabled: ['maplebirch'] };
+        live.modHubGetModInfo = name => ({ bootJson: { name } });
+        let stateReads = 0, confirmations = 0;
+        live.modHubLoadModManageState = async () => {
+            stateReads++;
+            live._modHubModState = { sideMods: names.map(name => ({ name, enabled: true })), sideDisabled: [] };
+        };
+        live.modHubConfirm = async options => {
+            confirmations++;
+            assert.ok(options.trustedMessageHtml.includes('本地冲突已启用·兼容性未确认'), '确认前必须按回读状态展示启用冲突');
+            assert.ok(!options.trustedMessageHtml.includes('modhub-conflict-disable-btn'), '只读计划确认不得提前修改启禁状态');
+            if (confirmations === 1) { names.push('scml-dol-maplebirchframework'); return true; }
+            return false;
+        };
+        assert.equal(await live.modHubMarket.confirmInstallConflicts(() => ({ targetMod: null, actions: [preparedAction] }), { allowDisable: false }),
+            false, '新增本地活跃框架风险后的取消必须终止安装');
+        assert.equal(confirmations, 2, '确认期间新增本地框架不得沿用原风险确认');
+        assert.ok(stateReads >= 3, '首次确认及确认后均须回读真实启禁状态');
 
         // 14.5 场景 5：纯英文技术名模组（无中文 nickName）必须能自动映射为中文友好名称，且建议文本去除重复的“建议”
         const englishOnlyProfiles = [
@@ -408,6 +729,9 @@ module.exports = async function() {
         assert.ok(enHtml.includes('modhub-conflict-disable-btn'), '启用的冲突模组卡片中必须包含快捷禁用按钮');
         assert.ok(enHtml.includes('data-conflict-raw="maplebirch"'), '快捷禁用按钮必须携带底层原始名称');
         assert.ok(enHtml.includes('快捷禁用【秋枫白桦框架】'), '快捷禁用按钮必须呈现中文友好名称');
+        const readOnlyHtml = market.formatConflictWarningHtml(enConflicts, { allowDisable: false });
+        assert.ok(readOnlyHtml.includes('兼容性警告'), '选版准备流程仍须展示冲突风险');
+        assert.ok(!readOnlyHtml.includes('modhub-conflict-disable-btn'), '选版确认期间不提供会提前写入状态的快捷禁用');
 
         // 14.7 场景 7：findDependentModsForConflict 依赖影响深度评估
         const depTestProfiles = [
@@ -777,21 +1101,14 @@ module.exports = async function() {
             { name: 'SomeOtherMod', enabled: true }
         ];
         const sfConflict = manager.modHubCheckEnableConflicts('Simple Frameworks', activeMaplebirch);
-        assert.ok(sfConflict, '当已启用 maplebirch 时，启用 Simple Frameworks 必须检出互斥冲突');
-        assert.equal(sfConflict.targetDisplayName, '简易框架', '待启用模组展示名称必须锁定为【简易框架】，绝不能被 maplebirch 别名污染为秋枫白桦！');
-        assert.equal(sfConflict.conflictDisplayName, '秋枫白桦框架', '已启用冲突模组展示名称必须为【秋枫白桦框架】');
-        assert.notEqual(sfConflict.targetDisplayName, sfConflict.conflictDisplayName, '待启用与已冲突模组展示名称绝不能相同！');
-        assert.equal(sfConflict.targetRawName, 'Simple Frameworks', '待启用原始名称必须为 Simple Frameworks');
-        assert.equal(sfConflict.conflictRawName, 'maplebirch', '已冲突原始名称必须为 maplebirch');
+        assert.equal(sfConflict, null, '同一秋枫包仅通过原生别名提供 Simple Frameworks 时不能把它当两个框架冲突');
 
         // 场景 B：当前已启用 Simple Frameworks，准备启用 maplebirch
         const activeSimple = [
             { name: 'Simple Frameworks', enabled: true }
         ];
         const mbConflict = manager.modHubCheckEnableConflicts('maplebirch', activeSimple);
-        assert.ok(mbConflict, '当已启用 Simple Frameworks 时，启用 maplebirch 必须检出互斥冲突');
-        assert.equal(mbConflict.targetDisplayName, '秋枫白桦框架', '待启用模组必须为秋枫白桦框架');
-        assert.equal(mbConflict.conflictDisplayName, '简易框架', '冲突模组必须为简易框架');
+        assert.equal(mbConflict, null, '原生别名返回同一实际包时，反向检查也不能制造独立简易框架');
 
         // 场景 C：同组内不产生虚假互斥冲突（同为简易框架组）
         const activeSameGroup = [
@@ -799,6 +1116,16 @@ module.exports = async function() {
         ];
         const sameGroupConflict = manager.modHubCheckEnableConflicts('Simple Frameworks', activeSameGroup);
         assert.equal(sameGroupConflict, null, '同属于简易框架组的模组绝不能自身跟自身产生互斥冲突');
+
+        conflictModInfoMap.set('simple frameworks', { name: 'Simple Frameworks',
+            bootJson: { name: 'Simple Frameworks', version: '2.0.5' } });
+        const doubleProvider = manager.modHubCheckEnableConflicts('Simple Frameworks', activeMaplebirch);
+        assert.equal(doubleProvider.kind, 'alias-provider-overlap', '两个实际包同时提供 Simple Frameworks 应提示别名重复，而非功能互斥');
+        assert.equal(doubleProvider.targetDisplayName, '简易框架');
+        assert.equal(doubleProvider.conflictDisplayName, '秋枫白桦框架');
+        assert.ok(!doubleProvider.reason.includes('挂钩机制') && !doubleProvider.reason.includes('存档损坏'));
+        assert.equal(manager.modHubCheckEnableConflicts('Simple Frameworks', [{ name: 'maplebirch', enabled: false }]), null,
+            '禁用秋枫不参与两个提供者同时启用风险');
 
         // 恢复 getModInfo
         manager.modHubGetModInfo = oldGetModInfo;
@@ -823,4 +1150,50 @@ module.exports = async function() {
         assert.equal(hubClassified3.category, '界面与便利', '包含 mod-hub 的仓库模组必须归入【界面与便利】分类');
     }
 
+    // 真实秋枫 5.1.3 提供原生简易框架别名：兼容代供与重复提供者分别检查。
+    {
+        const env = loadMarket();
+        const market = env.modHubMarket;
+        const maple = { name: 'maplebirch', bootJson: { name: 'maplebirch', version: '5.1.3', alias: ['Simple Frameworks'] } };
+        const simple = { name: 'Simple Frameworks', bootJson: { name: 'Simple Frameworks', version: '2.0.5' } };
+        const target = { id: 'eden-visuals', name: '伊甸互动头像' };
+        assert.equal(market.detectModInstallationConflicts(target, [{ type: 'satisfied', mod: { id: 'maplebirch', name: '秋枫白桦框架' }, local: maple }], [maple], new Set()).length,
+            0, '仅原生别名代供不构成框架冲突');
+        const actions = [{ type: 'install', mod: { id: 'simple-framework', name: '简易框架' }, prepared: { boots: [simple.bootJson] } }];
+        const duplicates = market.detectModInstallationConflicts(target, actions, [maple], new Set());
+        assert.equal(duplicates.length, 1, '两个独立 canonical 包将同时启用时需要一个重复别名风险');
+        assert.equal(duplicates[0].kind, 'alias-provider-overlap');
+        const html = market.formatConflictWarningHtml(duplicates);
+        assert.ok(html.includes('重复提供 Simple Frameworks'));
+        assert.ok(!html.includes('互斥') && !html.includes('存档损坏'), '别名声明不能被展示成功能互斥');
+        assert.equal(market.detectModInstallationConflicts(target, actions, [maple], new Set(['maplebirch'])).length,
+            0, '禁用的实际包不造成两个别名提供者同时启用');
+        const both = [{ type: 'install', mod: { id: 'maplebirch', name: '秋枫白桦框架' }, prepared: { boots: [maple.bootJson] } }, ...actions];
+        assert.equal(market.detectModInstallationConflicts(null, both, [maple, simple], new Set())[0].kind,
+            'alias-provider-overlap', '同批安装的两个实际框架也提示原生别名重复提供');
+        const preview = { type: 'install', mod: { id: 'maplebirch', name: '秋枫白桦框架', version: '5.1.3',
+            githubUrl: 'https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchframework' }, release: { version: '5.1.3', tag: 'maplebirch-release-v5.1.3' } };
+        assert.equal(market.detectModInstallationConflicts(null, [preview], [simple], new Set())[0].kind,
+            'alias-provider-overlap', '精确已核验发布允许提供者预览');
+        const history = { ...preview, release: { version: '1.0.0', tag: '1.0.0' } };
+        assert.equal(market.detectModInstallationConflicts(null, [history], [simple], new Set())[0].kind,
+            'unverified-framework-pair', '历史版本不能继承目录最新版的别名证据');
+        const realMissingAlias = { ...preview, prepared: { boots: [{ name: 'maplebirch', version: '5.1.3', alias: [] }] } };
+        assert.equal(market.detectModInstallationConflicts(null, [realMissingAlias], [simple], new Set())[0].kind,
+            'unverified-framework-pair', '实际包体优先于发布预览；缺少原生别名不得猜测兼容');
+        env.modHubGetModInfo = name => name === 'maplebirch' ? maple : simple;
+        env._modHubModState = { sideMods: [{ name: 'maplebirch', enabled: true }, { name: 'Simple Frameworks', enabled: false }],
+            sideDisabled: ['Simple Frameworks'] };
+        let enableConfirmations = 0;
+        env.modHubConfirm = async options => {
+            enableConfirmations++;
+            assert.ok(options.trustedMessageHtml.includes('重复提供这一技术名'));
+            assert.ok(!options.trustedMessageHtml.includes('挂钩逻辑互斥') && !options.trustedMessageHtml.includes('存档损坏'));
+            return false;
+        };
+        assert.equal(await env.modHubToggleSideMod('Simple Frameworks', true), false,
+            '管理启用调用同一真实别名提供者检查；取消不得启用第二个框架');
+        assert.equal(enableConfirmations, 1);
+        assert.equal(env._modHubModState.sideMods[1].enabled, false);
+    }
 };

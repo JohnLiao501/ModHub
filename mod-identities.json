@@ -571,6 +571,20 @@
       "aliases": [],
       "repositories": [],
       "repositoryKeys": ["koooooiCarp/DOL-Love-Locket-Text-Expansion-Mod"],
+      "releaseCompatibility": [
+        {
+          "releaseTag": "v0.5",
+          "gameVersionRange": ">=0.5.7.0 && <0.5.8.0",
+          "evidenceUrl": "https://github.com/koooooiCarp/DOL-Love-Locket-Text-Expansion-Mod/releases/tag/v0.5",
+          "dependencies": [{"id": "maplebirch"}]
+        },
+        {
+          "releaseTag": "v0.4",
+          "gameVersionRange": ">=0.5.3.0 && <0.5.4.0",
+          "evidenceUrl": "https://github.com/koooooiCarp/DOL-Love-Locket-Text-Expansion-Mod/releases/tag/v0.4",
+          "dependencies": [{"id": "simple-framework"}]
+        }
+      ],
       "category": "剧情与角色",
       "tags": []
     },
@@ -602,6 +616,16 @@
       "repositories": [],
       "repositoryKeys": ["LooopSpiner/In-The-Eden-After-Sunset"],
       "category": "剧情与角色",
+      "tags": []
+    },
+    {
+      "id": "eden-visuals",
+      "name": "伊甸互动头像",
+      "bootNames": ["伊甸头像互动"],
+      "aliases": [],
+      "repositories": [],
+      "repositoryKeys": ["LooopSpiner/Eden-Visuals-Mod"],
+      "category": "外观与资源",
       "tags": []
     },
     {

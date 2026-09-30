@@ -6,6 +6,41 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 原生格式无需先解压成 Zip；下载字节原样交给 ModLoader，失败时不得导入。
+    for (const extension of ['modpack', 'modpack.crypt']) {
+        const sb = loadMarket();
+        const market = sb.modHubMarket;
+        const mod = { id: 'native-format', name: 'NativeFixture', bootNames: ['NativeFixture'], version: '1.0.0', githubUrl: 'https://github.com/ModHubTests/NativeFixture' };
+        const fileName = `NativeFixture-v1.0.0.${extension}`;
+        const bytes = new Uint8Array(Buffer.from('JeremieModLoader 原生字节转交测试'));
+        sb.Blob = Blob;
+        sb.modHubGetGui = () => ({});
+        sb.modHubShowToast = () => {};
+        sb.modHubAlert = async () => {};
+        let nativeBoot = { name: mod.name, version: mod.version }, checks = 0, imports = 0;
+        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async data => {
+            checks++;
+            assert.deepEqual(Array.from(data), Array.from(bytes), 'ModPack 数据不得在原生核验前被重新解码或改写');
+            return nativeBoot;
+        } });
+        sb.fetch = async () => ({ ok: true, headers: { get: () => null }, blob: async () => new Blob([bytes]) });
+        sb.modHubHandleAddMod = async input => {
+            imports++;
+            const file = input.files[0];
+            assert.equal(file.name, fileName, '导入器必须收到原始 ModPack 文件名');
+            assert.equal(file.type, 'application/octet-stream');
+            assert.deepEqual(Array.from(new Uint8Array(await file.arrayBuffer())), Array.from(bytes), '导入器必须收到完整原始字节');
+            return true;
+        };
+        const options = { batchMode: true, askRestart: false, releaseInfo: { version: mod.version,
+            assets: [{ name: fileName, size: bytes.length, downloadUrl: `${mod.githubUrl}/releases/download/v1.0.0/${fileName}` }] } };
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', options), true, '原生 ModLoader 成功读取清单后可导入');
+        assert.equal(checks, 1);
+        assert.equal(imports, 1);
+        nativeBoot = '原生校验失败';
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', options), false, '加密、损坏或不支持的包由原生核验安全拒绝');
+        assert.equal(imports, 1, '原生校验失败不能触发导入');
+    }
     /* =========================================================================
      * 17. 批量计划与队列：使用真实公开接口验证依赖、版本与执行结果
      * ========================================================================= */
@@ -231,17 +266,29 @@ module.exports = async function() {
     {
         const sb = loadMarket();
         const market = sb.modHubMarket;
+        sb.modHubLoadModManageState = async () => {};
         const maple = { id: 'maplebirch', name: '秋枫白桦框架' };
         const simple = { id: 'simple-framework', name: '简易框架' };
         const action = (mod, role = '目标模组', type = 'install') => ({ mod, role, type });
         for (const roles of [['目标模组', '目标模组'], ['目标模组', '前置依赖'], ['前置依赖', '前置依赖']]) {
             const conflicts = market.detectModInstallationConflicts(null, [action(maple, roles[0]), action(simple, roles[1])], [], new Set());
-            assert.equal(conflicts.length, 1, '目标与前置的任意批次内部互斥组合都必须检出');
-            assert.equal(conflicts[0].localConflictMod.isIncoming, true, '内部互斥不能伪装成本地项');
+            assert.equal(conflicts.length, 1, '缺少原生别名证据时，目标与前置的任意框架组合都必须提示兼容性未确认');
+            assert.equal(conflicts[0].kind, 'unverified-framework-pair', '缺少包体证据不能推断两个框架固定互斥或已兼容');
+            assert.equal(conflicts[0].localConflictMod.isIncoming, true, '安装集合内的风险不能伪装成本地项');
             const html = market.formatConflictWarningHtml(conflicts);
-            assert.ok(html.includes('安装项间互斥'), '内部冲突必须明确标记安装项间互斥');
+            assert.ok(html.includes('安装项兼容性未确认'), '缺少原生别名证据必须明确标记安装项兼容性未确认');
             assert.ok(!html.includes('modhub-conflict-disable-btn'), '批次内部项不能展示无效快捷禁用按钮');
         }
+        const aliasActions = [
+            { ...action(maple), prepared: { boots: [{ name: 'maplebirch', version: '5.1.3', alias: ['Simple Frameworks'] }] } },
+            { ...action(simple), prepared: { boots: [{ name: 'Simple Frameworks', version: '2.0.5' }] } }
+        ];
+        const aliasConflicts = market.detectModInstallationConflicts(null, aliasActions, [], new Set());
+        assert.equal(aliasConflicts.length, 1, '两个独立包重复提供同一原生技术名仍须提示风险');
+        assert.equal(aliasConflicts[0].kind, 'alias-provider-overlap');
+        const aliasHtml = market.formatConflictWarningHtml(aliasConflicts);
+        assert.ok(aliasHtml.includes('安装项重复提供别名') && !aliasHtml.includes('安装项兼容性未确认'), '真实原生声明须展示重复别名提供者，不能仍作为未知兼容');
+        assert.ok(!aliasHtml.includes('modhub-conflict-disable-btn'), '重复别名的安装项同样不能展示本地快捷禁用按钮');
         const local = { name: 'maplebirch', version: '1.0.0', displayNames: ['maplebirch', '秋枫白桦框架'] };
         const enableAction = { ...action(maple, '前置依赖', 'enable'), local };
         const reenabled = market.detectModInstallationConflicts(null, [action(simple), enableAction], [local], new Set(['maplebirch']));
@@ -252,19 +299,26 @@ module.exports = async function() {
         assert.equal(unchecked[0].localConflictMod.isEnabled, false, '取消重新启用后才能识别为当前禁用');
         assert.ok(market.formatConflictWarningHtml(unchecked).includes('检查通过'), '取消冲突前置后实时恢复安全提示');
         const deduped = market.detectModInstallationConflicts(null, [action(simple), { ...enableAction, type: 'update' }, enableAction], [], new Set());
-        assert.equal(deduped.length, 1, '同一模组的更新与启用不得重复显示互斥');
+        assert.equal(deduped.length, 1, '同一模组的更新与启用不得重复显示兼容性风险');
 
         let confirmations = 0;
         sb.modHubConfirm = async options => {
             confirmations++;
             assert.equal(options.confirmDelay, 5, '批量与单装冲突必须共用 5 秒倒计时');
             assert.equal(options.confirmText, '继续安装', '风险按钮必须明确表示继续安装');
-            assert.ok(options.trustedMessageHtml.includes('安装项间互斥'), '二次确认必须展示内部互斥明细');
+            assert.ok(options.trustedMessageHtml.includes('安装项兼容性未确认'), '二次确认必须展示尚未确认的框架组合明细');
             return false;
         };
         const activePlan = { targetMod: null, actions: [action(maple), action(simple)] };
         assert.equal(await market.confirmInstallConflicts(() => activePlan), false, '取消二次确认必须终止批量安装');
         assert.equal(confirmations, 1, '取消后不能重复弹出风险提示');
+        sb.modHubConfirm = async options => {
+            assert.equal(options.confirmDelay, 5, '重复别名提供者的风险同样必须完整确认');
+            assert.equal(options.confirmText, '继续安装');
+            assert.ok(options.trustedMessageHtml.includes('安装项重复提供别名'), '真实原生别名风险必须在二次确认中明确展示');
+            return false;
+        };
+        assert.equal(await market.confirmInstallConflicts(() => ({ targetMod: null, actions: aliasActions })), false, '取消重复别名提供者的风险确认必须停止安装');
         sb.modHubConfirm = async () => true;
         assert.equal(await market.confirmInstallConflicts(() => activePlan), true, '玩家明确确认后可继续处理冲突批次');
         sb.modHubConfirm = async () => { throw new Error('无冲突时不应弹窗'); };
@@ -281,7 +335,7 @@ module.exports = async function() {
             }
             return false;
         };
-        assert.equal(await market.confirmInstallConflicts(() => ({ targetMod: null, actions: dynamicActions })), false, '确认期间新增互斥不能沿用旧确认结果');
+        assert.equal(await market.confirmInstallConflicts(() => ({ targetMod: null, actions: dynamicActions })), false, '确认期间新增框架风险不能沿用旧确认结果');
         assert.equal(dynamicConfirmations, 2, '新增冲突必须重新展示并等待确认');
 
         let riskVisible = true;
@@ -486,7 +540,7 @@ module.exports = async function() {
         assert.ok(html.indexOf('modhub-install-conflict-card') >= 0 && html.indexOf('modhub-install-conflict-card') < html.indexOf('所选目标'), '冲突警告必须位于所选目标列表之前');
         const targetListOffset = html.indexOf('modhub-batch-target-list');
         assert.ok(html.indexOf('modhub-install-conflict-card') < html.indexOf('前置依赖') && html.indexOf('前置依赖') < targetListOffset && targetListOffset < html.indexOf('modhub-batch-summary'), '确认页必须按冲突、前置、滚动目标列表、汇总的顺序展示');
-        assert.ok(html.includes('modhub-batch-target-dependencies') && html.includes(`需要前置：${satisfied.name}（^1.0.0）`), '每项目标必须展示其直接前置名称与版本要求');
+        assert.ok(html.includes('modhub-batch-target-dependencies') && html.includes(`需要前置：${satisfied.name}（版本要求需手动确认（作者原始写法：^1.0.0））`), '缺少原生范围解析时，每项目标必须展示直接前置及需手动确认的作者原始要求');
         assert.match(html, /<div>将串行处理 <strong class="gold">\d+ 项操作<\/strong>/, '操作数量必须明确高亮');
         assert.ok(html.includes('<div>下载线路：<strong class="gold">'), '下载线路必须独立成行并高亮');
     }
@@ -657,7 +711,7 @@ module.exports = async function() {
                 getMod: name => ['maplebirch', 'Simple Frameworks'].includes(name) ? maple : null,
                 getModList: () => [maple], getModListNameNoAlias: () => ['maplebirch']
             };
-            const sb = loadManager({ modModLoadController: controller, modUtils: utils });
+            const sb = loadManager({ modModLoadController: controller, modUtils: utils, AbortController });
             loadScripts(sb, ['javascript/modhub-market.js']);
             return { sb, controller, maple, simpleBoot, cache, reads, data, utils };
         };
@@ -708,12 +762,57 @@ module.exports = async function() {
 
         for (const mode of ['single', 'batch']) {
             const { sb: run, simpleBoot: boot } = createAliasFixture(false);
-            const mod = { id: 'simple-framework', name: '简易框架', version: boot.version, githubUrl: boot.repository };
+            const mod = { id: 'simple-framework', name: '简易框架', bootNames: [boot.name], version: boot.version, githubUrl: boot.repository };
+            const tagName = `v${boot.version}`;
+            const assetUrl = `${mod.githubUrl}/releases/download/${tagName}/SimpleFramework.zip`;
             run.Blob = Blob;
-            run.modHubConfirm = async () => true;
+            const historySignals = [];
+            run.modHubConfirm = async options => {
+                if (!options.customResult) return true;
+                const area = createStubElement();
+                const input = createStubElement('input');
+                input.value = JSON.stringify([run.modHubMarket.getMarketModKey(mod), tagName, assetUrl]);
+                input.dataset.key = run.modHubMarket.getMarketModKey(mod);
+                area.querySelectorAll = selector => {
+                    if (selector === 'input[name="modHubMarketVersion"]') return area.innerHTML.includes('name="modHubMarketVersion"') ? [input] : [];
+                    if (selector === '.modhub-version-batch-select' && area.innerHTML.includes('modhub-version-batch-select')) {
+                        input.disabled = /<select[^>]*\bdisabled/.test(area.innerHTML);
+                        return [input];
+                    }
+                    return [];
+                };
+                const dialog = createStubElement();
+                const query = dialog.querySelector;
+                dialog.querySelector = selector => ['#modHubVersionChoices', '#modHubBatchVersionChoices'].includes(selector) ? area : query(selector);
+                const confirm = dialog.querySelector('.modhub-modal-btn-confirm');
+                dialog.modHubSyncConfirmState = () => { confirm.disabled = !options.canConfirm(dialog); };
+                const ready = options.onRender(dialog);
+                assert.match(area.innerHTML, /正在读取版本列表/, '公开入口应先显示版本列表读取状态');
+                assert.equal(options.canConfirm(dialog), false, '异步读取版本列表时不能开始预检');
+                assert.equal(confirm.disabled, true, '加载状态必须同步禁用实际确认按钮');
+                if (mode === 'single') assert.equal(area.querySelectorAll('input[name="modHubMarketVersion"]').length, 0, '加载完成前不应虚构候选单选项');
+                else assert.equal(input.disabled, true, '批量条目读取期间应禁用选择控件');
+                await ready;
+                assert.ok(area.innerHTML.includes(run.modHubEscapeHtml(input.value)), '手选项必须来自真实版本模块渲染的历史候选');
+                assert.equal(typeof input.onchange, 'function', '异步读取完成后才使用已绑定的真实选择事件');
+                if (mode === 'batch') assert.equal(input.disabled, false, '批量条目加载后应恢复选择控件');
+                input.onchange();
+                assert.ok(options.canConfirm(dialog), '真实选择且加载结束后确认键必须允许执行');
+                assert.equal(confirm.disabled, false, '真实选择后实际确认按钮必须恢复');
+                return options.customResult(dialog);
+            };
             run.modHubAlert = async () => {};
-            run.fetch = async url => {
+            run.fetch = async (url, options = {}) => {
                 if (String(url).includes('release-index.json')) return { ok: true, json: async () => ({ schemaVersion: 1, mods: [mod] }) };
+                if (String(url).includes('/mod-releases?')) {
+                    assert.ok(options.signal instanceof AbortSignal, '历史读取必须通过真实 AbortController 传入可取消信号');
+                    assert.equal(options.signal.aborted, false, '加载期间的历史请求不能提前取消');
+                    historySignals.push(options.signal);
+                    return { ok: true, json: async () => ({ schemaVersion: 1, id: mod.id,
+                    sourceUrl: mod.githubUrl, page: 1, hasMore: false, fetchedAt: '2026-09-30T00:00:00Z',
+                    communityRevision: run.modHubMarket.getCommunityRevision(), releases: [{ tagName, version: boot.version,
+                        assets: [{ name: 'SimpleFramework.zip', downloadUrl: assetUrl, size: 1 }] }] }) };
+                }
                 if (String(url).includes('/releases?')) return { ok: true, json: async () => [] };
                 if (String(url).includes('/releases/latest')) return { ok: true, json: async () => ({ tag_name: `v${boot.version}`, assets: [{ name: 'SimpleFramework.zip', browser_download_url: `${mod.githubUrl}/releases/download/v${boot.version}/SimpleFramework.zip` }] }) };
                 return { ok: true, headers: { get: () => null }, blob: async () => new Blob([new Uint8Array([2])]) };
@@ -732,6 +831,7 @@ module.exports = async function() {
                 const result = await run.modHubMarket.installSelectedMods();
                 assert.equal(result.results.get('simple-framework').status, 'success', '批量公开入口应完成真实存储写入');
             }
+            assert.equal(historySignals.length, 1, '单装与批量入口均应完成一次真实历史读取再选择安装包');
             const installedInfo = run.modHubGetModInfo('Simple Frameworks');
             assert.equal(installedInfo.bootJson.version, boot.version, '单装与批量安装在尚未重载时都必须展示真实版本');
             assert.equal(run.modHubGetModSubtext('Simple Frameworks', installedInfo, false), '简易框架', '单装与批量都不能从旧运行时别名拿到秋枫副标题');

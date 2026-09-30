@@ -9,13 +9,14 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.1.0', 'boot.json 版本号必须为 1.1.0');
+    assert.equal(bootJson.version, '1.1.1', 'boot.json 版本号必须为 1.1.1');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
         'javascript/modhub-manager.js', 'javascript/modhub-dialog.js',
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
         'javascript/modhub-log.js', 'javascript/modhub-market.js',
+        'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
     ], '必须先加载公共管理接口，再加载弹窗、拖拽、美化、说明、日志与市场');
     for (const file of bootJson.scriptFileList) {
         assert.ok(fs.existsSync(path.join(srcRoot, file)), `${file} 必须存在于 src`);
@@ -221,6 +222,116 @@ module.exports = async function() {
             sb.modHubResolveImportedModName('completely-unknown-pack.zip', ['SmartPhone']),
             null, '无法识别的文件名必须返回 null 而非误配'
         );
+        for (const suffix of ['.modpack', '.MODPACK.CRYPT']) {
+            assert.equal(sb.modHubResolveImportedModName(`ExactMod${suffix}`, ['ExactMod', 'ExactModModPackCrypt']),
+                'ExactMod', '原生包后缀不得参与技术名匹配或误配到同前缀模组');
+        }
+    }
+
+    // 原生 ModPack 与 Zip 共用官方校验、原样落盘及本地导入分流。
+    {
+        const createImporter = (legacy = false) => {
+            const controller = createMockController({ disabled: ['NativePack'] });
+            const stored = new Map(), checks = [], tabs = [];
+            const bootByMarker = new Map([
+                [1, { name: 'NativePack', version: '1.0' }],
+                [2, { name: 'ZipPack', version: '2.0' }],
+                [3, { name: 'EncryptedPack', version: '3.0' }]
+            ]);
+            controller.checkModZipFileIndexDB = async bytes => { checks.push(Array.from(bytes)); return bootByMarker.get(bytes[0]); };
+            controller.addModIndexDB = async (name, bytes) => {
+                stored.set(name, Array.from(bytes)); controller.store.zips.add(name);
+                if (!controller.store.enabled.includes(name)) controller.store.enabled.push(name);
+            };
+            const utils = { getModListNameNoAlias: () => [] };
+            const gui = legacy ? {
+                gModUtils: utils, modModLoadController: controller,
+                listSideLoadModNameOnly: () => controller.listModIndexDB(),
+                listSideLoadHiddenModNameOnly: () => controller.loadHiddenModList(),
+                loadAndAddMod: async () => { throw new Error('ModPack 不得交给仅支持 Zip 的旧 GUI'); }
+            } : null;
+            const sb = loadManager({ modModLoadController: controller, modUtils: utils, ...(gui ? { modLoaderGui: gui } : {}) });
+            sb.modHubLoadBeautyState = async () => {};
+            sb.modHubSwitchTab = name => { tabs.push(name); return true; };
+            sb.initModManage = async () => {};
+            sb.modHubSelectReadmeMod = () => {};
+            return { sb, controller, stored, checks, tabs, gui };
+        };
+        const file = (name, marker) => ({ name, arrayBuffer: async () => new Uint8Array([marker, 42, 255, 0]).buffer });
+        {
+            const f = createImporter();
+            f.sb.modHubReadLocalReadme = async () => '# 原生包说明';
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [file('显示名称.modpack', 1)] }, { askRestart: false }), true);
+            assert.deepEqual(f.stored.get('NativePack'), [1, 42, 255, 0], '原生包必须保留已校验的原始字节，不能转成 Zip 或改名冒充');
+            assert.deepEqual(f.checks, [[1, 42, 255, 0]], '原生包必须经过 ModLoader 官方清单校验');
+            assert.deepEqual(f.controller.store.enabled, ['NativePack'], '持久化名称必须取自真实 boot，而非文件名');
+            assert.deepEqual(f.controller.store.disabled, [], '已有禁用版本应在成功导入后启用');
+            assert.deepEqual(f.tabs, ['模组说明'], '单个原生包包含说明时应保留本地导入分流');
+        }
+        {
+            const f = createImporter(true);
+            f.sb.modHubReadLocalReadme = async () => '';
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [file('plain.zip', 2), file('native.modpack', 1), file('native.modpack.crypt', 3)] }, { askRestart: false }), true);
+            assert.deepEqual([...f.stored.keys()], ['ZipPack', 'NativePack', 'EncryptedPack'], '混合批次应统一走原生校验和持久化路径');
+            assert.deepEqual([...f.stored.values()], [[2, 42, 255, 0], [1, 42, 255, 0], [3, 42, 255, 0]]);
+            assert.deepEqual(f.tabs, ['模组管理'], '批量 Zip / ModPack 导入应保持管理页集中高亮');
+            assert.deepEqual([...f.sb._modHubHighlightMods], ['ZipPack', 'NativePack', 'EncryptedPack']);
+        }
+        {
+            const f = createImporter(true);
+            f.sb.modHubReadLocalReadme = async () => '';
+            const binary = { ...file('手机下载的模组.bin', 1), type: 'application/octet-stream' };
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [binary] }, { askRestart: false }), true);
+            assert.deepEqual(f.stored.get('NativePack'), [1, 42, 255, 0], 'BIN 文件应以原始字节通过原生校验，不能交给旧 Zip GUI');
+            assert.equal(f.checks.length, 1);
+            await assert.rejects(() => f.sb.modHubInstallModZip(file('普通二进制.bin', 99)), /校验失败/, 'MIME 放宽不得让无效 BIN 绕过包体校验');
+            assert.equal(f.stored.size, 1, '无效 BIN 不得新增写入');
+        }
+        {
+            const f = createImporter(true);
+            let called = 0;
+            f.gui.loadAndAddMod = async () => { called++; f.controller.store.enabled.push('ZipPack'); };
+            f.sb.modHubReadLocalReadme = async () => '';
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [file('plain.zip', 2)] }, { askRestart: false }), true);
+            assert.equal(called, 1, '仅含 Zip 的旧 GUI 路径必须保留');
+            assert.equal(f.checks.length, 0);
+        }
+        for (const outcome of ['throw', 'message', 'empty', 'missingName']) {
+            const f = createImporter();
+            f.controller.checkModZipFileIndexDB = async () => {
+                if (outcome === 'throw') throw new Error('原生格式或密码无法读取');
+                return outcome === 'message' ? 'bootJson Invalid' : outcome === 'empty' ? null : { version: '1.0' };
+            };
+            await assert.rejects(() => f.sb.modHubInstallModZip(file('broken.modpack', 1)), /校验失败/, '原生校验失败不得退回文件名后继续落盘');
+            assert.equal(f.stored.size, 0);
+            assert.deepEqual(f.controller.store.enabled, []);
+            assert.deepEqual(f.controller.store.disabled, ['NativePack']);
+        }
+        {
+            const f = createImporter();
+            f.controller.checkModZipFileIndexDB = async () => { throw new Error('password required'); };
+            await assert.rejects(() => f.sb.modHubInstallModZip(file('locked.modpack.crypt', 3)), /不提供密码输入/, '需要密码的包必须给出可执行的失败说明');
+            assert.equal(f.stored.size, 0);
+        }
+        {
+            const f = createImporter(true);
+            delete f.controller.checkModZipFileIndexDB;
+            await assert.rejects(() => f.sb.modHubInstallModZip(file('native.modpack', 1)), /ModPack 校验接口/);
+            await assert.rejects(() => f.sb.modHubInstallModZip(file('native.bin', 1)), /ModPack 校验接口/, '旧环境不能只凭 BIN 文件名落盘');
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [file('plain.zip', 2), file('native.modpack', 1)] }, { askRestart: false }), false);
+            assert.equal(f.stored.size, 0, '缺少原生校验能力时必须在混合批次任何写入前中止');
+        }
+        {
+            const f = createImporter();
+            f.sb.modHubTriggerImport();
+            const created = f.sb.document.body.children.find(item => item.id === 'modHubImportFileInput');
+            const expectedAccept = '.zip,.modpack,.modpack.crypt,application/zip,application/octet-stream';
+            assert.equal(created.accept, expectedAccept);
+            created.accept = '.zip';
+            f.sb.document.getElementById = id => id === created.id ? created : null;
+            f.sb.modHubTriggerImport();
+            assert.equal(created.accept, expectedAccept, '已有本地文件控件也应更新原生格式和移动 MIME 过滤');
+        }
     }
 
     /* =========================================================================
@@ -311,6 +422,7 @@ module.exports = async function() {
         await sb.modHubDeleteSideMod('ModA');
         assert.equal(sb._modHubModState.sideMods.length, 1, '取消删除时列表必须保持不变');
         assert.equal(controller.store.removed.length, 0, '取消删除时不得调用包体移除');
+        assert.equal(sb._modHubReloadRevision || 0, 0, '取消删除不得新增待重载批次');
 
         // 7.2 用户确认：列表移除 + dropNames 落盘 + 包体删除
         const controller2 = createMockController({ enabled: ['ModA'], zips: ['ModA'] });
@@ -443,6 +555,269 @@ module.exports = async function() {
         // 模拟点击取消正常退出
         delayOverlay.children[0].querySelector('.modhub-modal-btn-cancel').click();
         assert.equal(await delayPromise, false, '取消关闭时能正常返回');
+        // 未满足自定义选版条件时也须拦截 Enter，防止触发弹窗背后的入口。
+        const keyboard = loadManager();
+        let handleKeydown;
+        keyboard.document.addEventListener = (type, handler) => { if (type === 'keydown') handleKeydown = handler; };
+        let selected = false, prevented = 0;
+        const selectionPromise = keyboard.modHubConfirm({ message: '请先选版', canConfirm: () => selected });
+        const selectionDialog = keyboard.document.body.children.at(-1).children[0];
+        assert.equal(selectionDialog.querySelector('.modhub-modal-btn-confirm').disabled, true);
+        handleKeydown({ key: 'Enter', preventDefault: () => prevented++ });
+        assert.equal(prevented, 1, '未选版的 Enter 也必须阻止默认操作');
+        selected = true;
+        selectionDialog.modHubSyncConfirmState();
+        assert.equal(selectionDialog.querySelector('.modhub-modal-btn-confirm').disabled, false);
+        handleKeydown({ key: 'Enter', preventDefault: () => prevented++ });
+        assert.equal(await selectionPromise, true);
+    }
+
+    // 精确档案查询：已知缓存缺项属于正常探测，不调用会打印错误的旧接口。
+    {
+        let exactCalls = 0, legacyCalls = 0;
+        const exact = { bootJson: { name: 'ModA' } };
+        const utils = {
+            getModLoader: () => ({ getModCacheArray: () => [] }),
+            getAnyModByNameNoAlias: () => { exactCalls++; return exact; },
+            getMod: () => { legacyCalls++; return exact; },
+        };
+        const sb = loadManager({ modLoaderGui: { gModUtils: utils } });
+        assert.equal(sb.modHubGetModInfo('尚未安装'), null, '有效空缓存中的缺项必须安全返回');
+        assert.equal(exactCalls + legacyCalls, 0, '已知缓存缺项不得触发旧接口的错误日志');
+        sb._modHubDisabledModInfo.set('moda', exact);
+        assert.equal(sb.modHubGetModInfo('ModA'), exact, '有效空缓存仍必须读取存储中的精确档案');
+        assert.equal(exactCalls + legacyCalls, 0, '读取精确存储档案无需查询旧接口');
+        utils.getModLoader = () => ({ getModCacheArray: () => [{ mod: exact }] });
+        assert.equal(sb.modHubGetModInfo(' MODA '), exact, '缓存中的精确名称应支持大小写及空白归一');
+        assert.equal(sb.modHubGetModInfo('兼容别名'), null, '缓存缺项不得被别名重定向到其他模组');
+
+        sb._modHubDisabledModInfo.clear();
+        for (const getModLoader of [undefined, () => ({ getModCacheArray() { throw new Error('旧版本缓存接口异常'); } })]) {
+            utils.getModLoader = getModLoader;
+            assert.equal(sb.modHubGetModInfo('ModA'), exact, '缓存接口缺失或抛错时仍必须兼容旧接口');
+        }
+        utils.getAnyModByNameNoAlias = () => { throw new Error('旧查询接口异常'); };
+        assert.equal(sb.modHubGetModInfo('ModA'), exact, '新查询接口抛错时必须继续兼容旧版 getMod');
+        assert.equal(sb.modHubGetModInfo('兼容别名'), null, '旧版别名查询返回其他模组时必须拒绝误配');
+        delete utils.getAnyModByNameNoAlias;
+        assert.equal(sb.modHubGetModInfo('ModA'), exact, '新查询接口缺失时必须兼容旧版 getMod');
+        utils.getMod = () => { throw new Error('旧接口同样不可用'); };
+        assert.equal(sb.modHubGetModInfo('ModA'), null, '全部档案查询接口抛错时应安全返回缺失');
+    }
+
+    // 管理页变更仅记录真实配置变化，失败时以回读到的实际配置为准。
+    {
+        const sb = loadManager({ console: { error() {}, warn() {}, log() {} } });
+        sb._modHubModState = { sideMods: [{ name: 'ModA', enabled: true }], sideEnabled: ['ModA'], sideDisabled: [] };
+        const tracked = action => sb.modHubRunManagerAction(action, '保存测试', { trackReload: true });
+        await tracked(async () => true);
+        assert.equal(sb._modHubReloadRevision || 0, 0, '无变化的成功操作不得标记待重载');
+        await tracked(async () => false);
+        assert.equal(sb._modHubReloadRevision || 0, 0, '取消或无变化操作不得标记待重载');
+        await tracked(async () => { sb._modHubModState.sideMods[0].enabled = false; });
+        assert.equal(sb._modHubReloadRevision, 1, '成功变更应新增一个待重载批次');
+        await sb.modHubRunManagerAction(async () => { sb._modHubModState.sideMods[0].enabled = true; });
+        assert.equal(sb._modHubReloadRevision, 1, '导入和市场等未请求追踪的操作不得加入管理页批次');
+        sb._modHubBeautyState = { enabledList: [{ type: '美化甲' }, { type: '美化乙' }], disabledList: [] };
+        await tracked(async () => { sb._modHubBeautyState.enabledList.reverse(); });
+        assert.equal(sb._modHubReloadRevision, 2, '美化启用顺序变化必须标记待重载');
+
+        const unchanged = { sideMods: [{ name: 'ModA', enabled: true }], sideEnabled: ['ModA'], sideDisabled: [] };
+        sb._modHubModState = unchanged;
+        sb.modHubLoadModManageState = async () => { sb._modHubModState = unchanged; };
+        sb.modHubLoadBeautyState = async () => true;
+        await tracked(async () => { throw new Error('写入失败'); });
+        assert.equal(sb._modHubReloadRevision, 2, '失败且配置未变时不得误记新批次');
+        assert.equal(sb._modHubManagerSaveFailed, true, '失败状态必须保留，不能允许刷新');
+        sb.modHubLoadModManageState = async () => {
+            sb._modHubModState = { sideMods: [{ name: 'ModA', enabled: false }], sideEnabled: [], sideDisabled: ['ModA'] };
+        };
+        await tracked(async () => { throw new Error('部分写入失败'); });
+        assert.equal(sb._modHubReloadRevision, 3, '失败后回读确认部分配置已变，也必须保留待重载批次');
+        assert.equal(sb._modHubManagerSaveFailed, true, '部分写入失败不得被待重载标记当成保存成功');
+    }
+
+    // 使用真实重载询问，防止沙箱默认屏蔽提示而掩盖批次去重问题。
+    function loadReloadManager(overrides = {}) {
+        const sb = loadManager(overrides);
+        loadScripts(sb, ['javascript/modhub-manager.js']);
+        sb.modHubRenderModManageUI = () => {};
+        sb.modHubUpdateManagerStatus = () => {};
+        sb.modHubShowToast = () => {};
+        return sb;
+    }
+    {
+        const sb = loadReloadManager();
+        let dialogs = 0, finishDialog;
+        sb.modHubConfirm = options => {
+            dialogs++;
+            assert.equal(options.cancelText, '稍后重载', '集中提示必须保留稍后重载');
+            return new Promise(resolve => { finishDialog = resolve; });
+        };
+        sb._modHubReloadRevision = 2;
+        const first = sb.modHubPromptPendingReload(), duplicate = sb.modHubPromptPendingReload();
+        await Promise.resolve();
+        assert.equal(dialogs, 1, '同一时间多次离开信号只能创建一个提示');
+        sb._modHubReloadRevision = 3;
+        finishDialog(false);
+        await Promise.all([first, duplicate]);
+        assert.equal(sb._modHubReloadPromptedRevision, 2, '稍后重载只确认提示创建时的批次，不能吞掉后续变化');
+        const next = sb.modHubPromptPendingReload();
+        await Promise.resolve();
+        assert.equal(dialogs, 2, '后续新变更必须再次集中提醒');
+        finishDialog(false);
+        await next;
+        await sb.modHubPromptPendingReload();
+        assert.equal(dialogs, 2, '已选择稍后重载的同一批变化不得重复弹窗');
+    }
+
+    // 原生关闭和真正切页才提示；内部切页、隐藏残留及重复绑定不产生干扰。
+    {
+        const clicks = [], bindings = [], microtasks = [];
+        const sb = createBaseSandbox({ queueMicrotask: callback => microtasks.push(callback) });
+        const overlay = createStubElement(), parent = createStubElement(), manager = createStubElement();
+        let managing = true, hidden = false, parentHidden = false, dialogs = 0;
+        overlay.dataset.overlay = 'modloader';
+        overlay.parentElement = parent;
+        overlay.classList.contains = name => name === 'hidden' && hidden;
+        parent.classList.contains = name => name === 'hidden' && parentHidden;
+        sb.document.getElementById = id => id === 'customOverlay' ? overlay : id === 'modHubModManageContainer' && managing ? manager : null;
+        sb.document.addEventListener = (name, handler, capture) => { if (name === 'click') clicks.push({ handler, capture }); };
+        sb.$ = sb.jQuery = () => ({ on: (name, handler) => bindings.push({ name, handler }) });
+        loadScripts(sb, ['javascript/modhub-manager.js']);
+        sb.modHubShowToast = () => {};
+        sb.modHubBindReloadReminder();
+        const clickCount = clicks.length, closeCount = bindings.length;
+        sb.modHubBindReloadReminder();
+        assert.equal(clicks.length, clickCount, '重复绑定不得增加点击监听');
+        assert.equal(bindings.length, closeCount, '重复绑定不得增加原生关闭监听');
+        assert.ok(clicks.some(listener => listener.capture === true), '切页观察必须在捕获阶段记录离开前的页面');
+        const flush = async () => {
+            while (microtasks.length) microtasks.shift()();
+            if (sb._modHubReloadPromptPromise) await sb._modHubReloadPromptPromise;
+        };
+        const tab = createStubElement('button');
+        tab.textContent = '模组市场';
+        tab.closest = () => null;
+        tab.click = () => { clicks.forEach(listener => listener.handler({ target: tab })); managing = false; };
+        sb.document.querySelectorAll = () => [tab];
+        sb.modHubConfirm = async () => { dialogs++; return false; };
+        sb._modHubReloadRevision = 1;
+        const modalTarget = { closest: selector => selector === '.modhub-modal-backdrop' ? {} : null };
+        clicks.forEach(listener => listener.handler({ target: modalTarget }));
+        assert.equal(microtasks.length, 0, '确认框内部点击不得被管理页离开观察捕获');
+        clicks.forEach(listener => listener.handler({ target: tab }));
+        await flush();
+        assert.equal(dialogs, 0, '同页点击没有真正离开时不得提示');
+        assert.equal(sb.modHubSwitchTab('模组市场', { skipReloadPrompt: true }), true);
+        await flush();
+        assert.equal(dialogs, 0, '导入程序切页必须显式绕过集中提示');
+        managing = true;
+        sb.modHubSwitchTab('模组市场');
+        await flush();
+        assert.equal(dialogs, 1, '玩家切出管理页必须集中提示');
+        const close = bindings.find(binding => binding.name.startsWith(':oncloseoverlay'));
+        assert.ok(close, '必须监听原生关闭事件');
+        hidden = true;
+        close.handler({}, 'modloader');
+        await flush();
+        assert.equal(dialogs, 1, '切页后关闭同一批变化不得重复提示');
+        sb._modHubReloadRevision = 2;
+        managing = true;
+        clicks.forEach(listener => listener.handler({ target: tab }));
+        managing = false;
+        await flush();
+        assert.equal(dialogs, 1, '隐藏覆盖层的残留管理 DOM 不得被当成正在离开');
+        hidden = false;
+        parentHidden = true;
+        managing = true;
+        clicks.forEach(listener => listener.handler({ target: tab }));
+        managing = false;
+        await flush();
+        assert.equal(dialogs, 1, '父遮罩隐藏时同样不得误判离开');
+        close.handler({}, 'saves');
+        await flush();
+        assert.equal(dialogs, 1, '关闭存档等其他覆盖层不得触发 ModHub 提示');
+        close.handler({}, 'modloader');
+        await flush();
+        assert.equal(dialogs, 2, '原生关闭 ModHub 时必须提醒尚未确认的新批次');
+    }
+
+    // 玩家在首次保存中离开，等待保存结束再提示；失败或安装中严禁刷新。
+    {
+        const timers = [], sb = loadReloadManager({ setTimeout: (callback, delay) => timers.push({ callback, delay }) });
+        sb._modHubModState = { sideMods: [{ name: 'ModA', enabled: true }], sideEnabled: ['ModA'], sideDisabled: [] };
+        let finishSave, dialogs = 0, reloaded = 0, installing = false;
+        sb.modHubMarket = { isInstallBusy: () => installing };
+        sb.location = { reload: () => { reloaded++; } };
+        sb.modHubConfirm = async () => { dialogs++; return false; };
+        const saving = sb.modHubRunManagerAction(async () => {
+            await new Promise(resolve => { finishSave = resolve; });
+            sb._modHubModState.sideMods[0].enabled = false;
+        }, '等待保存', { trackReload: true });
+        await sb.modHubPromptPendingReload();
+        assert.equal(dialogs, 0, '保存未完成时不得弹出重载选择');
+        assert.equal(sb._modHubReloadExitPending, true, '首次保存尚未产生 revision 也必须记录离开请求');
+        finishSave();
+        await saving;
+        await Promise.resolve();
+        await Promise.resolve();
+        assert.equal(dialogs, 1, '保存解锁后必须处理延迟的离开提醒');
+        sb._modHubReloadRevision++;
+        for (const [flag, value] of [['_modHubManagerSaveFailed', true], ['_modHubManagerStateUncertain', true], ['_modHubModLoading', Promise.resolve()]]) {
+            sb[flag] = value;
+            await sb.modHubPromptPendingReload();
+            sb.modHubRestartGame();
+            assert.equal(dialogs, 1, `${flag} 状态不得弹出刷新选择`);
+            assert.equal(sb._modHubReloadPromptedRevision, 1, `${flag} 状态不得确认掉未处理批次`);
+            sb[flag] = false;
+        }
+        installing = true;
+        sb.modHubRestartGame();
+        assert.equal(timers.filter(timer => timer.delay === 450).length, 0, '市场下载或安装中不得安排页面刷新');
+        installing = false;
+        sb.modHubRestartGame();
+        installing = true;
+        timers.find(timer => timer.delay === 450).callback();
+        assert.equal(reloaded, 0, '延迟刷新执行前必须再次检查安装锁');
+    }
+
+    // 连续普通启禁、删除只累计管理页批次；框架强提醒必须在操作锁释放后创建。
+    {
+        const controller = createMockController({ enabled: ['ModA', 'ModB', 'SimpleFramework'], zips: ['ModA', 'ModB', 'SimpleFramework'] });
+        const sb = loadReloadManager({ modModLoadController: controller });
+        await sb.modHubLoadModManageState();
+        sb.modHubFindDependentMods = async () => [];
+        const prompts = [];
+        sb.modHubConfirm = async options => {
+            prompts.push({ options, busy: sb._modHubManagerBusy });
+            return options.title.startsWith('确认删除');
+        };
+        await sb.modHubMoveSideMod(0, 'bottom');
+        await sb.modHubReorderList('side', 2, 0, false);
+        assert.equal(sb._modHubReloadRevision, 2, '步进排序和拖拽排序都必须加入管理页待重载批次');
+        sb.addonBeautySelectorAddon = { saveOrder: async () => true };
+        sb._modHubBeautyState = { enabledList: [{ type: '美化甲' }, { type: '美化乙' }], disabledList: [], allMap: new Map() };
+        await sb.modHubMoveBeauty(0, 'bottom');
+        assert.equal(sb._modHubReloadRevision, 3, '美化排序必须加入管理页待重载批次');
+        const beauty = sb._modHubBeautyState.enabledList[0];
+        sb._modHubBeautyState.allMap.set(beauty.type, beauty);
+        await sb.modHubToggleBeauty(beauty.type, false);
+        assert.equal(sb._modHubReloadRevision, 4, '美化启禁必须加入管理页待重载批次');
+        sb.modHubLoadBeautyState = async () => true;
+        await sb.modHubToggleSideMod('ModA', false, { skipConfirm: true });
+        assert.equal(prompts.length, 0, '普通启禁不得逐次弹出重载提示');
+        const revision = sb._modHubReloadRevision;
+        await sb.modHubToggleSideMod('ModA', false, { skipConfirm: true });
+        assert.equal(sb._modHubReloadRevision, revision, '重复启禁不得新增待重载批次');
+        await sb.modHubDeleteSideMod('ModA');
+        await sb.modHubDeleteSideMod('ModB');
+        assert.equal(prompts.length, 2, '连续普通删除只保留删除本身的确认，不得逐次询问重载');
+        await sb.modHubToggleSideMod('SimpleFramework', false, { skipConfirm: true });
+        const framework = prompts.find(prompt => prompt.options.title === '重新载入游戏（强烈建议）');
+        assert.ok(framework, '框架变更必须继续即时强提醒');
+        assert.equal(framework.busy, false, '框架提示必须在共享保存锁释放后创建');
+        assert.equal(sb._modHubReloadPromptedRevision, sb._modHubReloadRevision, '框架稍后重载后不得再重复提醒已确认批次');
     }
 
 };
