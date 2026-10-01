@@ -129,3 +129,69 @@
     box-sizing: border-box;
 }
 #modHubManagerStatus { margin: 6px 0; font-size: 0.9em; overflow-wrap: anywhere; }
+
+/* 还原确认与结果提示固定标题和按钮，仅条目名单滚动。 */
+.modhub-modal-backdrop:has(> .modhub-restore-notice) {
+    height: 100dvh;
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+}
+.modhub-restore-notice {
+    max-width: 560px;
+    max-height: calc(100dvh - 76px - env(safe-area-inset-bottom, 0px));
+    min-height: 0;
+    overflow: hidden;
+}
+.modhub-restore-notice .modhub-modal-header,
+.modhub-restore-notice .modhub-modal-footer,
+.modhub-restore-notice-target,
+.modhub-restore-notice-summary {
+    flex-shrink: 0;
+}
+.modhub-restore-notice .modhub-modal-body,
+.modhub-restore-notice .modhub-modal-message {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+}
+.modhub-restore-notice .modhub-modal-body { padding: 16px; }
+.modhub-restore-notice .modhub-modal-message { gap: 12px; }
+.modhub-restore-notice-section { min-height: 0; }
+.modhub-restore-notice-section:has(> .modhub-restore-notice-list) {
+    display: flex;
+    flex-direction: column;
+}
+.modhub-restore-notice p { margin: 0; }
+.modhub-restore-notice-list {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: min(260px, 30dvh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+    margin: 0;
+    padding: 4px 8px 4px 22px;
+    overflow-wrap: anywhere;
+}
+.modhub-restore-notice-list li + li { margin-top: 6px; }
+.modhub-restore-notice-list:focus-visible { outline: 1px solid var(--gold, #d6b365); }
+.modhub-restore-notice .red { color: var(--red, #ed7878); }
+.modhub-restore-notice .green { color: var(--green, #88bd86); }
+.modhub-restore-notice .gold { color: var(--gold, #d6b365); }
+.modhub-restore-notice .grey { color: var(--400, #aaa); }
+@media (max-width: 768px) {
+    .modhub-restore-notice .modhub-modal-footer { flex-wrap: wrap; gap: 8px; }
+    .modhub-restore-notice .modhub-modal-footer .macro-button {
+        flex: 1 1 0;
+        min-width: 0 !important;
+        min-height: 32px;
+        white-space: normal !important;
+        padding: 6px 10px !important;
+    }
+}
+@media (max-height: 600px) {
+    .modhub-restore-notice .modhub-modal-header,
+    .modhub-restore-notice .modhub-modal-footer { padding: 8px 12px; }
+    .modhub-restore-notice .modhub-modal-body { padding: 10px 12px; line-height: 1.45; }
+    .modhub-restore-notice .modhub-modal-message { gap: 8px; }
+}

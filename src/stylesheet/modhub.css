@@ -1812,6 +1812,46 @@ button.modhub-btn-primary:active,
     color: #ddd;
 }
 
+/* 自身禁用与卸载按影响、保留和恢复方式分段，长内容只滚动正文。 */
+.modhub-modal-backdrop:has(> .modhub-self-removal-dialog) {
+    height: 100dvh;
+    padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
+}
+
+.modhub-self-removal-dialog {
+    max-height: calc(100vh - 76px - env(safe-area-inset-bottom, 0px));
+    max-height: calc(100dvh - 76px - env(safe-area-inset-bottom, 0px));
+}
+
+.modhub-self-removal-dialog .modhub-modal-header,
+.modhub-self-removal-dialog .modhub-modal-footer {
+    flex-shrink: 0;
+}
+
+.modhub-self-removal-dialog .modhub-modal-body {
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+
+.modhub-self-removal-notice section + section {
+    border-top: 1px solid var(--750, #333);
+    margin-top: 14px;
+    padding-top: 14px;
+}
+
+.modhub-self-removal-notice h3 {
+    margin: 0 0 6px;
+    font-size: 0.92em;
+    line-height: 1.4;
+}
+
+.modhub-self-removal-notice p { margin: 0; }
+.modhub-self-removal-intro { margin: 0 0 14px; }
+.modhub-self-removal-dialog .red { color: var(--red, #ed7878); }
+.modhub-self-removal-dialog .green { color: var(--green, #88bd86); }
+.modhub-self-removal-dialog .gold { color: var(--gold, #d6b365); }
+
 .modhub-modal-select-wrap {
     display: flex;
     flex-direction: column;
