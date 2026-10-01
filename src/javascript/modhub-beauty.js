@@ -2,6 +2,12 @@
  * 美化包管理器模块 (BeautySelector Addon)
  * ========================================================================= */
 
+// BSA Type1 的 modRef.name 是 Addon 名称，所属模组以真实档案或图像 getter 为准。
+function modHubGetBeautyModName(item) {
+    return item?.modRef?.mod?.name || item?.imgListRef?.values?.()?.next?.()?.value?.getter?.modName
+        || item?.modRef?.name || (typeof item?.mod === 'string' ? item.mod : item?.mod?.name) || item?.fromMod || '';
+}
+
 // 自动启用已启用旁加载模组美化的配置（默认开启）
 window.modHubIsAutoBeautyEnabled = function() {
     try {
@@ -31,6 +37,8 @@ window.modHubToggleAutoBeautySetting = async function(checked) {
 };
 
 window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames = []) {
+    if (window.modHubRestore?.isRestoring?.()) syncAuto = false;
+    modHubBindBeautyImageGuard();
     const bAddon = window.addonBeautySelectorAddon;
     if (!bAddon || typeof bAddon.getTypeOrder !== 'function') {
         window._modHubBeautyLoaded = true;
@@ -61,7 +69,6 @@ window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames =
             } catch (_) {}
         }
 
-        const getModName = item => item.modRef?.name || item.mod || item.fromMod || '';
         const blockedModNames = new Set([
             ...(window._modHubModState?.sideDisabled || []),
             ...(window._modHubBeautyState?.blockedModNames || []),
@@ -69,7 +76,7 @@ window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames =
         ].map(name => String(name).trim().toLowerCase()));
         enabledSideMods.forEach(name => blockedModNames.delete(String(name).trim().toLowerCase()));
         if (syncAuto) {
-            const stillEnabled = usedList.filter(item => !blockedModNames.has(String(getModName(item)).trim().toLowerCase()));
+            const stillEnabled = usedList.filter(item => !blockedModNames.has(String(modHubGetBeautyModName(item)).trim().toLowerCase()));
             beautyChanged = stillEnabled.length !== usedList.length;
             usedList = stillEnabled;
         }
@@ -81,7 +88,7 @@ window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames =
             // 自动启用：属于已启用旁加载模组的美化项移入已启用列表
             const toEnable = [];
             disabledList = disabledList.filter(item => {
-                const modName = getModName(item);
+                const modName = modHubGetBeautyModName(item);
                 if (modName && enabledSideMods.has(modName)) {
                     toEnable.push(item);
                     return false;
@@ -102,7 +109,7 @@ window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames =
 
         // 标记是否属于受保护的自动管理美化项
         allList.forEach(item => {
-            const modName = getModName(item);
+            const modName = modHubGetBeautyModName(item);
             item.isAutoManaged = !!(autoBeautyEnabled && modName && enabledSideMods.has(modName));
         });
 
@@ -144,7 +151,7 @@ window.modHubRenderBeautyUI = function() {
             <div class="grey modhub-subdesc">默认开启。开启后已启用的旁加载模组美化将自动保持激活且无法手动停用，避免漏开或重装模组后图像缺失。</div>
         </div>
         <div class="childItem grey modhub-hint-bar">
-            提示：上方图像覆盖优先级高于下方。智能排序会将依赖方放在基础包之前，无关项保持原序。
+            美化调整自动保存并即时应用，无需重新载入。上方图像覆盖优先级高于下方；智能排序将依赖方放在基础包之前，无关项保持原序。
         </div>
     `;
 
@@ -160,7 +167,7 @@ window.modHubRenderBeautyUI = function() {
     } else {
         html += '<ul class="modhub-list">';
         enabledList.forEach((item, index) => {
-            const modName = item.modRef?.name || '未知模组';
+            const modName = modHubGetBeautyModName(item) || '未知模组';
             const isAuto = autoBeautyEnabled && item.isAutoManaged;
             html += `
                 <li class="modhub-item" data-index="${index}" data-drag-type="beauty" data-beauty-type="${window.modHubEscapeHtml(item.type)}" draggable="true">
@@ -200,7 +207,7 @@ window.modHubRenderBeautyUI = function() {
     } else {
         html += '<ul class="modhub-list">';
         disabledList.forEach(item => {
-            const modName = item.modRef?.name || '未知模组';
+            const modName = modHubGetBeautyModName(item) || '未知模组';
             html += `
                 <li class="modhub-item item-disabled" data-beauty-type="${window.modHubEscapeHtml(item.type)}">
                     <div class="modhub-item-info">
@@ -279,7 +286,7 @@ window.modHubToggleBeauty = async function(typeKey, enable) {
         const targetItem = state.allMap.get(typeKey);
         if (!targetItem) return false;
 
-        const modName = targetItem.modRef?.name || targetItem.mod || targetItem.fromMod || '';
+        const modName = modHubGetBeautyModName(targetItem);
         if (enable && state.blockedModNames?.has(String(modName).trim().toLowerCase())) {
             window.modHubShowToast(`请先启用所属模组，再启用美化包【${typeKey}】`, 'warning');
             return false;
@@ -307,6 +314,80 @@ window.modHubToggleBeauty = async function(typeKey, enable) {
     }, undefined, { trackReload: true });
 };
 
+// 配置切换后，旧请求不得把原图写回 Renderer 的缓存与图层。
+window._modHubBeautyImageRevision = window._modHubBeautyImageRevision || 0;
+function modHubBindBeautyImageGuard() {
+    const loader = window.Renderer?.ImageLoader;
+    const loadImage = loader?.loadImage;
+    if (typeof loadImage !== 'function' || loadImage._modHubBeautyGuard) return;
+    loader.loadImage = function(src, layer, success, failure) {
+        const revision = window._modHubBeautyImageRevision;
+        const guard = callback => function(...args) {
+            if (revision === window._modHubBeautyImageRevision && typeof callback === 'function') {
+                return callback.apply(this, args);
+            }
+        };
+        return loadImage.call(this, src, layer, guard(success), guard(failure));
+    };
+    loader.loadImage._modHubBeautyGuard = true;
+}
+modHubBindBeautyImageGuard();
+if (typeof window.jQuery === 'function') {
+    window.jQuery(document).on(':storyready.modHubBeautyImages :passageinit.modHubBeautyImages', modHubBindBeautyImageGuard);
+}
+
+// 只重绘现存画布，不重新执行段落或重置游戏中的渲染选项。
+window.modHubRefreshBeautyImages = function() {
+    modHubBindBeautyImageGuard();
+    window._modHubBeautyImageRevision++;
+    const renderer = window.Renderer;
+    if (!renderer) return false;
+    try {
+        if ('ImageCaches' in renderer) renderer.ImageCaches = {};
+        if ('ImageErrors' in renderer) renderer.ImageErrors = {};
+        const models = new Set();
+        Object.values(renderer.CanvasModelCaches || {}).forEach(slots => {
+            Object.values(slots || {}).forEach(model => models.add(model));
+        });
+        if (renderer.lastModel) models.add(renderer.lastModel);
+        const temporary = window.State?.temporary || window.SugarCube?.State?.temporary || window.T;
+        const multiModels = Object.values(temporary?.multiCombatModels || {});
+        multiModels.forEach(multi => Object.values(multi.models || {}).forEach(model => models.add(model)));
+        const invalidate = layers => {
+            if (typeof renderer.invalidateLayerCaches === 'function') {
+                renderer.invalidateLayerCaches(layers);
+            } else {
+                layers.forEach(layer => {
+                    for (const key of ['image', 'imageSrc', 'mask', 'cachedMaskSrc', 'cachedImage', 'cachedProcessing']) delete layer[key];
+                });
+            }
+        };
+        models.forEach(model => {
+            const layers = [...(model.layerList || []), ...Object.values(model.options?.generatedLayers || {})];
+            invalidate(layers.filter(layer => layer && typeof layer === 'object'));
+        });
+        multiModels.forEach(multi => invalidate((multi.layers || []).filter(layer => layer && typeof layer === 'object')));
+        let refreshed = 'ImageCaches' in renderer;
+        [...models, ...multiModels].forEach(model => {
+            if (!model.canvas?.canvas?.isConnected) return;
+            if (typeof model.redraw !== 'function') {
+                refreshed = false;
+                return;
+            }
+            try {
+                model.redraw();
+            } catch (error) {
+                refreshed = false;
+                console.warn('[ModHub] 美化配置已应用，当前画布刷新失败:', error);
+            }
+        });
+        return refreshed;
+    } catch (error) {
+        console.warn('[ModHub] 美化配置已应用，图像缓存刷新失败:', error);
+        return false;
+    }
+};
+
 // 保存美化排序与设置
 window.modHubSaveBeautyState = async function(showSuccess = true) {
     const bAddon = window.addonBeautySelectorAddon;
@@ -316,9 +397,13 @@ window.modHubSaveBeautyState = async function(showSuccess = true) {
     window.modHubRenderModManageUI();
     try {
         const typeOrder = state.enabledList.map(item => item.type);
+        const changed = JSON.stringify(bAddon.typeOrderUsed?.map(item => item.type) || []) !== JSON.stringify(typeOrder);
         if (await bAddon.saveOrder(typeOrder) === false) throw new Error('美化配置保存失败');
         bAddon.typeOrderUsed = [...state.enabledList];
-        if (showSuccess) window.modHubShowToast('美化包排序已保存（重新载入后完全生效）', 'success');
+        const refreshed = !changed || window.modHubRefreshBeautyImages();
+        if (showSuccess) window.modHubShowToast(refreshed
+            ? '美化配置已保存并即时应用'
+            : '美化配置已保存并应用，部分图像将在下次绘制时更新', 'success');
         return true;
     } catch (e) {
         if (window._modHubManagerBusy) throw e;

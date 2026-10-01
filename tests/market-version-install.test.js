@@ -28,6 +28,8 @@ function fixture(definitions, installed = []) {
         return compare(version, base) === 0;
     };
     const sb = createBaseSandbox({ AbortController });
+    loadScripts(sb, ['javascript/modhub-dialog.js', 'javascript/modhub-restore.js', 'javascript/modhub-manager.js', 'javascript/modhub-market.js']);
+    const runtimeMarket = sb.modHubMarket, offerReload = sb.modHubOfferReload;
     sb.modHubEscapeHtml = value => String(value).replace(/[<>&"]/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[character]));
     sb.modHubShowToast = () => {};
     sb.modHubAlert = async message => { alerts.push(message); };
@@ -49,6 +51,8 @@ function fixture(definitions, installed = []) {
     };
     sb.modHubClearMarketPreparationProgress = name => { if (progress.get(name) === 'prepared') { progress.delete(name); return true; } return false; };
     sb.modHubMarket = {
+        runInstallTask: runtimeMarket.runInstallTask,
+        isInstallBusy: () => !!(runtimeMarket.isInstallBusy() || sb.modHubMarket.batchInstallState.running),
         getMarketModKey: mod => mod.id, getMarketMods: () => mods, getCurrentMirrorId: () => 'test',
         getLocalInstalledProfiles: () => [...profiles.values()],
         checkModInstallStatus: mod => { mod._matchedLocal = [...profiles.values()].find(profile => mod.bootNames.includes(profile.name)) || null; return mod._matchedLocal ? 'up_to_date' : 'not_installed'; },
@@ -95,7 +99,7 @@ function fixture(definitions, installed = []) {
         rankCandidates: (mod, releases) => ({ candidates: releases, recommendedKey: releases[0]?.compatibility.status === 'compatible' || releases[0]?.compatibility.evidence === 'filename' ? releases[0].candidateKey : '', gameVersion: '0.5.0.0' })
     };
     loadScripts(sb, ['javascript/modhub-market-install.js']);
-    return { sb, mods, events, prompts, alerts, profiles, preparedCalls, progress, renderDialog, actualVersions };
+    return { sb, mods, events, prompts, alerts, profiles, preparedCalls, progress, renderDialog, actualVersions, runtimeMarket, offerReload };
 }
 
 /** 复现当前 ModLoader 的包装缓存、规范名称接口与原生声明别名接口。 */
@@ -135,6 +139,132 @@ function useNativeDependencyRanges(f) {
 }
 
 module.exports = async function () {
+    // 还原点整理可以包含真实包体回读；任何入口都必须等到根操作解锁后才询问重载。
+    for (const route of ['单次安装', '批量安装', '市场单次入口', '市场批量入口', '全部更新入口']) {
+        const f = fixture([{ id: 'ReloadTarget', version: '2.0.0', dependencies: [{ id: 'ReloadDependency' }] },
+            { id: 'ReloadDependency' }], route === '全部更新入口'
+                ? [{ name: 'ReloadTarget', version: '1.0.0' }, { name: 'ReloadDependency', version: '1.0.0' }] : []);
+        f.sb._modHubModState.sideDisabled = ['ReloadDependency'];
+        f.sb.modHubIsFrameworkMod = name => name === 'ReloadDependency';
+        f.sb._modHubReloadRevision = 7;
+        const contexts = [], install = f.sb.modHubMarket.downloadAndInstallMod, toggle = f.sb.modHubToggleSideMod;
+        f.sb.modHubMarket.downloadAndInstallMod = (mod, mirror, options) => {
+            if (!options.prepareOnly) contexts.push(options.restoreContext);
+            return install(mod, mirror, options);
+        };
+        f.sb.modHubToggleSideMod = (name, enabled, options) => {
+            contexts.push(options.restoreContext);
+            return toggle(name, enabled, options);
+        };
+        const restore = f.sb.modHubRestore, finish = restore.finish;
+        let releaseFinish, signalFinish, operationContext, operationCount = 0;
+        const finishGate = new Promise(resolve => { releaseFinish = resolve; });
+        const finishStarted = new Promise(resolve => { signalFinish = resolve; });
+        restore.withOperation = async (meta, action) => {
+            operationCount++;
+            operationContext = restore.createOperation(meta);
+            assert.equal(restore.claim(operationContext), true);
+            try { return await action(operationContext); }
+            finally { signalFinish(); await finishGate; await finish(operationContext); }
+        };
+        const timers = [], reloadPrompts = [];
+        let reloaded = 0;
+        f.sb.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
+        f.sb.location = { reload: () => { reloaded++; } };
+        f.sb.modHubOfferReload = f.offerReload;
+        const confirm = f.sb.modHubConfirm;
+        f.sb.modHubConfirm = options => {
+            if (options.title.startsWith('重新载入游戏')) {
+                assert.equal(operationContext.finished, true, '提示前必须完成还原点整理');
+                assert.equal(restore.isOperationBlocked(), false, '提示前必须释放上下文所有权');
+                assert.equal(f.sb.modHubMarket.isInstallBusy(), false, '提示前必须释放市场及批量忙碌标志');
+                assert.equal(options.confirmType, 'danger', '前置核心框架的变更也应汇入最终提示');
+                reloadPrompts.push(options);
+                return true;
+            }
+            return confirm(options);
+        };
+        if (route.includes('入口')) {
+            for (const mod of f.mods) mod.identityId = mod.id.toLowerCase();
+            f.sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1,
+                mods: f.mods.map(mod => ({ ...mod, versionSource: 'github' })) }) });
+            if (route === '全部更新入口') f.sb._modHubModState.sideMods = [{ name: 'ReloadTarget', enabled: true }];
+            await f.runtimeMarket.loadMarketData(true);
+            if (route === '全部更新入口') assert.equal(f.runtimeMarket.getUpdatableMods().length, 1,
+                `测试更新目标应可识别：${JSON.stringify(f.runtimeMarket.getMarketMods())}`);
+            if (route === '市场批量入口') {
+                f.runtimeMarket.toggleBatchSelection(true);
+                f.runtimeMarket.setBatchModSelected(f.runtimeMarket.getMarketModKey(f.mods[0]), true);
+            }
+        }
+        const result = route === '单次安装' ? f.sb.modHubMarketInstaller.install(f.mods[0])
+            : route === '批量安装' ? f.sb.modHubMarketInstaller.installBatch([f.mods[0]])
+            : route === '市场单次入口' ? f.runtimeMarket.promptDownloadMirrorAndInstall(f.mods[0])
+            : route === '市场批量入口' ? f.runtimeMarket.installSelectedMods() : f.runtimeMarket.updateAllMods();
+        await finishStarted;
+        f.sb._modHubReloadExitPending = true;
+        assert.equal(reloadPrompts.length, 0, `${route}：整理未完成不得弹重载框`);
+        assert.equal(timers.filter(item => item.delay === 300 || item.delay === 450).length, 0, `${route}：整理未完成不得安排重载`);
+        assert.equal(f.sb.modHubRestartGame(), false, '用户在整理期间手动重载也应被阻止');
+        releaseFinish();
+        const outcome = await result;
+        assert.ok(outcome !== false, `${route}：保留安装结果`);
+        assert.equal(operationCount, 1, `${route}：目标及前置只能有一个根操作`);
+        assert.ok(contexts.length >= 2 && contexts.every(context => context === operationContext), `${route}：安装与启用前置显式使用同一上下文；实际 ${f.events.join('、')}`);
+        assert.equal(reloadPrompts.length, 1, `${route}：整理完成后只提示一次`);
+        for (const item of timers.filter(item => item.delay === 300)) item.callback();
+        for (const item of timers.filter(item => item.delay === 450)) item.callback();
+        assert.equal(reloaded, 1, `${route}：立即重载应成功一次`);
+        assert.equal(await f.sb.modHubCompleteOperationReload(operationContext), false, '重复完成不得再次重载');
+        assert.equal(await f.sb.modHubPromptPendingReload(), false, '本次提示不得重复为退出提醒');
+    }
+    for (const failure of ['整理失败', '保存失败', '状态待核实']) {
+        const f = fixture([{ id: 'ReloadFailure' }]);
+        const restore = f.sb.modHubRestore, finish = restore.finish;
+        let context;
+        f.sb._modHubReloadRevision = 4;
+        restore.withOperation = async (meta, action) => {
+            context = restore.createOperation(meta); restore.claim(context);
+            try { return await action(context); }
+            finally {
+                await finish(context);
+                if (failure === '整理失败') context.finishError = new Error('测试还原点整理失败');
+                if (failure === '保存失败') f.sb._modHubManagerSaveFailed = true;
+                if (failure === '状态待核实') f.sb._modHubManagerStateUncertain = true;
+                f.sb._modHubReloadExitPending = true;
+            }
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), true, '整理保护不得把已落盘的安装改判为失败');
+        assert.ok(!f.events.includes('reload'), `${failure}：不得自动提示重载`);
+        assert.equal(f.sb._modHubReloadExitPending, false, '失败时不得转而触发重复退出提示');
+        assert.equal(await f.sb.modHubCompleteOperationReload(context), false);
+        assert.equal(f.sb.modHubPromptPendingReload(), false, '失败后退出市场也不能重新触发自动重载提示');
+        assert.equal(f.sb.modHubRestartGame(), false, '失败后定时器或手动重载仍需先核验');
+    }
+    {
+        const f = fixture([{ id: 'ReloadLater' }]);
+        f.sb._modHubReloadRevision = 3;
+        f.sb.modHubOfferReload = f.offerReload;
+        const confirm = f.sb.modHubConfirm;
+        let prompts = 0, switched = 0;
+        f.sb.modHubSwitchTab = () => { switched++; };
+        f.sb.modHubConfirm = options => {
+            if (options.title.startsWith('重新载入游戏')) { prompts++; return false; }
+            return confirm(options);
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), true);
+        assert.equal(prompts, 1);
+        assert.equal(switched, 0, '稍后重载必须保持当前市场页签');
+        assert.equal(await f.sb.modHubPromptPendingReload(), false, '稍后重载之后不得重复提示同一批次');
+    }
+    {
+        const f = fixture([{ id: 'PartialTarget', dependencies: [{ id: 'PartialDependency' }], installFailure: true },
+            { id: 'PartialDependency' }]);
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false, '目标失败仍保持单次安装失败返回值');
+        assert.equal(f.profiles.has('PartialDependency'), true, '保留已成功落盘的前置');
+        assert.equal(f.events.filter(event => event === 'reload').length, 1, '部分成功应在根完成后提示一次重载');
+        assert.equal(f.sb.modHubMarket.isInstallBusy(), false);
+    }
     {
         const f = fixture([]);
         useNativeDependencyRanges(f);
@@ -614,6 +744,7 @@ module.exports = async function () {
         assert.equal(result.results.get('First').status, 'success');
         assert.equal(result.results.get('Second').status, 'skipped');
         assert.deepEqual(f.events.filter(event => event.startsWith('install:')), ['install:First'], '批量停止保留已成功写入项并跳过后续');
+        assert.equal(f.events.filter(event => event === 'reload').length, 1, '写入后停止只为已完成变更提示一次重载');
     }
     {
         const f = fixture([{ id: 'CancelFinal' }]);

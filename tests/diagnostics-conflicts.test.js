@@ -16,7 +16,7 @@ module.exports = async function() {
 
         const analysis = manager.modHubAnalyzeLogs(rawLogLines);
 
-        assert.equal(analysis.errorCount, 2, '两行包含错误标记的日志必须计为 2 处错误');
+        assert.equal(analysis.errorCount, 2, '两行包含错误标记的日志必须计为 2 条错误日志');
         assert.ok(analysis.errorMods.includes('原版优化'), '必须准确提取报错模组【原版优化】');
         assert.ok(analysis.errorFiles.includes('Widgets Clothing Caption'), '必须准确提取报错段落【Widgets Clothing Caption】');
 
@@ -29,6 +29,37 @@ module.exports = async function() {
         assert.ok(issue.solution.includes('核心剧情') && issue.solution.includes('可正常游玩'), '对于原版优化顶栏入口补丁冲突必须给出不影响核心游玩的安抚与分析');
     }
 
+    // 截图中的作弊条件是待匹配代码，不能作为模组名，也不能套用管理器入口诊断。
+    {
+        const manager = loadManager({
+            modLoaderGui: { gModUtils: { getModListNameNoAlias: () => ['Cheat-Lyra', 'Lyra', 'Remy Love Mod', 'Love Mod'] } }
+        });
+        const detail = '[错误] [TweeReplacer] do_patch() cannot find findString: [Cheat-Lyra] findString: [and $cheatsEnabled is true or $debug is 1] in: [StoryCaption]';
+        const summary = '[错误] [TweeReplacer] do_patch() done: [Cheat-Lyra] okCount:[6] errorCount:[1]';
+        for (const logs of [[detail, summary], [summary, detail]]) {
+            const analysis = manager.modHubAnalyzeLogs(logs);
+            assert.deepEqual(Array.from(analysis.errorMods), ['Cheat-Lyra', 'TweeReplacer'], '仅补丁来源与框架可作为关联模组，不能提取条件代码或 Lyra 子串');
+            assert.deepEqual(Array.from(analysis.errorFiles), ['StoryCaption'], '必须保留真实目标段落');
+            const issue = analysis.matchedIssues[0];
+            assert.ok(issue.desc.includes('作弊按钮开放条件'), '统计行先出现时，仍应优先使用具体补丁诊断');
+            assert.ok(issue.desc.includes('不能确定冲突来源或功能影响'), '不得断定错误来源或保证补丁无害');
+            assert.ok(!issue.desc.includes('原版优化') && !issue.solution.includes('完全不会影响'), '作弊补丁不能套用原版优化入口安抚');
+            const diagnosis = createStubElement();
+            manager.document.getElementById = id => id === 'modHubLogDiagnosisContainer' ? diagnosis : null;
+            manager.modHubRenderLogDiagnosis(analysis);
+            assert.ok(diagnosis.innerHTML.includes('发现 2 条错误日志'), '界面须按日志行数描述错误计数');
+        }
+        const regexAnalysis = manager.modHubAnalyzeLogs([
+            '[错误] [TweeReplacer] do_patch() cannot find findRegex: [其他模组] findRegex: [and [Lyra] <<link [[入口|StoryCaption]]>>] in: [StoryCaption]'
+        ]);
+        assert.deepEqual(Array.from(regexAnalysis.errorMods), ['其他模组', 'TweeReplacer'], 'findRegex 正文中的名称与嵌套方括号不得成为模组来源');
+        assert.ok(!regexAnalysis.matchedIssues[0].desc.includes('管理器入口'), '同一段落的其他补丁不得套用入口诊断');
+        const known = manager.modHubAnalyzeLogs(['[错误] Cheat-Lyra 与 Remy Love Mod 调用失败']);
+        assert.deepEqual(Array.from(known.errorMods).sort(), ['Cheat-Lyra', 'Remy Love Mod'], '已知模组须匹配完整名称，不能匹配连字符或空格中的短名称');
+        const quoted = manager.modHubAnalyzeLogs(['[错误] modName: "Remy Love Mod"']);
+        assert.deepEqual(Array.from(quoted.errorMods), ['Remy Love Mod'], '带空格的名称字段不得被截成首个词');
+    }
+
     // 13.2 怨灵的倒影神庙段落补丁冲突精准诊断与友好建议测试
     {
         const manager = loadManager();
@@ -39,7 +70,7 @@ module.exports = async function() {
 
         const analysis = manager.modHubAnalyzeLogs(rawLogLines);
 
-        assert.equal(analysis.errorCount, 2, '两行错误日志必须计为 2 处错误');
+        assert.equal(analysis.errorCount, 2, '两行错误日志必须计为 2 条错误日志');
         assert.ok(analysis.errorMods.includes("Wraith'sReflection"), '必须准确提取报错模组 Wraith\'sReflection');
         assert.ok(analysis.errorFiles.includes('Temple Jordan'), '必须准确提取报错段落 Temple Jordan');
 
@@ -55,6 +86,68 @@ module.exports = async function() {
         manager.document.getElementById = id => id === 'modHubLogDiagnosisContainer' ? diagnosis : null;
         manager.modHubRenderLogDiagnosis(analysis);
         assert.ok(diagnosis.innerHTML.includes('怨灵的倒影'), '独立日志模块必须通过共享接口渲染中文别名');
+    }
+
+    // 早期恢复日志与常规捕获器、原版日志重复时只显示一次，独立错误不能被同类关键词吞掉。
+    {
+        const nativeError = '[TweeReplacer] do_patch() cannot find findString: [ModA] findString: [原文] in: [Example]';
+        const otherError = '[TweeReplacer] do_patch() cannot find findString: [ModB] findString: [原文] in: [Example]';
+        const runtimeError = 'TypeError: 启动对象未定义\nstartup@game.html:12:3';
+        const earlyLogs = [
+            '[脚本异常] ' + runtimeError,
+            '[控制台报错] ' + nativeError,
+            { message: '[控制台报错] ' + otherError, level: 'error', time: '11:00:00' },
+            { message: '早期恢复入口已就绪', level: 'info', time: '11:00:01' },
+            { message: '早期恢复警告', level: 'warning', time: Date.now() }
+        ];
+        const nativeLogs = [{ type: 'error', str: nativeError }, { type: 'info', str: '' }];
+        const manager = loadManager({
+            modLoaderGui: { gLoadingProgress: { logList: nativeLogs } },
+            modHubRestore: { getStartupLogs: () => earlyLogs }
+        });
+        manager._modHubStartupErrors.push('[控制台报错] ' + runtimeError);
+        const logs = manager.modHubGetRawModLoaderLogs();
+        const analysis = manager.modHubAnalyzeLogs(logs);
+        assert.equal(analysis.errorCount, 3, '早期与常规捕获重复的运行时错误、原版补丁错误分别只保留一次');
+        assert.equal(logs.filter(item => item.message.includes(runtimeError)).length, 1, '不同捕获前缀的同一堆栈必须跨流去重');
+        assert.equal(logs.filter(item => item.message.includes(nativeError)).length, 1, '原版已有的早期日志不得再次导入');
+        assert.equal(logs.find(item => item.message.includes(otherError)).time, '11:00:00', '不同模组的同类错误不得被合并且须保留时间');
+        assert.equal(logs.find(item => item.message === '早期恢复入口已就绪').level, 'info', '结构化早期日志须保留真实级别');
+        const warning = logs.find(item => item.message === '早期恢复警告');
+        assert.equal(warning.level, 'warn', '恢复模块的 warning 级别不得误记为 error');
+        assert.match(warning.time, /^\d{1,2}:\d{2}:\d{2}$/, '早期数值时间戳须转换为可读时间');
+        assert.equal(nativeLogs.length, 2, '合并不得修改原版日志');
+        assert.equal(earlyLogs.length, 5, '合并不得修改早期捕获数据');
+        manager.modHubRestore.getStartupLogs = () => { throw new Error('日志接口暂不可用'); };
+        assert.doesNotThrow(() => manager.modHubGetRawModLoaderLogs(), '早期日志接口失败不得破坏现有日志查看');
+    }
+
+    // 真实早期模块先捕获异常，常规脚本稍后加载时仍须合并且不重复计算。
+    {
+        const listeners = {};
+        let earlyHook;
+        const controller = { addLifeTimeCircleHook: (name, hook) => { earlyHook = hook; } };
+        const loader = {
+            constructor: { dbName: '阶段测试库', storeName: '阶段测试库', modDataIndexDBZipList: '启用', modDataIndexDBZipListHidden: '禁用', calcModNameKey: name => '包:' + name },
+            customStore: () => Promise.reject(new Error('阶段测试不提供持久层'))
+        };
+        const manager = createBaseSandbox({
+            indexedDB: {}, modModLoadController: controller,
+            modUtils: { getModLoader: () => ({ getIndexDBLoader: () => loader }) },
+            addEventListener: (type, listener) => { listeners[type] = listener; },
+            console: { error() {}, warn() {}, log() {} }
+        });
+        loadScripts(manager, bootJson.scriptFileList_inject_early);
+        await manager.modHubRestore.startupReady;
+        assert.ok(earlyHook && typeof listeners.error === 'function', 'inject_early 阶段必须注册错误与加载日志捕获');
+        earlyHook.logWarning('分阶段加载警告');
+        listeners.error({ message: 'TypeError: 分阶段启动异常' });
+        loadScripts(manager, bootJson.scriptFileList.filter(file => file !== 'javascript/modhub-market.js'));
+        manager.console.error('TypeError: 分阶段启动异常');
+        const analysis = manager.modHubAnalyzeLogs(manager.modHubGetRawModLoaderLogs());
+        assert.equal(analysis.errorCount, 1, '早期与常规捕获器的同一异常须只显示一次');
+        assert.equal(analysis.warnCount, 1, '真实早期模块的 warning 日志须保留为警告');
+        assert.ok(analysis.lines.some(line => line.message.includes('分阶段启动异常')), '正常模块加载后仍可查看早期异常');
     }
 
     // 13.3 启动错误对象不能因消息缺少 Error 字样而漏记，原版日志仍保持独立
@@ -465,13 +558,13 @@ module.exports = async function() {
 
         // 提取按钮文本与顺序
         const buttonMatches = [...actionBlock.matchAll(/<button([^>]*)>([^<]+)<\/button>/g)];
-        assert.equal(buttonMatches.length, 4, '顶部操作栏必须有且仅有 4 个核心操作按钮');
+        assert.equal(buttonMatches.length, 5, '顶部操作栏必须有且仅有 5 个核心操作按钮');
 
         const buttonNames = buttonMatches.map(m => m[2].trim());
         assert.deepEqual(
             buttonNames,
-            ['导入模组', '重新载入游戏', '智能整理模组与美化顺序', '刷新列表'],
-            '顶部按钮顺序必须为：导入模组 -> 重新载入游戏 -> 智能整理模组与美化顺序 -> 刷新列表'
+            ['导入模组', '重新载入游戏', '智能整理模组与美化顺序', '刷新列表', '时间点还原'],
+            '顶部按钮顺序必须为：导入模组 -> 重新载入游戏 -> 智能整理模组与美化顺序 -> 刷新列表 -> 时间点还原'
         );
 
         // 验证所有按钮均统一具备 modhub-btn-primary 类
@@ -1052,7 +1145,7 @@ module.exports = async function() {
         // 16.5 契约 5：连续安装/多步骤下载过程中不弹出重启提示打断，全部完成后统一弹窗
         const marketJs = fs.readFileSync(path.join(srcRoot, 'javascript/modhub-market.js'), 'utf8');
         assert.ok(marketJs.includes('skipReloadOffer: options.skipReloadOffer'), 'downloadAndInstallMod 必须透传 skipReloadOffer 到底层');
-        assert.ok(marketJs.includes('await window.modHubToggleSideMod(action.local.name, true, { silentOfferReload: true })'), '多步骤计划中启用前置必须静默处理，严禁中途弹出重载提醒');
+        assert.match(marketJs, /await window\.modHubToggleSideMod\(action\.local\.name, true, \{ silentOfferReload: true,\s*restoreContext(?:\s*:[^}]*)? \}\)/, '多步骤计划中启用前置必须静默处理，并显式传递同批次还原点上下文');
         assert.ok(marketJs.includes('skipReloadOffer: true'), '多步骤计划与批量更新中下载安装必须显式声明 skipReloadOffer: true');
         assert.ok(managerJs.includes('(!options || !options.skipReloadOffer)'), 'modHubHandleAddMod 必须尊重 skipReloadOffer 守护，杜绝擅自提前弹窗');
         assert.ok(managerJs.includes('if (!options?.keepCurrentTab)'), 'modHubHandleAddMod 必须在非 keepCurrentTab 模式下才允许跳转页签');
@@ -1061,7 +1154,8 @@ module.exports = async function() {
         assert.ok(managerJs.includes('!targetEnable && !options.skipConfirm'), 'modHubToggleSideMod 必须在禁用前检查是否需二次确认');
         assert.ok(managerJs.includes('window.modHubFindDependentMods(modName)'), 'modHubToggleSideMod 必须调用 modHubFindDependentMods 排查下游受影响模组');
         assert.ok(!managerJs.includes('（原排序保持不变）'), 'Toast 提示中严禁残留（原排序保持不变）冗余文字');
-        assert.ok(marketJs.includes('{ silentOfferReload: true, skipConfirm: true }'), '市场快捷禁用必须传入 skipConfirm: true 杜绝二次弹窗');
+        assert.match(marketJs, /\{ silentOfferReload: true, skipConfirm: true,\s*restoreContext(?:\s*:[^}]*)? \}/, '市场快捷禁用必须传入 skipConfirm: true，并显式使用同批次还原点上下文');
+        assert.ok(!marketJs.includes('marketRestoreContext') && !marketJs.includes('getRestoreContext'), '市场共享操作上下文不能依赖全局隐式状态');
 
         // 16.7 契约 7：简易框架与秋枫白桦互斥组仲裁引擎与防别名污染
         // 模拟运行环境中 ModLoader 别名重定向导致 modHubGetModInfo('Simple Frameworks') 返回 maplebirch 信息，

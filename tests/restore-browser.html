@@ -1,0 +1,423 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ModHub 隔离验收</title>
+<style>
+:root{color-scheme:dark;--850:#222;--600:#666;--100:#eee}body{margin:16px;background:#111;color:#ddd;font:16px/1.6 sans-serif}main{max-width:840px;margin:auto;padding-bottom:80px}a{color:#d6b365}button{background:#292929;color:#eee;border:1px solid #666;min-height:36px;padding:6px 10px;font:inherit;white-space:normal}pre{white-space:pre-wrap;overflow-wrap:anywhere}h1{font-size:22px;color:#d6b365}
+</style>
+</head>
+<body>
+<main><h1>ModHub 隔离验收</h1><p>此页面用浏览器原生 IndexedDB 验证还原事务。完整加载、启动救援与美化验收请进入实际游戏。所有数据库使用页面显示的测试前缀，存档与浏览器存储限于独立端口。</p><p><a href="/game">打开真实游戏验收</a></p><div id="modHubAcceptanceHarness"></div></main>
+<script id="modHubAcceptanceDriver">
+(function () {
+    'use strict';
+    const config = window.modHubAcceptanceConfig;
+    if (!config) return;
+    const game = config.mode === 'game';
+    const recordKey = `${config.prefix}_expected`;
+    const saveKey = `${config.prefix}_save_sentinel`;
+    const keys = config.keys;
+    const stateKeys = ['modhub_sideload_mod_order', 'modhub_auto_enable_sideload_beauty'];
+    let output, panel, busy = false;
+    const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    const settings = () => Object.fromEntries(stateKeys.map(key => [key, localStorage.getItem(key)]));
+    const safeModeSwitch = () => window.modUtils?.getMod?.('ModLoaderGui')?.modRef?.modLoadSwitch
+        || window.modLoaderGui?.modLoadSwitch || window.modLoaderGuiInstance?.modLoadSwitch
+        || window.modUtils?.getModLoadSwitch?.();
+    const isSafeModeOn = () => typeof safeModeSwitch()?.isSafeModeOn === 'function' ? safeModeSwitch().isSafeModeOn() : null;
+    const checkSafeMode = () => assert(isSafeModeOn() !== true, '原生 ModLoaderGui 安全模式正在跳过验收图包与故障包，请显式点击【关闭本次验收安全模式并重载】后重试');
+    const beautyOwner = item => item?.modRef?.mod?.name
+        || item?.imgListRef?.get?.('img/modhub-test.png')?.getter?.modName
+        || item?.modRef?.name || (typeof item?.mod === 'string' ? item.mod : item?.mod?.name) || item?.fromMod || '';
+    const beautyTypes = () => (window.addonBeautySelectorAddon?.getTypeOrder?.() || []).map(item => ({
+        type: item.type,
+        原始字段: Object.keys(item),
+        modRefName: item.modRef?.name ?? null,
+        modRefModName: item.modRef?.mod?.name ?? null,
+        getterModName: item.imgListRef?.get?.('img/modhub-test.png')?.getter?.modName ?? null,
+        实际所属名称: beautyOwner(item),
+    }));
+    const interfaces = () => ({
+        恢复早期入口: typeof window.modHubRestore?.restore === 'function',
+        管理器运行入口: typeof window.modHubHandleAddMod === 'function',
+        GUI真实实例: !!window.modUtils?.getMod?.('ModLoaderGui')?.modRef,
+        安全模式真实开关: typeof safeModeSwitch()?.disableSafeMode === 'function',
+        美化插件: !!window.addonBeautySelectorAddon,
+        原生Renderer: !!window.Renderer,
+        原生CanvasModel: typeof window.CanvasModel?.create === 'function',
+        原生MultiCanvasModel: typeof window.MultiCanvasModel?.create === 'function',
+        游戏StatePassage: window.SugarCube?.State?.passage || '',
+        isSafeModeOn: isSafeModeOn(),
+    });
+    const log = message => { output.textContent += `${new Date().toLocaleTimeString('zh-CN', { hour12: false })} ${message}\n`; output.scrollTop = output.scrollHeight; };
+    const decode = raw => typeof raw === 'string' ? Uint8Array.from(atob(raw), character => character.charCodeAt(0)) : new Uint8Array(raw);
+    async function hash(raw) {
+        const data = decode(raw);
+        return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', data)), byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+    function open(name, storeName, create = false) {
+        assert(name.startsWith(config.prefix), '拒绝访问测试前缀以外的数据库');
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(name);
+            let missing = false;
+            request.onupgradeneeded = () => {
+                if (create) request.result.createObjectStore(storeName);
+                else { missing = true; request.transaction.abort(); }
+            };
+            request.onerror = () => missing ? resolve(null) : reject(request.error);
+            request.onsuccess = () => {
+                const db = request.result;
+                if (!db.objectStoreNames.contains(storeName)) { db.close(); reject(new Error('实际数据库缺少指定仓库')); }
+                else resolve(db);
+            };
+        });
+    }
+    async function rows(dbName, storeName) {
+        const db = await open(dbName, storeName);
+        if (!db) return new Map();
+        try {
+            return await new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readonly');
+                const result = new Map();
+                const request = tx.objectStore(storeName).openCursor();
+                request.onsuccess = () => { const cursor = request.result; if (cursor) { result.set(cursor.key, cursor.value); cursor.continue(); } };
+                tx.oncomplete = () => resolve(result);
+                tx.onabort = tx.onerror = () => reject(tx.error);
+            });
+        } finally { db.close(); }
+    }
+    async function write(dbName, storeName, values, deletes = []) {
+        const db = await open(dbName, storeName, true);
+        try {
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(storeName, 'readwrite'); const store = tx.objectStore(storeName);
+                for (const [key, value] of values) store.put(value, key);
+                for (const key of deletes) store.delete(key);
+                tx.oncomplete = resolve; tx.onabort = tx.onerror = () => reject(tx.error);
+            });
+        } finally { db.close(); }
+    }
+    function schema() {
+        const loader = window.modUtils?.getModLoader?.()?.getIndexDBLoader?.();
+        const klass = loader?.constructor;
+        assert(klass && typeof klass.calcModNameKey === 'function', '等待真实 ModLoader 提供存储接口');
+        const result = { dbName: klass.dbName, storeName: klass.storeName, enabledKey: klass.modDataIndexDBZipList, disabledKey: klass.modDataIndexDBZipListHidden, prefix: klass.calcModNameKey('') };
+        assert(result.dbName === keys.ModLoader_IndexDBLoader && result.storeName === keys.ModLoader_IndexDBLoader && result.enabledKey === keys.modDataIndexDBZipList && result.disabledKey === keys.modDataIndexDBZipListHidden && result.prefix === keys.modDataIndexDBZip + ':', '实际 ModLoader 命名空间与隔离配置不一致');
+        return result;
+    }
+    function beautySchema() {
+        const addon = window.addonBeautySelectorAddon;
+        const result = { dbName: addon?.BeautySelectorAddon_dbName || keys.BeautySelectorAddon, storeName: addon?.BeautySelectorAddon_storeName || keys.BeautySelectorAddon, key: addon?.BeautySelectorAddon_OrderSaveKey || keys.BeautySelectorAddon_OrderSaveKey };
+        assert(result.dbName === keys.BeautySelectorAddon && result.storeName === keys.BeautySelectorAddon && result.key === keys.BeautySelectorAddon_OrderSaveKey, '实际美化命名空间与隔离配置不一致');
+        return result;
+    }
+    async function inspect() {
+        const spec = schema(); const values = await rows(spec.dbName, spec.storeName);
+        const packages = [];
+        for (const [key, raw] of values) if (typeof key === 'string' && key.startsWith(spec.prefix)) packages.push({ name: key.slice(spec.prefix.length), hash: await hash(raw), size: decode(raw).length });
+        packages.sort((a, b) => a.name.localeCompare(b.name));
+        const beauty = beautySchema(); const beautyValues = await rows(beauty.dbName, beauty.storeName);
+        const result = { schema: spec, enabled: JSON.parse(values.get(spec.enabledKey) || '[]'), disabled: JSON.parse(values.get(spec.disabledKey) || '[]'), packages, beautyValue: beautyValues.get(beauty.key) ?? null, settings: settings(), journal: !!values.get('modhub_restore_journal_v1'), save: localStorage.getItem(saveKey), points: values.get('modhub_restore_points_v1') || [], isSafeModeOn: isSafeModeOn(), interfaces: interfaces() };
+        if (typeof indexedDB.databases === 'function') result.databaseNames = (await indexedDB.databases()).map(db => db.name);
+        return result;
+    }
+    function expectedView(state) {
+        return { enabled: state.enabled, disabled: state.disabled, packages: state.packages, beautyValue: state.beautyValue, settings: state.settings, save: state.save };
+    }
+    async function verify() {
+        const expected = JSON.parse(sessionStorage.getItem(recordKey) || 'null');
+        assert(expected, '尚未建立验收基线');
+        const actual = await inspect();
+        assert(same(expected.state, expectedView(actual)), '回滚后的列表、包体哈希、美化配置或存档标记与操作前不一致：\n' + JSON.stringify({ expected: expected.state, actual: expectedView(actual) }, null, 2));
+        assert(!actual.journal, '恢复事务日志尚未清除');
+        if (game) {
+            checkSafeMode();
+            assert(window.SugarCube?.State?.passage && document.querySelector('.passage'), '实际游戏首界面尚未完成渲染');
+            const screen = document.getElementById('init-screen');
+            assert(!screen || getComputedStyle(screen).display === 'none', '实际游戏仍停留在加载页面');
+            log(`通过：真实游戏已进入【${window.SugarCube.State.passage}】，列表及全部包体 SHA-256 与操作前相同，美化配置、存档标记恢复，事务日志已清除。`);
+        } else log('通过：原生 IndexedDB 的包体、列表与美化跨库恢复完全一致；游戏存档标记保持不变，事务日志已清除。');
+        log(JSON.stringify(expectedView(actual), null, 2));
+    }
+    async function packageBytes(kind) {
+        const response = await fetch(`/api/package?kind=${kind}`);
+        assert(response.ok, '测试包读取失败');
+        const data = await response.arrayBuffer(); assert(await hash(data) === config.hashes[kind], '测试包传输哈希不一致'); return data;
+    }
+    function fileInput(files) {
+        assert(typeof DataTransfer === 'function', '当前浏览器不支持构造测试 FileList');
+        const input = document.createElement('input'); input.type = 'file'; input.multiple = files.length > 1;
+        const transfer = new DataTransfer(); files.forEach(file => transfer.items.add(file)); input.files = transfer.files;
+        assert(input.files.length === files.length, '测试文件未进入真实 HTMLInputElement.files');
+        return input;
+    }
+    async function install(kind, promptReload = false) {
+        assert(typeof window.modHubHandleAddMod === 'function', '游戏运行模块尚未加载完成');
+        const data = await packageBytes(kind);
+        const result = await window.modHubHandleAddMod(fileInput([new File([data], `modhub-acceptance-${kind}.zip`, { type: 'application/zip' })]), { askRestart: promptReload, keepCurrentTab: true });
+        assert(result !== false, window._modHubLastInstallError || '真实安装接口返回失败');
+        const actual = await inspect(); const name = kind === 'throw' ? 'ModHub验收抛错' : kind === 'hang' ? 'ModHub验收挂起' : 'ModHub验收图包';
+        assert(actual.enabled.includes(name) && actual.packages.some(item => item.name === name && item.hash === config.hashes[kind]), '真实安装后列表或包体回读不一致');
+    }
+    async function baseline() {
+        checkSafeMode();
+        const before = await inspect();
+        // BSA 2.9.0 的图像缓存键不含 type，使用不同 modName 的单 type 内存包。
+        const files = []; const expected = [];
+        for (const [kind, name] of [['base', 'ModHub验收图包'], ['base-b', 'ModHub验收图包乙']]) {
+            const data = await packageBytes(kind);
+            files.push(new File([data], `${name}.zip`, { type: 'application/zip' })); expected.push({ name, hash: await hash(data) });
+        }
+        // 保持真实批量入口，验证单次管理锁与共享操作前还原点。
+        const result = await window.modHubHandleAddMod(fileInput(files), { askRestart: false, keepCurrentTab: true });
+        assert(result !== false, window._modHubLastInstallError || '双图包基线安装失败');
+        const actual = await inspect();
+        assert(expected.every(item => actual.enabled.includes(item.name) && actual.packages.some(pack => pack.name === item.name && pack.hash === item.hash)), '双图包真实安装后的列表或包体哈希不一致');
+        const changed = expected.some(item => !before.enabled.includes(item.name) || !before.packages.some(pack => pack.name === item.name && pack.hash === item.hash));
+        if (changed) {
+            const oldPoints = new Set(before.points.map(point => point.id));
+            const addedPoints = actual.points.filter(point => !oldPoints.has(point.id));
+            assert(addedPoints.length === 1, '真实两包批量安装没有共享一个操作前还原点：新增点数 ' + addedPoints.length);
+            log('通过：两个真实安装包共享一个操作前还原点 ' + addedPoints[0].id);
+        }
+        localStorage.setItem(saveKey, '验收存档标记保持不变');
+        log('两个不同 modName 的单 type 基线图包已通过真实安装接口保存，正在重新载入实际游戏。'); location.reload();
+    }
+    async function fault(kind, promptReload = false) {
+        checkSafeMode();
+        const before = await inspect();
+        assert(before.enabled.includes('ModHub验收图包'), '请先安装基线图包并重载');
+        assert(!before.enabled.some(name => ['ModHub验收抛错', 'ModHub验收挂起'].includes(name)), '请先完成上一次故障的回滚');
+        sessionStorage.setItem(recordKey, JSON.stringify({ kind, state: expectedView(before) }));
+        await install(kind, promptReload);
+        const after = await inspect(); const point = after.points.find(item => same(expectedView({ ...item.state, beautyValue: item.state.beauty.value, save: before.save }), expectedView(before)));
+        assert(point, '真实安装前没有完整保留可用还原点');
+        sessionStorage.setItem(recordKey, JSON.stringify({ kind, pointId: point.id, state: expectedView(before) }));
+        log(`已生成操作前还原点【${point.label}】，重载后请主动打开加载页时间点恢复入口，查看变更并确认还原。`);
+        if (!promptReload) location.reload();
+    }
+    async function beauty() {
+        checkSafeMode();
+        assert(window.addonBeautySelectorAddon && typeof window.modHubMoveBeauty === 'function', '实际美化插件尚未完成加载');
+        assert(window.Renderer?.CanvasModels && typeof window.CanvasModel?.create === 'function' && typeof window.MultiCanvasModel?.create === 'function', '当前游戏未公开真实 CanvasModel 与 MultiCanvasModel 工厂接口');
+        const turns = window.SugarCube.State.turns;
+        await window.modHubLoadModManageState();
+        await window.modHubToggleAutoBeautySetting(false);
+        await window.modHubLoadBeautyState(false);
+        log('真实美化 type 状态：' + JSON.stringify(beautyTypes(), null, 2));
+        for (const type of ['ModHub验收美化甲', 'ModHub验收美化乙']) {
+            assert(window._modHubBeautyState.allMap.has(type), '实际美化插件没有注册验收图包，请先安装基线并重载');
+            if (!window._modHubBeautyState.enabledList.some(item => item.type === type)) await window.modHubToggleBeauty(type, true);
+        }
+        const firstOwner = beautyOwner(window._modHubBeautyState.allMap.get('ModHub验收美化甲'));
+        const secondOwner = beautyOwner(window._modHubBeautyState.allMap.get('ModHub验收美化乙'));
+        assert(firstOwner && secondOwner && firstOwner !== secondOwner, '验收图包实际所属名称没有分离：' + JSON.stringify({ firstOwner, secondOwner }) + '，请安装不同 modName 的双图包并重载');
+        const revision = window._modHubReloadRevision;
+        const move = async type => { const index = window._modHubBeautyState.enabledList.findIndex(item => item.type === type); await window.modHubMoveBeauty(index, 'top'); return window.addonBeautySelectorAddon.imageGetter('img/modhub-test.png'); };
+        const first = await move('ModHub验收美化甲');
+        // 使用游戏原生模型工厂和渲染器，仅登记中性验收模板与专用缓存槽。
+        const modelKey = `${config.prefix}_canvas_probe`;
+        const multiKey = `${config.prefix}_multi_probe`;
+        window.Renderer.CanvasModels[modelKey] = { name: modelKey, width: 2, height: 2, frames: 1, layers: { test: { show: true, src: 'img/modhub-test.png', z: 0, width: 2, height: 2 } } };
+        const normal = window.CanvasModel.create(modelKey, 'normal');
+        const normalContext = normal.createCanvas(false);
+        const multi = window.MultiCanvasModel.create(multiKey, modelKey, 'combat');
+        const temporary = window.State?.temporary || window.SugarCube?.State?.temporary || window.T;
+        assert(window.Renderer.CanvasModelCaches[modelKey]?.normal === normal && temporary?.multiCombatModels?.[multiKey] === multi, '真实模型未登记到业务刷新发现的普通/战斗缓存位置');
+        document.getElementById('modHubAcceptanceCanvasProbe')?.remove();
+        const preview = document.createElement('div'); preview.id = 'modHubAcceptanceCanvasProbe'; preview.style.cssText = 'display:flex;gap:12px;flex-wrap:wrap';
+        for (const [label, context] of [['普通 CanvasModel', normalContext], ['战斗 MultiCanvasModel', multi.canvas]]) {
+            const item = document.createElement('div'); const caption = document.createElement('div'); caption.textContent = label;
+            context.canvas.style.cssText = 'display:block;width:56px;height:56px;image-rendering:pixelated;border:1px solid #666'; context.canvas.setAttribute('aria-label', label + '中性验收画布'); item.append(caption, context.canvas); preview.appendChild(item);
+        }
+        panel.appendChild(preview);
+        const painted = { normal: 0, combat: 0 }; const errors = [];
+        normal.render(normalContext, normal.defaultOptions(), { renderingDone: () => painted.normal++, error: error => errors.push(String(error)), loadError: () => errors.push('普通验收画布未能读取真实美化图像') });
+        multi.play({ renderingDone: () => painted.combat++, error: error => errors.push(String(error)), loadError: () => errors.push('战斗验收画布未能读取真实美化图像') });
+        const pixel = context => Array.from(context.getImageData(0, 0, 1, 1).data);
+        const waitPaint = async (last, expectedPixel) => {
+            const deadline = Date.now() + 8000;
+            while (Date.now() < deadline) {
+                if (errors.length) throw new Error(errors.join('；'));
+                if (painted.normal > last.normal && painted.combat > last.combat && same(pixel(normalContext), expectedPixel) && same(pixel(multi.canvas), expectedPixel)) return;
+                await new Promise(resolve => setTimeout(resolve, 25));
+            }
+            throw new Error('真实画布未完成预期像素更新：' + JSON.stringify({ painted, normalPixel: pixel(normalContext), combatPixel: pixel(multi.canvas), expectedPixel }));
+        };
+        const imagePixel = async data => {
+            const image = new Image(); await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('真实美化返回的图像无法解码')); image.src = data; });
+            const context = window.Renderer.createCanvas(2, 2); context.drawImage(image, 0, 0); return pixel(context);
+        };
+        const firstPixel = await imagePixel(first);
+        await waitPaint({ normal: 0, combat: 0 }, firstPixel);
+        const before = { ...painted };
+        // 本轮只修改美化顺序，画布再次绘制必须由业务保存后的集中刷新触发。
+        const second = await move('ModHub验收美化乙');
+        const secondPixel = await imagePixel(second);
+        await waitPaint(before, secondPixel);
+        assert(first && second && first !== second, '更改优先级后真实美化图像没有变化');
+        assert(!same(firstPixel, secondPixel), '两套验收美化像素相同，无法证明真实画布切换');
+        assert(window.SugarCube.State.turns === turns, '美化调整推进了游戏 State.turns');
+        assert(window._modHubReloadRevision === revision, '美化调整产生了重新载入标记');
+        log(`通过：真实普通 CanvasModel 与战斗 MultiCanvasModel 由业务保存刷新后像素从 [${firstPixel}] 切换到 [${secondPixel}]；原生渲染完成次数 ${painted.normal}/${painted.combat}，State.turns=${turns} 保持不变，未增加重新载入标记。`);
+    }
+    async function script(name) {
+        return new Promise((resolve, reject) => { const tag = document.createElement('script'); tag.src = '/source/javascript/' + name; tag.onload = resolve; tag.onerror = () => reject(new Error('运行模块读取失败：' + name)); document.head.appendChild(tag); });
+    }
+    async function harnessInit() {
+        const spec = { dbName: keys.ModLoader_IndexDBLoader, storeName: keys.ModLoader_IndexDBLoader, enabledKey: keys.modDataIndexDBZipList, disabledKey: keys.modDataIndexDBZipListHidden, prefix: keys.modDataIndexDBZip + ':' };
+        await open(spec.dbName, spec.storeName, true).then(db => db.close());
+        // 此适配器仅提供真实仓库与档案校验接口；恢复逻辑来自当前源码。
+        class HarnessLoader {
+            customStore(mode, action) { return open(spec.dbName, spec.storeName).then(db => { const tx = db.transaction(spec.storeName, mode); const result = action(tx.objectStore(spec.storeName)); return Promise.resolve(result).finally(() => db.close()); }); }
+        }
+        Object.assign(HarnessLoader, { dbName: spec.dbName, storeName: spec.storeName, modDataIndexDBZipList: spec.enabledKey, modDataIndexDBZipListHidden: spec.disabledKey, calcModNameKey: name => spec.prefix + name });
+        const loader = new HarnessLoader();
+        window.modModLoadController = {
+            async checkModZipFileIndexDB(data) { const response = await fetch('/api/inspect', { method: 'POST', body: decode(data) }); assert(response.ok, '真实 Zip 档案校验失败'); return response.json(); },
+            addLifeTimeCircleHook() {},
+        };
+        window.SugarCube = { State: { passage: '原生存储验收' } };
+        const builtins = [
+            { name: 'ModHub', from: 'Local', mod: { name: 'ModHub', bootJson: { name: 'ModHub', version: config.version, scriptFileList_inject_early: ['javascript/modhub-restore.js'], dependenceInfo: [{ modName: 'TweeReplacer' }] } } },
+            { name: 'TweeReplacer', from: 'Local', mod: { name: 'TweeReplacer', bootJson: { name: 'TweeReplacer', version: '1.0.0' } } }
+        ];
+        window.modUtils = { getModLoader: () => ({ getIndexDBLoader: () => loader, getModReadCache: () => ({ get_Array: () => builtins }), getLoaderKeyConfig: () => ({ getLoaderKey: (key, fallback) => keys[key] || fallback }) }), getMod: name => builtins.find(item => item.name === name)?.mod };
+        await script('modhub-dialog.js'); await script('modhub-restore-panel.js'); await script('modhub-restore.js');
+        await window.modHubRestore.startupReady;
+        log('原生存储验收已就绪。事务在浏览器 IndexedDB 内执行，未使用测试框架的存储模拟。');
+    }
+    async function harnessCase() {
+        const spec = schema(); const b = beautySchema(); const current = await inspect();
+        const deletes = current.packages.map(item => spec.prefix + item.name).concat(['modhub_restore_points_v1', 'modhub_restore_journal_v1']);
+        const base = await packageBytes('base');
+        await write(spec.dbName, spec.storeName, [[spec.enabledKey, JSON.stringify(['ModHub验收图包'])], [spec.disabledKey, '[]'], [spec.prefix + 'ModHub验收图包', base]], deletes.filter(key => key !== spec.prefix + 'ModHub验收图包'));
+        await write(b.dbName, b.storeName, [[b.key, JSON.stringify(['ModHub验收美化甲', 'ModHub验收美化乙'])]]);
+        localStorage.setItem(stateKeys[0], JSON.stringify(['ModHub验收图包'])); localStorage.setItem(stateKeys[1], 'false'); localStorage.setItem(saveKey, '验收存档标记保持不变');
+        const before = await inspect(); let pointId;
+        await window.modHubRestore.withOperation({ label: '原生事务验收：更新包体、禁用模组与修改美化' }, async context => {
+            assert(await window.modHubRestore.prepare(context), '原生仓库无法建立还原点'); pointId = context.pointId;
+            await write(spec.dbName, spec.storeName, [[spec.enabledKey, JSON.stringify(['ModHub验收抛错'])], [spec.disabledKey, JSON.stringify(['ModHub验收图包'])], [spec.prefix + 'ModHub验收图包', await packageBytes('updated')], [spec.prefix + 'ModHub验收抛错', await packageBytes('throw')]]);
+            await write(b.dbName, b.storeName, [[b.key, JSON.stringify(['ModHub验收美化乙'])]]);
+            localStorage.setItem(stateKeys[0], JSON.stringify(['ModHub验收抛错'])); localStorage.setItem(stateKeys[1], 'true');
+        });
+        sessionStorage.setItem(recordKey, JSON.stringify({ pointId, state: expectedView(before) }));
+        log('已用原生事务更新旧包、安装故障包、禁用基线并改变美化与设置。请点击【选择还原点】完成真实恢复。');
+        log('还原点：' + pointId);
+    }
+    async function harnessAbort() {
+        const before = await inspect(); const spec = schema(); const db = await open(spec.dbName, spec.storeName);
+        try {
+            await new Promise((resolve, reject) => {
+                const tx = db.transaction(spec.storeName, 'readwrite'); const store = tx.objectStore(spec.storeName);
+                store.put(JSON.stringify(['事务中止用临时模组']), spec.enabledKey);
+                const request = store.put(new Uint8Array([1, 2, 3]).buffer, spec.prefix + '事务中止用临时模组');
+                request.onsuccess = () => tx.abort();
+                tx.onabort = resolve; tx.onerror = () => reject(tx.error); tx.oncomplete = () => reject(new Error('应中止的事务被提交'));
+            });
+        } finally { db.close(); }
+        assert(same(expectedView(before), expectedView(await inspect())), '原生事务中止后留下了部分列表或包体写入');
+        log('通过：原生 tx.abort 已撤销同一事务中先写入的启用列表及临时包体，原状态完全保留。');
+    }
+    async function harnessReplay() {
+        const expected = JSON.parse(sessionStorage.getItem(recordKey) || 'null');
+        assert(expected?.pointId, '请先建立原生事务验收场景');
+        const before = await inspect(); const originalPut = IDBObjectStore.prototype.put; let interrupted = false; let failure;
+        IDBObjectStore.prototype.put = function (value, key) {
+            const request = originalPut.call(this, value, key);
+            if (this.transaction.db.name === keys.ModLoader_IndexDBLoader && key === 'modhub_restore_journal_v1' && value?.phase === 'mod-written' && !interrupted) {
+                interrupted = true; request.onsuccess = () => this.transaction.abort();
+            }
+            return request;
+        };
+        try { await window.modHubRestore.restore(expected.pointId); }
+        catch (error) { failure = error; }
+        finally { IDBObjectStore.prototype.put = originalPut; }
+        assert(interrupted && failure, '未能在真实恢复提交期间触发原生事务中止');
+        const after = await inspect();
+        assert(same([before.enabled, before.disabled, before.packages], [after.enabled, after.disabled, after.packages]), '恢复事务中止后出现部分模组写入');
+        assert(after.journal, '恢复事务中止后没有保留可重放日志');
+        log('通过：真实恢复提交事务被 tx.abort 中止，模组包体与列表原子保留，跨库恢复日志仍存在。正在刷新，启动恢复会重放同一目标。');
+        sessionStorage.setItem(`${config.prefix}_replay`, '恢复事务中止后的刷新重放');
+        location.reload();
+    }
+    function addButton(label, action) {
+        const button = document.createElement('button'); button.type = 'button'; button.textContent = label;
+        button.addEventListener('click', async () => {
+            if (busy) return;
+            busy = true; button.disabled = true;
+            try { await action(); } catch (error) { log('失败：' + error.message); }
+            finally { busy = false; button.disabled = false; }
+        }); panel.querySelector('.modhub-acceptance-actions').appendChild(button);
+    }
+    function mount() {
+        const style = document.createElement('style');
+        style.textContent = '#modHubAcceptancePanel{position:fixed;left:8px;right:8px;bottom:8px;z-index:5000;max-width:780px;margin:auto;background:#191919;color:#ddd;border:1px solid #666;font:14px/1.5 sans-serif;padding:8px;box-sizing:border-box}#modHubAcceptancePanel summary{color:#d6b365;cursor:pointer;min-height:28px}#modHubAcceptancePanel .modhub-acceptance-body{max-height:46dvh;overflow:auto;padding-bottom:60px}#modHubAcceptancePanel button{min-height:36px;flex:1 1 140px;min-width:0;padding:6px;background:#292929;color:#eee;border:1px solid #666;font:inherit}#modHubAcceptancePanel pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}#modHubAcceptancePanel .modhub-acceptance-actions{display:flex;gap:6px;flex-wrap:wrap}';
+        document.head.appendChild(style);
+        if (!game) style.textContent += '#modHubAcceptancePanel{z-index:1000}';
+        const host = document.createElement('details'); host.id = 'modHubAcceptancePanel'; host.open = !game;
+        host.innerHTML = '<summary>隔离验收控制台</summary><div class="modhub-acceptance-body"><p class="modhub-acceptance-status"></p><div class="modhub-acceptance-actions"></div><pre id="modHubAcceptanceResult"></pre></div>';
+        (document.getElementById('modHubAcceptanceHarness') || document.body).appendChild(host); panel = host.querySelector('.modhub-acceptance-body'); output = host.querySelector('pre');
+        if (game) {
+            addButton('读取真实美化 type 状态', () => log(JSON.stringify(beautyTypes(), null, 2)));
+            // 原生 Dialog 会隐藏 body 的其他子节点，测试控件随之挂入当前对话框。
+            // 不操作年龄勾选项、确认按钮，也不关闭或替换真实对话框。
+            const attach = () => {
+                const dialogBody = document.getElementById('ui-dialog-body');
+                const target = window.SugarCube?.Dialog?.isOpen?.() && dialogBody ? dialogBody : document.body;
+                if (host.parentNode !== target) target.appendChild(host);
+                // 首屏年龄声明保持原样，验收的 ModHub 模态框挂在其内部以便操作。
+                if (target === dialogBody) document.querySelectorAll('.modhub-modal-backdrop,.modhub-restore-panel-overlay').forEach(modal => {
+                    if (modal.parentNode === document.body) target.appendChild(modal);
+                });
+                if (host.hasAttribute('aria-hidden')) host.removeAttribute('aria-hidden');
+                if (host.getAttribute('tabindex') === '-3') host.removeAttribute('tabindex');
+                host.querySelectorAll('[tabindex="-3"]').forEach(element => element.removeAttribute('tabindex'));
+            };
+            if (typeof window.jQuery === 'function') window.jQuery(document).on(':dialogopened.modHubAcceptance :dialogclosed.modHubAcceptance :storyready.modHubAcceptance', attach);
+            new MutationObserver(attach).observe(document.body, { attributes: true, attributeFilter: ['aria-hidden'], childList: true, subtree: true });
+            attach();
+        }
+        host.querySelector('.modhub-acceptance-status').textContent = `${game ? '实际游戏' : '原生存储'}；独立源 ${location.origin}；测试库前缀 ${config.prefix}_`;
+        addButton('读取当前真实接口状态', () => log(JSON.stringify(interfaces(), null, 2)));
+        addButton('读取实际存储状态', async () => log(JSON.stringify(await inspect(), (key, value) => key === 'points' ? value.map(point => ({ id: point.id, label: point.label })) : value, 2)));
+        if (game) {
+            addButton('关闭本次验收安全模式并重载', () => {
+                const control = safeModeSwitch();
+                assert(typeof control?.disableSafeMode === 'function' && typeof control?.isSafeModeOn === 'function', '当前原生 ModLoaderGui 未提供安全模式开关接口');
+                control.disableSafeMode();
+                assert(control.isSafeModeOn() === false, '原生安全模式关闭后回读仍为开启');
+                log('本次独立验收源的原生安全模式已显式关闭，正在重载测试游戏。'); location.reload();
+            });
+            addButton('安装基线图包并重载', baseline);
+            addButton('安装抛错模组并重载', () => fault('throw'));
+            addButton('安装抛错模组并验证重载提示', () => fault('throw', true));
+            addButton('安装挂起模组并重载', () => fault('hang'));
+            addButton('核验美化即时生效', beauty);
+            addButton('打开 ModHub', () => { assert(window.modHubOpenManager, '运行模块尚未加载'); window.modHubOpenManager('模组管理'); });
+        } else {
+            addButton('建立原生事务验收场景', harnessCase);
+            addButton('检查事务中止原子性', harnessAbort);
+            addButton('中止恢复事务并刷新重放', harnessReplay);
+        }
+        addButton('选择还原点', () => { assert(window.modHubRestore, '恢复入口尚未加载'); return window.modHubRestore.showHistory({ startup: game && !window.SugarCube?.State?.passage }); });
+        addButton('核验回滚结果', verify);
+        addButton('清空本次测试源并重载', async () => {
+            assert(typeof indexedDB.databases === 'function', '当前浏览器不支持枚举测试数据库');
+            assert(await window.modHubConfirm({ title: '重置隔离验收', message: '只清理此独立端口内的 ModHub 验收库与测试浏览器存储。', confirmText: '清理测试数据', cancelText: '取消', confirmType: 'danger' }), '已取消重置');
+            const dbs = await indexedDB.databases();
+            for (const db of dbs) if (db.name.startsWith(config.prefix)) await new Promise((resolve, reject) => { const request = indexedDB.deleteDatabase(db.name); request.onsuccess = resolve; request.onerror = () => reject(request.error); request.onblocked = () => reject(new Error('测试数据库仍有连接，请关闭其他测试页后重试')); });
+            for (const key of [recordKey, saveKey, ...stateKeys]) { localStorage.removeItem(key); sessionStorage.removeItem(key); }
+            location.reload();
+        });
+        if (game) log('本页加载本地实际游戏与当前源码包；首界面出现后安装基线，再安装故障测试。故障重载时使用正式加载页还原窗口。');
+        else harnessInit().catch(error => log('初始化失败：' + error.message));
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', mount, { once: true }); else mount();
+})();
+</script>
+</body>
+</html>

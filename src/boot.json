@@ -1,6 +1,6 @@
 {
     "name": "ModHub",
-    "version": "1.1.1",
+    "version": "1.2.0",
     "nickName": "模组管理器与市场套件",
     "description": "DoL 原生暗黑风格模组管理与市场套件",
     "styleFileList": [
@@ -8,9 +8,13 @@
         "stylesheet/modhub-market.css",
         "stylesheet/modhub-overrides.css"
     ],
+    "scriptFileList_inject_early": [
+        "javascript/modhub-dialog.js",
+        "javascript/modhub-restore-panel.js",
+        "javascript/modhub-restore.js"
+    ],
     "scriptFileList": [
         "javascript/modhub-manager.js",
-        "javascript/modhub-dialog.js",
         "javascript/modhub-drag.js",
         "javascript/modhub-beauty.js",
         "javascript/modhub-readme.js",
