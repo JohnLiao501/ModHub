@@ -623,7 +623,7 @@
         return approved;
     }
 
-    async function executePlan(plan, approved, restoreContext) {
+    async function executePlan(plan, approved) {
         const api = market(), results = new Map(), changed = new Set();
         const installedBoots = new Map();
         for (const [key, reason] of plan.blocked) results.set(key, { status: 'skipped', reason });
@@ -655,7 +655,7 @@
         for (const [index, action] of plan.actions.entries()) {
             if (api.batchInstallState) Object.assign(api.batchInstallState, { current: action.mod.name, completed: index, total: plan.actions.length });
             api.renderBatchInstallToolbar?.();
-            if (stopped() || restoreContext?.cancelled || failedDependency(action.key)) { results.set(action.key, { status: 'skipped', reason: stopped() || restoreContext?.cancelled ? '已停止后续安装' : '前置未完成' }); window.modHubClearMarketPreparationProgress?.(action.mod.name); continue; }
+            if (stopped() || failedDependency(action.key)) { results.set(action.key, { status: 'skipped', reason: stopped() ? '已停止后续安装' : '前置未完成' }); window.modHubClearMarketPreparationProgress?.(action.mod.name); continue; }
             try {
                 await window.modHubLoadModManageState?.(true);
                 if (bootSnapshot(localBoot(getLocal(action.mod))) !== action.localSnapshot) throw new Error('本地版本或依赖已改变，请重新核对安装计划。');
@@ -667,34 +667,28 @@
                         || bootSnapshot(currentBoot) !== action.localSnapshot) throw new Error('前置版本或依赖已改变，请重新核对安装计划。');
                     const risks = api.getPreparedCompatibilityRisks?.([currentBoot]) || [];
                     if (risks.some(risk => !approved.includes(risk.key))) throw new Error('前置游戏适配声明已变化，请重新核对安装计划。');
-                    if (isDisabled(action.local.name)) changedByAction = await window.modHubToggleSideMod?.(action.local.name, true, { silentOfferReload: true, restoreContext }) === true;
-                    if (changedByAction) {
-                        changed.add(action.mod.name);
-                        window.modHubRegisterOperationReload(restoreContext, '所选前置已启用，重新载入后生效。',
-                            { isFramework: window.modHubIsFrameworkMod?.(action.mod.name) });
-                    }
+                    if (isDisabled(action.local.name)) changedByAction = await window.modHubToggleSideMod?.(action.local.name, true, { silentOfferReload: true }) === true;
                     await window.modHubLoadModManageState?.(true);
                     if (!getLocal(action.mod) || isDisabled(action.local.name)) throw new Error('前置未能实际启用');
                 } else {
                     const ok = await api.downloadAndInstallMod(action.mod, api.getCurrentMirrorId(), {
                         releaseInfo: action.release, preparedPackage: action.prepared, askRestart: false, skipReloadOffer: true,
                         batchMode: true, dependencyRequirements: action.requirements, approvedCompatibilityRisks: approved,
-                        restoreContext,
                         onFailure: reason => { action.failureReason = reason; }
                     });
                     if (!ok) throw new Error(action.failureReason || '安装未完成');
                     installedBoots.set(action.key, { ...action.prepared.boots[0] });
+                    changedByAction = true;
                     changed.add(action.mod.name);
-                    window.modHubRegisterOperationReload(restoreContext, '所选模组及前置已处理，重新载入后生效。',
-                        { isFramework: window.modHubIsFrameworkMod?.(action.mod.name) });
                     await window.modHubLoadModManageState?.(true);
                     const local = getLocal(action.mod);
                     if (local && isDisabled(local.name)) {
-                        await window.modHubToggleSideMod?.(local.name, true, { silentOfferReload: true, restoreContext });
+                        await window.modHubToggleSideMod?.(local.name, true, { silentOfferReload: true });
                         await window.modHubLoadModManageState?.(true);
                         if (isDisabled(local.name)) throw new Error('安装完成但前置未能启用');
                     }
                 }
+                if (changedByAction) changed.add(action.mod.name);
                 results.set(action.key, { status: 'success' });
             } catch (error) { results.set(action.key, { status: 'failed', reason: error.message || '安装失败' }); }
             finally { window.modHubClearMarketPreparationProgress?.(action.mod.name); plan.nodes.get(action.key).prepared = null; action.prepared = null; }
@@ -702,7 +696,7 @@
         return { results, changed };
     }
 
-    async function run(selections, updateOnly, restoreContext) {
+    async function run(selections, updateOnly) {
         let plan, initialPlan;
         const acknowledged = new Set();
         try {
@@ -732,7 +726,7 @@
             approved = await confirmRisks(plan, actualRuntimes, acknowledged);
             if (approved === null || stopped()) return false;
             if (market().confirmInstallConflicts && !await market().confirmInstallConflicts(() => getConflictPlan(plan), { allowDisable: false })) return false;
-            const outcome = await executePlan(plan, approved, restoreContext);
+            const outcome = await executePlan(plan, approved);
             const success = [...outcome.results.values()].filter(result => result.status === 'success').length;
             const failed = [...outcome.results.values()].filter(result => result.status === 'failed').length;
             const skipped = [...outcome.results.values()].filter(result => result.status === 'skipped').length;
@@ -740,31 +734,27 @@
             market().renderMarketCards?.();
             const deferred = [...plan.nodes.values()].reduce((count, node) => count + (node.skipped ? 1 : 0) + (!node.issue ? node.unresolved.length : 0), 0);
             window.modHubShowToast(`安装处理完成：成功 ${success} 项，失败 ${failed} 项，跳过 ${skipped} 项${deferred ? `；暂未处理前置 ${deferred} 项` : ''}`, failed || deferred ? 'warning' : 'info');
-            if (outcome.changed.size) window.modHubRegisterOperationReload(restoreContext, '所选模组及前置已处理，重新载入后生效。', { isFramework: [...outcome.changed].some(name => window.modHubIsFrameworkMod?.(name)) });
+            if (outcome.changed.size) await window.modHubOfferReload?.('所选模组及前置已处理，重新载入后生效。', { isFramework: [...outcome.changed].some(name => window.modHubIsFrameworkMod?.(name)) });
             return { ...outcome, changedMods: outcome.changed };
         } catch (error) { if (error.code !== 'INSTALL_CANCELLED') await window.modHubAlert(error.message || '安装准备失败', '安装未完成'); return false; }
         finally { releasePrepared(plan); if (initialPlan !== plan) releasePrepared(initialPlan); }
     }
 
-    async function install(mod, { restoreContext } = {}) {
-        if (!restoreContext) return market().runInstallTask(context => install(mod, { restoreContext: context }),
-            { label: '市场安装及前置处理', names: [mod.name] });
+    async function install(mod) {
         if (market().batchInstallState) market().batchInstallState.stopRequested = false;
         try {
             const choice = await selectVersion(mod, { localVersion: getLocal(mod)?.version || '' });
             if (!choice) return false;
-            const outcome = await run([{ mod, ...choice }], false, restoreContext);
+            const outcome = await run([{ mod, ...choice }], false);
             return Boolean(outcome?.results?.get(keyOf(mod))?.status === 'success');
         } catch (error) { await window.modHubAlert(error.message || '发布版本读取失败', '无法选择版本'); return false; }
     }
 
-    async function installBatch(targets, { updateOnly = false, restoreContext } = {}) {
-        if (!restoreContext) return market().runInstallTask(context => installBatch(targets, { updateOnly, restoreContext: context }),
-            { label: updateOnly ? '市场批量更新' : '市场批量安装', names: targets.map(mod => mod.name) });
+    async function installBatch(targets, { updateOnly = false } = {}) {
         const state = market().batchInstallState;
         if (state) Object.assign(state, { running: true, stopRequested: false, current: '读取可选版本', completed: 0, total: targets.length });
         market().renderBatchInstallToolbar?.();
-        try { return await run(await selectBatch(targets, updateOnly), updateOnly, restoreContext); }
+        try { return await run(await selectBatch(targets, updateOnly), updateOnly); }
         catch (error) { await window.modHubAlert(error.message || '批量安装准备失败', '安装未完成'); return false; }
         finally {
             if (state) Object.assign(state, { running: false, current: '', completed: state.total });

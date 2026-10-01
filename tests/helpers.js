@@ -92,21 +92,17 @@ function createBaseSandbox(overrides = {}) {
     return sandbox;
 }
 
-function loadScripts(sandbox, files = [...(bootJson.scriptFileList_inject_early || []), ...bootJson.scriptFileList]) {
+function loadScripts(sandbox, files = bootJson.scriptFileList) {
     for (const file of files) {
         const code = fs.readFileSync(path.join(srcRoot, file), 'utf8');
         // 每个文件使用独立作用域，避免共享顶层变量掩盖跨模块依赖遗漏。
         vm.runInContext(`(function() {\n${code}\n}).call(window);`, sandbox, { filename: file });
-        // 旧状态用例不提供 IndexedDB；真实还原用例自行提供事务存储，保持真实引擎。
-        if (file === 'javascript/modhub-restore.js' && !sandbox.indexedDB) {
-            sandbox.modHubRestore.prepare = async () => true;
-        }
     }
 }
 
 function loadManager(overrides = {}) {
     const sandbox = createBaseSandbox(overrides);
-    loadScripts(sandbox, [...(bootJson.scriptFileList_inject_early || []), ...bootJson.scriptFileList.filter(file => file !== 'javascript/modhub-market.js')]);
+    loadScripts(sandbox, bootJson.scriptFileList.filter(file => file !== 'javascript/modhub-market.js'));
     // 测试环境屏蔽重型 UI 刷新与提示，聚焦状态变迁
     sandbox.modHubRenderModManageUI = () => {};
     sandbox.modHubUpdateManagerStatus = () => {};
@@ -118,7 +114,7 @@ function loadManager(overrides = {}) {
 
 function loadMarket() {
     const sandbox = createBaseSandbox();
-    loadScripts(sandbox, [...(bootJson.scriptFileList_inject_early || []), 'javascript/modhub-manager.js', 'javascript/modhub-market.js']);
+    loadScripts(sandbox, ['javascript/modhub-manager.js', 'javascript/modhub-market.js']);
     return sandbox;
 }
 

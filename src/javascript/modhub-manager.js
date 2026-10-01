@@ -337,7 +337,7 @@ window.modHubReadIndexDBModLists = async function() {
 window.modHubSaveIndexDBModList = async function(enabledList, disabledList, options = {}) {
     let targetEnabled = window.modHubUniqueModNames(enabledList);
     const enabledNames = new Set(targetEnabled.map(name => name.trim().toLowerCase()));
-    let targetDisabled = window.modHubUniqueModNames(disabledList)
+    const targetDisabled = window.modHubUniqueModNames(disabledList)
         .filter(name => !enabledNames.has(name.trim().toLowerCase()));
     const dropNames = new Set((Array.isArray(options.dropNames) ? options.dropNames : [])
         .map(name => String(name || '').trim().toLowerCase())
@@ -359,7 +359,6 @@ window.modHubSaveIndexDBModList = async function(enabledList, disabledList, opti
         }
     }
 
-    targetEnabled = window.modHubKeepRecoveryOrder(targetEnabled);
     const gui = window.modHubGetGui();
     const controller = [window.modHubGetController(), gui, gui?.modModLoadController].find(target =>
         typeof target?.overwriteModIndexDBModList === 'function' &&
@@ -373,11 +372,16 @@ window.modHubSaveIndexDBModList = async function(enabledList, disabledList, opti
     if (current.ok && options.skipVerify !== true) {
         const after = await window.modHubReadIndexDBModLists();
         if (after.ok) {
-            const sameOrder = (a, b) => a.length === b.length && a.every((name, index) => name === b[index]);
-            if (!sameOrder(targetEnabled, after.enabled) || !sameOrder(targetDisabled, after.disabled)) {
-                throw new Error('模组列表写入校验失败，存储中的启禁状态或精确顺序与预期不一致');
+            const toSet = names => new Set(names.map(name => name.trim().toLowerCase()));
+            const sameSet = (a, b) => a.size === b.size && [...a].every(name => b.has(name));
+            const expectEnabled = toSet(targetEnabled);
+            const expectDisabled = toSet(targetDisabled);
+            const actualEnabled = toSet(after.enabled);
+            const actualDisabled = toSet(after.disabled);
+            if (!sameSet(expectEnabled, actualEnabled) || !sameSet(expectDisabled, actualDisabled)) {
+                throw new Error('模组列表写入校验失败，存储中的记录与预期不一致');
             }
-        } else throw new Error('模组列表保存后无法回读，不能确认启禁状态与顺序');
+        }
     }
     return true;
 };
@@ -392,15 +396,16 @@ window.modHubEnsureModInEnabledList = async function(modName, options = {}) {
         return { ok: false, skipped: true, reason: read.error?.message || '无法读取模组列表' };
     }
     const key = name.toLowerCase();
-    const nextEnabled = window.modHubKeepRecoveryOrder(window.modHubUniqueModNames([...read.enabled, name, ...(options.extraEnabled || [])]));
-    if (JSON.stringify(read.enabled) === JSON.stringify(nextEnabled) && !read.disabled.some(item => item.trim().toLowerCase() === key)) return { ok: true };
+    if (read.enabled.some(item => item.trim().toLowerCase() === key)) return { ok: true };
+
+    const nextEnabled = window.modHubUniqueModNames([...read.enabled, name, ...(options.extraEnabled || [])]);
     try {
         await window.modHubSaveIndexDBModList(nextEnabled, read.disabled);
     } catch (error) {
         return { ok: false, reason: error?.message || String(error) };
     }
     const after = await window.modHubReadIndexDBModLists();
-    const ok = after.ok && JSON.stringify(after.enabled) === JSON.stringify(nextEnabled) && !after.disabled.some(item => item.trim().toLowerCase() === key);
+    const ok = after.ok && after.enabled.some(item => item.trim().toLowerCase() === key);
     return ok ? { ok: true } : { ok: false, reason: '写入后回读仍未包含该模组' };
 };
 
@@ -408,7 +413,6 @@ window.modHubEnsureModInEnabledList = async function(modName, options = {}) {
 // 历史上某些保存动作会用陈旧的内存快照覆盖启用列表，把已安装模组挤出去，
 // 包体仍在库中但 ModLoader 启动时不再加载它（表现为市场反复显示未安装 / 可更新）。
 window.modHubRepairOrphanModZips = async function(options = {}) {
-    if (window.modHubRestore?.isRestoring()) return { repaired: [] };
     const result = { ok: false, scanned: 0, repaired: [], skipped: [] };
     const gui = window.modHubGetGui();
     const keyval = gui?.gModUtils?.getIdbKeyValRef ? gui.gModUtils.getIdbKeyValRef() : null;
@@ -448,8 +452,6 @@ window.modHubRepairOrphanModZips = async function(options = {}) {
         result.scanned++;
         const name = key.slice(prefix.length).trim();
         if (!name || known.has(name.toLowerCase())) continue;
-        // 尊重玩家移除恢复工具的选择，未登记的自身包体不自动启用。
-        if (name.toLowerCase() === 'modhub') { result.skipped.push(name); continue; }
         orphans.push(name);
     }
     if (!orphans.length) return result;
@@ -501,6 +503,17 @@ window.modHubWaitManagerIdle = async function(timeoutMs = 6000, maxChecks = 60) 
         await new Promise(resolve => setTimeout(resolve, 120));
     }
     return !isBusy();
+};
+
+// 工具函数：转义 HTML
+window.modHubEscapeHtml = function(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
 };
 
 window.modHubHasReadmeContent = function(readme) {
@@ -739,8 +752,9 @@ window.modHubRestartGame = function() {
         return false;
     }
     window.modHubShowToast('正在重新载入游戏...', 'warning');
-    location.reload();
-    return true;
+    setTimeout(() => {
+        if (!window.modHubIsReloadBlocked()) location.reload();
+    }, 450);
 };
 
 window.modHubToggleSafeMode = function(checked) {
@@ -1196,7 +1210,6 @@ window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') 
     // 5. 落盘强校验：确认包体已登记进启用列表
     // 这是「点击安装、重启后却显示未安装」的直接防线：
     // 只要启用列表里缺少这个名字，ModLoader 启动时就完全不会加载该包体。
-    if (bootJson) window._modHubDisabledModInfo.set(modName.trim().toLowerCase(), { name: modName, bootJson });
     const ensured = await window.modHubEnsureModInEnabledList(modName);
     if (!ensured.ok && !ensured.skipped) {
         throw new Error(`模组【${modName}】包体已写入，但未能登记到启用列表：${ensured.reason || '未知原因'}`);
@@ -1205,6 +1218,7 @@ window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') 
         console.warn('[ModHub] 当前环境无法回读模组列表，跳过安装落盘校验:', ensured.reason);
     }
 
+    if (bootJson) window._modHubDisabledModInfo.set(modName.trim().toLowerCase(), { name: modName, bootJson });
     return {
         modName,
         bootJson,
@@ -1273,14 +1287,8 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             if (needsNativeCheck && typeof window.modHubGetController()?.checkModZipFileIndexDB !== 'function') {
                 throw new Error('当前 ModLoader 未提供 ModPack 校验接口，无法核验此二进制安装包；请使用支持该格式的加载器或作者提供的 Zip 包。');
             }
-            if (fileCount === 1 && !needsNativeCheck && typeof gui.loadAndAddMod === 'function') {
+            if (!needsNativeCheck && typeof gui.loadAndAddMod === 'function') {
                 await gui.loadAndAddMod(fileInput);
-                const lists = await window.modHubReadIndexDBModLists();
-                if (!lists.ok) throw new Error('导入后无法核验模组加载顺序');
-                await window.modHubLoadDisabledModInfo(lists.enabled);
-                if (JSON.stringify(lists.enabled) !== JSON.stringify(window.modHubKeepRecoveryOrder(lists.enabled))) {
-                    await window.modHubSaveIndexDBModList(lists.enabled, lists.disabled);
-                }
             } else if (typeof window.modHubInstallFilesViaIndexDB === 'function') {
                 const installed = await window.modHubInstallFilesViaIndexDB(files);
                 installedNames = (installed || []).map(result => result.modName).filter(Boolean);
@@ -1306,7 +1314,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
                 afterEnabled: state?.sideEnabled || [],
                 afterDisabled: state?.sideDisabled || []
             };
-        }, '正在导入模组，请稍候...', { restoreContext: options.restoreContext, restoreLabel: isBatch ? '批量导入模组' : '导入模组' });
+        }, '正在导入模组，请稍候...');
         if (!imported) {
             // 记录可读原因供市场端展示，避免只抛出含糊的「安装未完成」
             window._modHubLastInstallError = window._modHubLastInstallError || window._modHubManagerStatus || '模组管理器正忙或配置状态待核实';
@@ -1340,12 +1348,6 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
         if (options && (options.askRestart || options.promptReload) && !options.skipReloadOffer) {
             const isFramework = (affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : [])).some(name => window.modHubIsFrameworkMod(name)) || window.modHubIsFrameworkMod(targetDisplayName);
             const label = isBatch ? `${fileCount} 个模组` : (targetDisplayName ? `模组【${targetDisplayName}】` : '模组');
-            if (options.restoreContext) {
-                window.modHubRegisterOperationReload(options.restoreContext, `${label}已成功添加并完成配置。`, { isFramework });
-                window._modHubHighlightMods = new Set(affectedNames.length > 0 ? affectedNames : (targetModName ? [targetModName] : []));
-                return true;
-            }
-            if (window.modHubIsReloadBlocked()) return true;
             if (isFramework) {
                 await window.modHubOfferReload(`${label}已成功添加并完成配置。`, { isFramework: true });
                 if (options.keepCurrentTab) {
@@ -1648,18 +1650,14 @@ window.modHubUpdateManagerStatus = function() {
     if (controls) controls.disabled = !!(window._modHubManagerBusy || window._modHubModLoading);
     const status = document.getElementById('modHubManagerStatus');
     if (status) {
-        status.textContent = window._modHubManagerStatus || '配置自动保存；模组重新载入后生效，美化即时应用';
+        status.textContent = window._modHubManagerStatus || '配置自动保存，重新载入后生效';
         status.className = window._modHubManagerSaveFailed ? 'red' : 'grey';
     }
 };
 
 // ponytail: 共用一把操作锁；确有并行操作需求时再按存储资源拆分。
 window.modHubRunManagerAction = async function(action, message = '正在保存，请稍候...', options = {}) {
-    const restore = window.modHubRestore;
-    const restoreContext = options.restoreContext || restore?.createOperation({ label: options.restoreLabel || '调整模组与美化配置' });
-    const ownRestoreContext = !options.restoreContext;
-    if (window._modHubManagerBusy || window._modHubModLoading || window._modHubManagerStateUncertain ||
-        restore?.isRestoring() || restore?.isOperationBlocked(restoreContext)) {
+    if (window._modHubManagerBusy || window._modHubModLoading || window._modHubManagerStateUncertain) {
         window.modHubShowToast(window._modHubManagerStateUncertain ? '请先刷新列表核实配置，再进行修改。' : '上一项操作尚未完成，请稍候。', 'warning');
         return false;
     }
@@ -1677,14 +1675,8 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
     window._modHubManagerStatus = message;
     window.modHubUpdateManagerStatus();
     try {
-        if (ownRestoreContext && restore?.claim && !restore.claim(restoreContext)) return false;
-        if (restore && !await restore.prepare(restoreContext)) {
-            window._modHubManagerStatus = '已取消操作，配置保持不变';
-            return false;
-        }
         const result = await action();
-        const modChanged = beforeReload !== modHubReloadConfigSnapshot(window._modHubModState);
-        window._modHubManagerStatus = result === false ? previousStatus : (modChanged ? '模组配置已保存，重新载入后生效；美化配置即时应用' : '配置已保存，美化配置即时应用');
+        window._modHubManagerStatus = result === false ? previousStatus : '已保存，重新载入后生效';
         if (result !== false) window._modHubManagerSaveFailed = false;
         if (result !== false && options.trackReload) modHubRecordReloadChange(beforeReload);
         return result === undefined ? true : result;
@@ -1709,16 +1701,6 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
         window.modHubShowToast(window._modHubManagerStatus + '：' + (error.message || error), 'warning');
         return false;
     } finally {
-        if (ownRestoreContext && restore) {
-            try { await restore.finish(restoreContext); }
-            catch (error) { restoreContext.finishError = error; console.warn('[ModHub] 还原点整理未完成', error); }
-            finally { restore.release?.(restoreContext); }
-            if (restoreContext.finishError) {
-                window._modHubManagerSaveFailed = true;
-                window._modHubManagerStateUncertain = true;
-                window._modHubManagerStatus = '还原点整理失败，请刷新列表核验配置后再重载';
-            }
-        }
         window._modHubManagerBusy = false;
         window.modHubRenderModManageUI();
         window.modHubUpdateManagerStatus();
@@ -1740,7 +1722,6 @@ window.initModManage = async function(refresh = false) {
             const loading = window.modHubLoadModManageState(refresh);
             window.modHubUpdateManagerStatus();
             await loading;
-            await window.modHubEnsureRecoveryPlacement();
             // 自愈：修复「包体已安装、却未登记进启用列表」的历史遗留模组，
             // 这类模组重启后不会被加载，是市场反复显示未安装 / 可更新的根源之一。
             if (!window._modHubOrphanRepairDone && typeof window.modHubRepairOrphanModZips === 'function') {
@@ -1786,7 +1767,6 @@ window.modHubRenderModManageUI = function() {
     const isNarrowScreen = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches;
     const gui = window.modHubGetGui();
     const { sideMods, builtInMods } = window._modHubModState;
-    const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
     const totalSideCount = sideMods ? sideMods.length : 0;
     const beautyCount = (window._modHubBeautyState?.enabledList.length || 0) + (window._modHubBeautyState?.disabledList.length || 0);
 
@@ -1814,10 +1794,9 @@ window.modHubRenderModManageUI = function() {
                 <span class="gold">模组与美化顺序管理</span>
                 <div class="modhub-header-actions">
                     <button id="modHubImportModBtn" class="macro-button modhub-btn-primary" type="button" title="从本地选择或直接拖拽 Zip / ModPack 模组文件导入" onclick="window.modHubTriggerImport()">导入模组</button>
-                    <button id="modHubRestartGameBtn" class="macro-button modhub-btn-primary" type="button" title="重新载入游戏以使最新模组配置生效，美化调整即时应用" onclick="window.modHubRestartGame()">重新载入游戏</button>
+                    <button id="modHubRestartGameBtn" class="macro-button modhub-btn-primary" type="button" title="重新载入游戏以使最新模组和美化配置生效" onclick="window.modHubRestartGame()">重新载入游戏</button>
                     <button id="modHubSmartSortAllBtn" class="macro-button modhub-btn-primary" type="button" title="根据明确依赖，同时整理已安装模组的加载顺序和美化包的覆盖顺序" onclick="window.modHubSmartSortAll()">智能整理模组与美化顺序</button>
                     <button id="modHubRefreshListBtn" class="macro-button modhub-btn-primary" type="button" title="在原版管理器修改后，重新读取列表与模组资料" onclick="window.initModManage(true)">刷新列表</button>
-                    <button id="modHubRestorePointsBtn" class="macro-button modhub-btn-primary" type="button" onclick="window.modHubRestore.showHistory()">时间点还原</button>
                 </div>
             </div>
         </div>
@@ -1836,7 +1815,6 @@ window.modHubRenderModManageUI = function() {
         sideMods.forEach((item, index) => {
             const modName = item.name;
             const isEnabled = item.enabled;
-            const isRecovery = recoveryNames.has(modName.toLowerCase());
             const modInfo = window.modHubGetModInfo(modName);
             const version = modInfo?.bootJson?.version || '';
             const subText = window.modHubGetModSubtext(modName, modInfo, false);
@@ -1853,7 +1831,6 @@ window.modHubRenderModManageUI = function() {
             }
 
             const descParts = [];
-            if (isRecovery) descParts.push('<span class="gold">为确保时间点还原正常运行，不可调整顺序</span>');
             if (isEnabled) {
                 if (versionText) descParts.push(versionText);
                 if (updateTagHtml) descParts.push(updateTagHtml);
@@ -1867,9 +1844,9 @@ window.modHubRenderModManageUI = function() {
             const isHighlight = window._modHubHighlightMods && window._modHubHighlightMods.has(modName);
 
             html += `
-                <li class="modhub-item ${isEnabled ? '' : 'item-disabled'} ${isHighlight ? 'modhub-item-highlight' : ''}" data-mod-name="${window.modHubEscapeHtml(modName)}" data-index="${index}" data-drag-type="side" draggable="${!isRecovery}">
+                <li class="modhub-item ${isEnabled ? '' : 'item-disabled'} ${isHighlight ? 'modhub-item-highlight' : ''}" data-mod-name="${window.modHubEscapeHtml(modName)}" data-index="${index}" data-drag-type="side" draggable="true">
                     <div class="modhub-item-info">
-                        ${isRecovery ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>'}
+                        <span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>
                         <div class="modhub-item-main">
                             <div class="modhub-item-title ${isEnabled ? '' : 'grey'}">${window.modHubEscapeHtml(modName)}</div>
                             <div class="grey modhub-item-desc">${descHtml}</div>
@@ -1877,8 +1854,8 @@ window.modHubRenderModManageUI = function() {
                     </div>
                     <div class="modhub-btn-group">
                         ${updateBtnHtml}
-                        <button class="macro-button modhub-btn-move modhub-side-move-up" data-index="${index}" title="上移一位（长按直接置顶）" aria-label="上移或置顶" ${isRecovery ? 'disabled' : ''}>▲</button>
-                        <button class="macro-button modhub-btn-move modhub-side-move-down" data-index="${index}" title="下移一位（长按直接置底）" aria-label="下移或置底" ${isRecovery ? 'disabled' : ''}>▼</button>
+                        <button class="macro-button modhub-btn-move modhub-side-move-up" data-index="${index}" title="上移一位（长按直接置顶）" aria-label="上移或置顶">▲</button>
+                        <button class="macro-button modhub-btn-move modhub-side-move-down" data-index="${index}" title="下移一位（长按直接置底）" aria-label="下移或置底">▼</button>
                         <button class="macro-button modhub-btn-toggle ${isEnabled ? '' : 'btn-enable'}" data-mod-action="toggle" title="${isEnabled ? '禁用该模组' : '启用该模组'}">${isEnabled ? '禁用' : '启用'}</button>
                         <button class="macro-button modhub-btn-delete btn-delete" data-mod-action="delete" title="永久删除该模组"><span class="red">删除</span></button>
                     </div>
@@ -2073,10 +2050,11 @@ window.modHubIsFrameworkMod = function(modName) {
 window._modHubReloadRevision = window._modHubReloadRevision || 0;
 window._modHubReloadPromptedRevision = window._modHubReloadPromptedRevision || 0;
 
-function modHubReloadConfigSnapshot(modState) {
+function modHubReloadConfigSnapshot(modState, beautyState) {
     return JSON.stringify([
         modState?.sideMods?.map(item => [item.name, item.enabled]) || [],
-        modState?.sideEnabled || [], modState?.sideDisabled || []
+        modState?.sideEnabled || [], modState?.sideDisabled || [],
+        beautyState?.enabledList?.map(item => item.type) || []
     ]);
 }
 
@@ -2087,8 +2065,7 @@ function modHubRecordReloadChange(before) {
 }
 
 window.modHubIsReloadBusy = function() {
-    return !!(window._modHubManagerBusy || window._modHubModLoading || window.modHubMarket?.isInstallBusy?.() ||
-        window.modHubRestore?.isRestoring?.() || window.modHubRestore?.isOperationBlocked?.());
+    return !!(window._modHubManagerBusy || window._modHubModLoading || window.modHubMarket?.isInstallBusy?.());
 };
 
 window.modHubIsReloadBlocked = function() {
@@ -2112,7 +2089,7 @@ window.modHubPromptPendingReload = function() {
     window._modHubReloadExitPending = false;
     if (window._modHubReloadRevision <= window._modHubReloadPromptedRevision) return false;
     window._modHubReloadPromptPromise = Promise.resolve().then(() =>
-        window.modHubOfferReload('模组配置已保存，重新载入后生效。美化配置已即时应用。')
+        window.modHubOfferReload('模组或美化配置已保存，重新载入后生效。')
     ).finally(() => { window._modHubReloadPromptPromise = null; });
     return window._modHubReloadPromptPromise;
 };
@@ -2138,35 +2115,7 @@ window.modHubBindReloadReminder = function() {
     }
 };
 
-// 共享安装操作仅登记一次提示，由拥有上下文的最外层在整理与解锁后展示。
-window.modHubRegisterOperationReload = function(context, message = '配置已更新。', options = {}) {
-    if (!context || context.reloadOfferConsumed) return false;
-    context.reloadOffer = { message, isFramework: Boolean(options.isFramework || context.reloadOffer?.isFramework) };
-    return true;
-};
-
-window.modHubCompleteOperationReload = async function(context) {
-    if (!context?.finished || context.reloadOfferConsumed || !context.reloadOffer) return false;
-    if (context.finishError) {
-        window._modHubManagerSaveFailed = true;
-        window._modHubManagerStateUncertain = true;
-        window._modHubManagerStatus = '还原点整理失败，请刷新列表核验配置后再重载';
-        window.modHubUpdateManagerStatus?.();
-    }
-    if (context.finishError || window._modHubManagerSaveFailed || window._modHubManagerStateUncertain) {
-        context.reloadOfferConsumed = true;
-        window._modHubReloadExitPending = false;
-        return false;
-    }
-    if (window.modHubIsReloadBusy()) return false;
-    context.reloadOfferConsumed = true;
-    window._modHubReloadExitPending = false;
-    return window.modHubOfferReload(context.reloadOffer.message, { isFramework: context.reloadOffer.isFramework });
-};
-
 window.modHubOfferReload = async function(message = '配置已更新。', options = {}) {
-    if (options.restoreContext) return window.modHubRegisterOperationReload(options.restoreContext, message, options);
-    if (window.modHubIsReloadBlocked()) return false;
     const revision = window._modHubReloadRevision;
     const isFramework = Boolean(options.isFramework);
     const title = isFramework ? '重新载入游戏（强烈建议）' : '重新载入游戏';
@@ -2213,33 +2162,6 @@ window.modHubOfferReload = async function(message = '配置已更新。', option
         window.modHubRestartGame();
     }, 300);
     return true;
-};
-
-// 恢复工具及实际前置保持在最早合法位置，其余模组保留玩家的相对顺序。
-window.modHubKeepRecoveryOrder = function(names, profiles = []) {
-    return window.modHubRestore.keepRecoveryOrder(names, profiles);
-};
-
-window.modHubProtectedRecoveryNames = function() {
-    const state = window._modHubModState;
-    return window.modHubRestore.getRecoveryInfo?.(state?.sideEnabled || [])?.protectedNames || [];
-};
-
-window.modHubEnsureRecoveryPlacement = async function() {
-    if (!window._modHubModState || window._modHubManagerBusy || window.modHubRestore?.isRestoring()) return false;
-    const lists = await window.modHubReadIndexDBModLists();
-    if (!lists.ok) return false;
-    const info = window.modHubRestore.getRecoveryInfo?.(lists.enabled);
-    if (!info) return false;
-    if (info.issues.length && !window._modHubRecoveryWarningShown) {
-        window._modHubRecoveryWarningShown = true;
-        window.modHubShowToast(info.issues.map(item => item.message).join('\n'), 'warning');
-    }
-    if (JSON.stringify(info.order) === JSON.stringify(lists.enabled)) return true;
-    return window.modHubRunManagerAction(async () => {
-        if (!await window.modHubSaveModManageState(false)) throw new Error('恢复工具加载顺序保存失败');
-        window.modHubShowToast('恢复工具已固定在必要前置之后，下次启动生效。', 'info');
-    }, '正在保护并固定恢复工具加载顺序...', { trackReload: true, restoreLabel: '固定恢复工具加载顺序' });
 };
 
 window.modHubBuildSmartOrder = async function(nodes, gui, dependentsFirst = false) {
@@ -2740,18 +2662,6 @@ window.modHubFindDependentMods = async function(targetModName) {
     return affected;
 };
 
-// 禁用与卸载共用重点说明，纯文本提示仍保留给调用方。
-function modHubSelfRemovalNoticeHtml(uninstall) {
-    const recovery = uninstall
-        ? '<strong class="gold">重新导入 ModHub</strong> 后可继续使用。'
-        : '可通过<strong class="gold">加载器原生管理界面</strong>重新启用 ModHub。';
-    return `<div class="modhub-self-removal-notice">
-        <section><h3 class="red">重新载入后停用</h3><p>ModHub 的<strong>模组管理、模组市场、时间点还原和加载页救援</strong>将<strong class="red">停用</strong>。</p></section>
-        <section><h3 class="green">保留内容</h3><p><strong class="green">游戏存档和已有还原点保留</strong>。</p></section>
-        <section><h3 class="gold">恢复使用</h3><p>${recovery}</p></section>
-    </div>`;
-}
-
 // 旁加载模组启用/禁用就地切换（保持原有排序位置绝对不变）
 window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     const state = window._modHubModState;
@@ -2762,9 +2672,6 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     if (!item) return false;
 
     const targetEnable = enable !== undefined ? !!enable : !item.enabled;
-    const isModHub = String(modName).trim().toLowerCase() === 'modhub';
-    const selfNotice = isModHub ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。可通过加载器原生管理界面重新启用 ModHub。游戏存档和已有还原点保留。' : '';
-    const selfNoticeHtml = isModHub ? modHubSelfRemovalNoticeHtml(false) : '';
     if (item.enabled === targetEnable) return false;
 
     // 当即将启用模组时，进行本地已知冲突检测
@@ -2856,7 +2763,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
                         disableBtn.textContent = '正在禁用...';
 
                         try {
-                            if (!await window.modHubToggleSideMod(rawName, false, { skipConfirm: true, silentOfferReload: true, trackReload: true, restoreContext: options.restoreContext })) throw new Error('快捷禁用未完成');
+                            if (!await window.modHubToggleSideMod(rawName, false, { skipConfirm: true, silentOfferReload: true, trackReload: true })) throw new Error('快捷禁用未完成');
 
                             if (typeof dialog.modHubClearDelay === 'function') {
                                 dialog.modHubClearDelay();
@@ -2930,29 +2837,25 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
 
             const confirmProceed = await window.modHubConfirm({
                 title: `确认禁用【${displayName}】？`,
-                message: `禁用【${displayName}】后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}是否仍然确认禁用？`,
+                message: `禁用【${displayName}】后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n是否仍然确认禁用？`,
                 trustedMessageHtml: `
                     <div class="modhub-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：</div>
                     <div class="modhub-modal-affected-box">
                         ${modItemsHtml}
                     </div>
-                    ${selfNoticeHtml}
                     <div class="grey modhub-modal-question" style="margin-top:10px;">是否仍然确认禁用该${targetTypeLabel}？</div>
                 `,
                 confirmText: '确认禁用',
                 cancelText: '暂不禁用',
-                dialogClass: isModHub ? 'modhub-self-removal-dialog' : '',
                 confirmType: 'danger'
             });
 
             if (!confirmProceed) return false;
-        } else if (isModHub && !await window.modHubConfirm({ title: '确认禁用 ModHub', message: selfNotice, trustedMessageHtml: selfNoticeHtml, dialogClass: 'modhub-self-removal-dialog', confirmText: '确认禁用', cancelText: '取消', confirmType: 'danger' })) {
-            return false;
         }
     }
 
     const isFramework = window.modHubIsFrameworkMod(modName);
-    const immediateReload = !options.silentOfferReload && (isFramework || isModHub);
+    const immediateReload = !options.silentOfferReload && isFramework;
     const saved = await window.modHubRunManagerAction(async () => {
         const currentState = window._modHubModState;
         const currentItem = currentState?.sideMods?.find(m => m.name === modName);
@@ -2967,22 +2870,18 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
 
         window.modHubShowToast(`模组【${modName}】已${targetEnable ? '启用' : '禁用'}，重新载入后生效`, 'success');
         return true;
-    }, undefined, { trackReload: options.trackReload ?? !options.silentOfferReload, immediateReload,
-        restoreContext: options.restoreContext, restoreLabel: `${targetEnable ? '启用' : '禁用'}模组【${modName}】` });
+    }, undefined, { trackReload: options.trackReload ?? !options.silentOfferReload, immediateReload });
     if (saved && immediateReload) {
         const modInfo = window.modHubGetModInfo(modName);
         const subtext = window.modHubGetModSubtext(modName, modInfo, false, true);
         const modDisplayName = subtext ? `${modName}（${subtext}）` : modName;
-        await window.modHubOfferReload(`${isModHub ? 'ModHub' : `核心框架【${modDisplayName}】`}已${targetEnable ? '启用' : '禁用'}。`, { isFramework });
+        await window.modHubOfferReload(`核心框架【${modDisplayName}】已${targetEnable ? '启用' : '禁用'}。`, { isFramework: true });
     }
     return saved;
 };
 
 // 永久删除旁加载模组
 window.modHubDeleteSideMod = async function(modName) {
-    const isModHub = String(modName).trim().toLowerCase() === 'modhub';
-    const selfNotice = isModHub ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。游戏存档和已有还原点保留；重新导入 ModHub 后可继续使用。' : '';
-    const selfNoticeHtml = isModHub ? modHubSelfRemovalNoticeHtml(true) : '';
     const isFramework = window.modHubIsFrameworkMod(modName);
     const affectedMods = await window.modHubFindDependentMods(modName);
     const modInfo = window.modHubGetModInfo(modName);
@@ -3008,27 +2907,23 @@ window.modHubDeleteSideMod = async function(modName) {
                     ${affectedListHtml}
                 </div>
             </div>
-            ${selfNoticeHtml}
-            <div class="grey" style="font-size: 0.9em; margin-top: 8px;">删除后该模组将从浏览器存储中彻底移除。是否仍要删除？</div>
+            <div class="grey" style="font-size: 0.9em; margin-top: 8px;">删除后该模组将从浏览器存储中彻底移除，不可恢复。是否仍要删除？</div>
         `;
 
         confirmed = await window.modHubConfirm({
-            title: isModHub ? '确认卸载 ModHub（存在依赖警告）' : '确认删除模组（存在依赖警告）',
-            message: `确定要彻底删除模组【${modDisplayName}】吗？\n\n警告：以下模组依赖于该模组/框架，删除后可能无法正常运行：\n${affectedListText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}删除后该模组将从浏览器存储中彻底移除。是否确认删除？`,
+            title: '确认删除模组（存在依赖警告）',
+            message: `确定要彻底删除模组【${modDisplayName}】吗？\n\n警告：以下模组依赖于该模组/框架，删除后可能无法正常运行：\n${affectedListText}\n\n删除后该模组将从浏览器存储中彻底移除，不可恢复。是否确认删除？`,
             trustedMessageHtml,
-            confirmText: isModHub ? '确认卸载' : '确认删除',
+            confirmText: '确认删除',
             cancelText: '取消',
-            dialogClass: isModHub ? 'modhub-self-removal-dialog' : '',
             confirmType: 'danger',
             confirmDelay: 5
         });
     } else {
         confirmed = await window.modHubConfirm({
-            title: isModHub ? '确认卸载 ModHub' : '确认删除模组',
-            message: `确定要删除模组【${modName}】吗？\n${selfNotice || '删除后该模组将从浏览器存储中彻底移除，不可恢复。'}`,
-            trustedMessageHtml: isModHub ? `<p class="modhub-self-removal-intro">确定要删除模组【<strong class="gold">${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${selfNoticeHtml}` : '',
-            dialogClass: isModHub ? 'modhub-self-removal-dialog' : '',
-            confirmText: isModHub ? '确认卸载' : '确认删除',
+            title: '确认删除模组',
+            message: `确定要删除模组【${modName}】吗？\n删除后该模组将从浏览器存储中彻底移除，不可恢复。`,
+            confirmText: '确认删除',
             cancelText: '取消',
             confirmType: 'danger'
         });
@@ -3038,8 +2933,6 @@ window.modHubDeleteSideMod = async function(modName) {
     const saved = await window.modHubRunManagerAction(async () => {
         const state = window._modHubModState;
         if (!state) throw new Error('模组列表尚未读取完成');
-        const controller = window.modHubGetController();
-        if (typeof controller?.removeModIndexDB !== 'function') throw new Error('当前加载器未提供模组包删除接口，已停止删除');
         window.modHubEnsureModStateSync(state);
         state.sideMods = state.sideMods.filter(item => item.name !== modName);
         state.sideEnabled = state.sideEnabled.filter(name => name !== modName);
@@ -3050,18 +2943,14 @@ window.modHubDeleteSideMod = async function(modName) {
         window._modHubDisabledModInfo.delete(modName.trim().toLowerCase());
         // 真正删除浏览器存储中的安装包；
         // 只从列表移除而不删包体，会留下永远无法被加载的孤儿包体（占用空间且状态诡异）。
-        if (await controller.removeModIndexDB(modName) === false) throw new Error('模组包删除失败');
-        const gui = window.modHubGetGui();
-        const loader = gui?.gModUtils?.getModLoader?.()?.getIndexDBLoader?.();
-        const keyval = gui?.gModUtils?.getIdbKeyValRef?.();
-        if (loader?.customStore && typeof loader.constructor?.calcModNameKey === 'function' && typeof keyval?.get === 'function' &&
-            await keyval.get(loader.constructor.calcModNameKey(modName), loader.customStore)) {
-            throw new Error('模组包删除后仍存在，未能确认卸载成功');
+        const controller = window.modHubGetController();
+        if (controller && typeof controller.removeModIndexDB === 'function') {
+            await controller.removeModIndexDB(modName);
         }
-    }, undefined, { trackReload: true, immediateReload: isFramework || isModHub, restoreLabel: `删除模组【${modName}】` });
+    }, undefined, { trackReload: true, immediateReload: isFramework });
     if (saved) {
         window.modHubShowToast(`已删除模组【${modName}】，重新载入后生效`, 'warning');
-        if (isFramework || isModHub) await window.modHubOfferReload(`模组【${modDisplayName || modName}】已从模组列表中删除。`, { isFramework });
+        if (isFramework) await window.modHubOfferReload(`模组【${modDisplayName || modName}】已从模组列表中删除。`, { isFramework: true });
     }
     return saved;
 };
@@ -3071,11 +2960,6 @@ window.modHubDeleteSideMod = async function(modName) {
 window.modHubSaveModManageState = async function(showSuccess = true, options = {}) {
     const state = window._modHubModState;
     if (!state) return false;
-    window.modHubEnsureModStateSync(state);
-    const protectedNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
-    const first = window.modHubKeepRecoveryOrder(state.sideEnabled).filter(name => protectedNames.has(name.toLowerCase()));
-    const ordered = [...first, ...state.sideMods.map(item => item.name).filter(name => !first.includes(name))];
-    state.sideMods = state.sideMods.slice().sort((a, b) => ordered.indexOf(a.name) - ordered.indexOf(b.name));
     window.modHubEnsureModStateSync(state);
 
     window.modHubRenderModManageUI();
@@ -3096,13 +2980,3 @@ window.modHubSaveModManageState = async function(showSuccess = true, options = {
         return false;
     }
 };
-
-// 游戏就绪后核验下一次启动的顺序；只有实际修正时才建立保护点。
-window.jQuery?.(document).one?.(':storyready.modHubRecoveryPlacement', async () => {
-    try {
-        await window.modHubLoadModManageState();
-        await window.modHubEnsureRecoveryPlacement();
-    } catch (error) {
-        console.warn('[ModHub] 恢复工具顺序核验未完成', error);
-    }
-});

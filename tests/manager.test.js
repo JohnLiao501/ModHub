@@ -9,17 +9,16 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.2.0', 'boot.json 版本号必须为 1.2.0');
+    assert.equal(bootJson.version, '1.1.1', 'boot.json 版本号必须为 1.1.1');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
-        'javascript/modhub-manager.js',
+        'javascript/modhub-manager.js', 'javascript/modhub-dialog.js',
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
         'javascript/modhub-log.js', 'javascript/modhub-market.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
-    ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志与市场');
-    assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '弹窗、面板与恢复引擎必须在业务脚本之前注入');
-    for (const file of [...bootJson.scriptFileList_inject_early, ...bootJson.scriptFileList]) {
+    ], '必须先加载公共管理接口，再加载弹窗、拖拽、美化、说明、日志与市场');
+    for (const file of bootJson.scriptFileList) {
         assert.ok(fs.existsSync(path.join(srcRoot, file)), `${file} 必须存在于 src`);
     }
     assert.deepEqual(bootJson.styleFileList, [
@@ -161,163 +160,6 @@ module.exports = async function() {
         assert.equal(sb.modHubGetGui(), null, '无 ModLoader 接口时必须返回 null');
     }
 
-    // 已启用恢复工具及必要前置固定在普通模组之前，顺序保护不限制禁用或卸载。
-    {
-        const controller = createMockController({ enabled: ['用户甲', 'ModHub', 'TweeReplacer', '用户乙'], zips: ['用户甲', 'ModHub', 'TweeReplacer', '用户乙'] });
-        const sb = loadManager({ modModLoadController: controller });
-        await sb.modHubLoadModManageState();
-        const profiles = [
-            { name: 'ModHub', bootJson: { dependenceInfo: [{ modName: 'TweeReplacer' }] } },
-            { name: 'TweeReplacer', bootJson: { dependenceInfo: [{ modName: '底层依赖' }] } },
-            { name: '底层依赖', bootJson: {} },
-        ];
-        assert.deepEqual([...sb.modHubKeepRecoveryOrder(['用户甲', 'ModHub', 'TweeReplacer', '用户乙', '底层依赖'], profiles)],
-            ['底层依赖', 'TweeReplacer', 'ModHub', '用户甲', '用户乙'], '递归前置先于恢复工具，普通模组相对顺序保持');
-        sb._modHubDisabledModInfo.set('modhub', { bootJson: profiles[0].bootJson });
-        assert.ok(sb.modHubProtectedRecoveryNames().includes('TweeReplacer'), '已启用工具的必要前置保持固定顺序');
-        await sb.modHubEnsureModInEnabledList('用户甲');
-        assert.deepEqual(controller.store.enabled, ['TweeReplacer', 'ModHub', '用户甲', '用户乙'], '原生安装已登记的包仍须修正工具顺序，不能提前返回');
-        const shuffled = createMockController({ enabled: ['甲', '乙'] });
-        const write = shuffled.overwriteModIndexDBModList;
-        shuffled.overwriteModIndexDBModList = async list => { await write(list); shuffled.store.enabled.reverse(); return true; };
-        await assert.rejects(() => loadManager({ modModLoadController: shuffled }).modHubSaveIndexDBModList(['甲', '乙'], []), /精确顺序/, '集合相同但顺序错误仍须拒绝');
-        const embedded = loadManager({ modUtils: { getModLoader: () => ({ getModReadCache: () => ({ get_Array: () => [
-            { name: 'ModHub', from: 'Local', mod: { bootJson: profiles[0].bootJson } }
-        ] }) }) } });
-        assert.deepEqual([...embedded.modHubKeepRecoveryOrder(['用户甲', 'TweeReplacer', '用户乙'])], ['TweeReplacer', '用户甲', '用户乙'], '内嵌 ModHub 也要把旁加载必要前置固定在普通模组之前');
-        const missing = embedded.modHubRestore.getRecoveryInfo(['用户甲']);
-        assert.ok(missing.issues.some(item => item.blocking && /缺失或未启用/.test(item.message)), '缺失或禁用前置须明确提示');
-        const versioned = loadManager({ modSC2DataManager: { getDependenceChecker: () => ({ getInfiniteSemVerApi: () => ({
-            parseVersion: value => value ? { version: value } : null, parseRange: value => value, satisfies: () => false
-        }) }) } });
-        const incompatible = versioned.modHubRestore.getRecoveryInfo(['ModHub', 'TweeReplacer'], [
-            { name: 'ModHub', bootJson: { dependenceInfo: [{ modName: 'TweeReplacer', version: '^1.0.0' }] } },
-            { name: 'TweeReplacer', bootJson: { version: '0.1.0' } }
-        ]);
-        assert.ok(incompatible.issues.some(item => item.blocking && /版本不匹配/.test(item.message)), '已知不兼容前置须阻止恢复');
-        sb.modHubGetModInfo = name => name === 'ModHub' ? { bootJson: profiles[0].bootJson } : null;
-        sb._modHubDisabledModInfo.set('modhub', { bootJson: { dependenceInfo: [{ modName: '新前置' }] } });
-        sb._modHubModState.sideMods.push({ name: '新前置', enabled: true });
-        sb.modHubEnsureModStateSync(sb._modHubModState);
-        assert.ok(sb.modHubProtectedRecoveryNames().includes('新前置'), '刚安装更新的工具按新包实际前置固定顺序，不能沿用运行时旧依赖');
-        assert.equal(await sb.modHubToggleSideMod('新前置', false, { skipConfirm: true, silentOfferReload: true }), true, '实际前置也允许用户主动禁用');
-    }
-
-    // 主动停用和卸载后，普通保存、导入登记、刷新与孤儿自愈不得复活 ModHub。
-    {
-        const controller = createMockController({ enabled: ['用户甲', 'ModHub', 'TweeReplacer'], zips: ['用户甲', 'ModHub', 'TweeReplacer'] });
-        const loader = { customStore: {}, constructor: { calcModNameKey: name => '包体:' + name } };
-        const utils = {
-            getMod: name => name === 'ModHub' ? { bootJson: { dependenceInfo: [{ modName: 'TweeReplacer' }] } } : null,
-            getModLoader: () => ({ getIndexDBLoader: () => loader }),
-            getIdbKeyValRef: () => ({ keys: async () => [...controller.store.zips].map(name => '包体:' + name), get: async key => controller.store.zips.has(key.slice(3)) ? '包体' : null }),
-        };
-        const sb = loadManager({ modModLoadController: controller, modUtils: utils });
-        await sb.modHubLoadModManageState();
-        let accepted = false;
-        const prompts = [];
-        sb.modHubConfirm = async options => { prompts.push(options); return accepted; };
-        assert.equal(await sb.modHubToggleSideMod('ModHub', false), false, '取消自身禁用不写入');
-        assert.deepEqual(controller.store.enabled, ['用户甲', 'ModHub', 'TweeReplacer']);
-        accepted = true;
-        assert.equal(await sb.modHubToggleSideMod('ModHub', false), true, '确认后允许禁用自身');
-        assert.match(prompts.at(-1).message, /时间点还原和加载页救援将停用/);
-        assert.deepEqual(controller.store.disabled, ['ModHub']);
-        assert.ok(!controller.store.enabled.includes('ModHub'));
-        assert.deepEqual([...sb.modHubProtectedRecoveryNames()], [], '本轮仍在运行的档案不再锁住必要前置');
-        await sb.modHubSaveModManageState(false);
-        await sb.modHubEnsureModInEnabledList('用户乙');
-        await sb.modHubLoadModManageState(true);
-        await sb.modHubEnsureRecoveryPlacement();
-        await sb.modHubRepairOrphanModZips();
-        assert.deepEqual(controller.store.disabled, ['ModHub'], '保存、单装登记、刷新及自愈保持禁用');
-        assert.ok(!controller.store.enabled.includes('ModHub'));
-        assert.equal(await sb.modHubToggleSideMod('ModHub', true), true, '用户可以重新启用自身');
-        assert.deepEqual(controller.store.enabled.slice(0, 2), ['TweeReplacer', 'ModHub'], '重新启用恢复合法优先顺序');
-        accepted = false;
-        assert.equal(await sb.modHubDeleteSideMod('ModHub'), undefined, '取消卸载不写入');
-        assert.ok(controller.store.zips.has('ModHub'));
-        accepted = true;
-        assert.equal(await sb.modHubDeleteSideMod('ModHub'), true, '确认后真正卸载自身');
-        assert.match(prompts.at(-1).message, /重新导入 ModHub/);
-        assert.ok(!controller.store.zips.has('ModHub'));
-        await sb.modHubLoadModManageState(true);
-        await sb.modHubSaveModManageState(false);
-        await sb.modHubRepairOrphanModZips();
-        assert.ok(![...controller.store.enabled, ...controller.store.disabled].includes('ModHub'), '卸载后保存刷新不会补回自身');
-        controller.store.zips.add('ModHub');
-        const repair = await sb.modHubRepairOrphanModZips();
-        assert.ok(repair.skipped.includes('ModHub'), '残留的未登记自身包体不自动启用');
-        assert.ok(!controller.store.enabled.includes('ModHub'));
-
-        const failedController = createMockController({ enabled: ['ModHub'], zips: ['ModHub'] });
-        const failed = loadManager({ modModLoadController: failedController });
-        failed.modHubConfirm = async () => true;
-        await failed.modHubLoadModManageState();
-        failedController.removeModIndexDB = async () => false;
-        assert.equal(await failed.modHubDeleteSideMod('ModHub'), false, '包体删除失败不能报告卸载成功');
-        assert.equal(failed._modHubManagerSaveFailed, true, '失败保持重载保护');
-        assert.ok(failedController.store.zips.has('ModHub'));
-        delete failedController.removeModIndexDB;
-        assert.equal(await failed.modHubDeleteSideMod('ModHub'), false, '缺少删除接口也不能报告成功');
-        assert.ok(failedController.store.zips.has('ModHub'));
-
-        const silentController = createMockController({ enabled: ['ModHub'], zips: ['ModHub'] });
-        silentController.removeModIndexDB = async () => true;
-        const silent = loadManager({ modModLoadController: silentController, modUtils: {
-            getModLoader: () => ({ getIndexDBLoader: () => loader }),
-            getIdbKeyValRef: () => ({ get: async () => '未删除的真实包体' }),
-        } });
-        silent.modHubConfirm = async () => true;
-        await silent.modHubLoadModManageState();
-        assert.equal(await silent.modHubDeleteSideMod('ModHub'), false, '加载器返回成功但包体仍在库中时仍须拒绝成功提示');
-        assert.equal(silent._modHubManagerSaveFailed, true);
-        assert.ok(silentController.store.zips.has('ModHub'));
-    }
-
-    // 固定只限制移动顺序，恢复工具的禁用与删除按钮可正常点击。
-    {
-        const sb = createBaseSandbox();
-        loadScripts(sb);
-        const container = createStubElement();
-        sb.document.getElementById = id => id === 'modHubModManageContainer' ? container : null;
-        sb._modHubModState = { sideMods: [{ name: 'ModHub', enabled: true }], sideEnabled: ['ModHub'], sideDisabled: [], builtInMods: [] };
-        sb.modHubRenderBeautyUI = sb.modHubUpdateGeneralInfo = () => {};
-        sb.modHubRenderModManageUI();
-        const row = container.innerHTML.match(/<li[^>]*data-mod-name="ModHub"[\s\S]*?<\/li>/)?.[0];
-        assert.ok(row, '管理页必须展示自身');
-        for (const action of ['toggle', 'delete']) {
-            const button = row.match(new RegExp('<button[^>]*data-mod-action="' + action + '"[^>]*>'))?.[0];
-            assert.ok(button && !/\bdisabled\b/.test(button), '自身' + action + '按钮不得再被顺序保护禁用');
-        }
-    }
-
-    // 批量调用显式共享上下文，只有批量外层负责结束还原点；恢复期间不得执行普通动作。
-    {
-        const sb = loadManager();
-        const shared = { id: '批量上下文' }, prepared = [], finished = [];
-        let actions = 0, restoring = false;
-        sb.modHubRestore = {
-            createOperation: () => ({ id: '独立上下文' }), isRestoring: () => restoring,
-            isOperationBlocked: () => false, claim: () => true,
-            prepare: async context => { prepared.push(context); return true; },
-            finish: async context => finished.push(context), release() {},
-        };
-        await sb.modHubRunManagerAction(() => { actions++; }, '批量第一项', { restoreContext: shared });
-        await sb.modHubRunManagerAction(() => { actions++; }, '批量第二项', { restoreContext: shared });
-        assert.ok(prepared.length === 2 && prepared.every(context => context === shared));
-        assert.equal(finished.length, 0, '内层管理动作不得结束批量共享上下文');
-        await sb.modHubRunManagerAction(() => { actions++; });
-        assert.equal(finished.length, 1, '独立动作必须结束自己的还原点');
-        restoring = true;
-        assert.equal(await sb.modHubRunManagerAction(() => { actions++; }), false);
-        assert.equal(actions, 3, '恢复时动作函数不得执行');
-        restoring = false;
-        sb.modHubRestore.prepare = async () => false;
-        assert.equal(await sb.modHubRunManagerAction(() => { actions++; }), false);
-        assert.equal(actions, 3, '取消建立还原点时不得执行持久化动作');
-    }
-
     /* =========================================================================
      * 3. 智能依赖拓扑排序（modHubBuildSmartOrder）
      * ========================================================================= */
@@ -453,15 +295,6 @@ module.exports = async function() {
             assert.equal(await f.sb.modHubHandleAddMod({ files: [file('plain.zip', 2)] }, { askRestart: false }), true);
             assert.equal(called, 1, '仅含 Zip 的旧 GUI 路径必须保留');
             assert.equal(f.checks.length, 0);
-        }
-        {
-            const f = createImporter(true);
-            let prepared = 0;
-            f.sb.modHubRestore.prepare = async () => { prepared++; return true; };
-            f.sb.modHubReadLocalReadme = async () => '';
-            assert.equal(await f.sb.modHubHandleAddMod({ files: [file('first.zip', 2), file('second.zip', 1)] }, { askRestart: false }), true);
-            assert.deepEqual([...f.stored.keys()], ['ZipPack', 'NativePack'], '双 Zip 导入不得调用只接受单文件的原生 GUI');
-            assert.equal(prepared, 1, '批量导入必须在同一管理操作中只准备一次还原点');
         }
         for (const outcome of ['throw', 'message', 'empty', 'missingName']) {
             const f = createImporter();
@@ -654,7 +487,7 @@ module.exports = async function() {
         overlay2.children[0].querySelector('.modhub-modal-btn-cancel').click();
         assert.equal(await cancelPromise, false, '点击取消必须回传 false');
         // 9.3 红线静态扫描：源码不得调用浏览器原生 alert / window.confirm
-        for (const file of [...bootJson.scriptFileList_inject_early, ...bootJson.scriptFileList]) {
+        for (const file of bootJson.scriptFileList) {
             const source = fs.readFileSync(path.join(srcRoot, file), 'utf8');
             assert.ok(!/[^.\w](?:alert|confirm)\s*\(/.test(source), `${file} 严禁调用浏览器原生 alert() 或 confirm()`);
             assert.ok(!/window\.confirm\s*\(/.test(source), `${file} 严禁调用 window.confirm()`);
@@ -787,20 +620,20 @@ module.exports = async function() {
         assert.equal(sb._modHubReloadRevision, 1, '导入和市场等未请求追踪的操作不得加入管理页批次');
         sb._modHubBeautyState = { enabledList: [{ type: '美化甲' }, { type: '美化乙' }], disabledList: [] };
         await tracked(async () => { sb._modHubBeautyState.enabledList.reverse(); });
-        assert.equal(sb._modHubReloadRevision, 1, '美化启用顺序即时生效，不得标记待重载');
+        assert.equal(sb._modHubReloadRevision, 2, '美化启用顺序变化必须标记待重载');
 
         const unchanged = { sideMods: [{ name: 'ModA', enabled: true }], sideEnabled: ['ModA'], sideDisabled: [] };
         sb._modHubModState = unchanged;
         sb.modHubLoadModManageState = async () => { sb._modHubModState = unchanged; };
         sb.modHubLoadBeautyState = async () => true;
         await tracked(async () => { throw new Error('写入失败'); });
-        assert.equal(sb._modHubReloadRevision, 1, '失败且配置未变时不得误记新批次');
+        assert.equal(sb._modHubReloadRevision, 2, '失败且配置未变时不得误记新批次');
         assert.equal(sb._modHubManagerSaveFailed, true, '失败状态必须保留，不能允许刷新');
         sb.modHubLoadModManageState = async () => {
             sb._modHubModState = { sideMods: [{ name: 'ModA', enabled: false }], sideEnabled: [], sideDisabled: ['ModA'] };
         };
         await tracked(async () => { throw new Error('部分写入失败'); });
-        assert.equal(sb._modHubReloadRevision, 2, '失败后回读确认部分配置已变，也必须保留待重载批次');
+        assert.equal(sb._modHubReloadRevision, 3, '失败后回读确认部分配置已变，也必须保留待重载批次');
         assert.equal(sb._modHubManagerSaveFailed, true, '部分写入失败不得被待重载标记当成保存成功');
     }
 
@@ -915,16 +748,13 @@ module.exports = async function() {
         const timers = [], sb = loadReloadManager({ setTimeout: (callback, delay) => timers.push({ callback, delay }) });
         sb._modHubModState = { sideMods: [{ name: 'ModA', enabled: true }], sideEnabled: ['ModA'], sideDisabled: [] };
         let finishSave, dialogs = 0, reloaded = 0, installing = false;
-        let markStarted;
-        const started = new Promise(resolve => { markStarted = resolve; });
         sb.modHubMarket = { isInstallBusy: () => installing };
         sb.location = { reload: () => { reloaded++; } };
         sb.modHubConfirm = async () => { dialogs++; return false; };
         const saving = sb.modHubRunManagerAction(async () => {
-            await new Promise(resolve => { finishSave = resolve; markStarted(); });
+            await new Promise(resolve => { finishSave = resolve; });
             sb._modHubModState.sideMods[0].enabled = false;
         }, '等待保存', { trackReload: true });
-        await started;
         await sb.modHubPromptPendingReload();
         assert.equal(dialogs, 0, '保存未完成时不得弹出重载选择');
         assert.equal(sb._modHubReloadExitPending, true, '首次保存尚未产生 revision 也必须记录离开请求');
@@ -944,14 +774,12 @@ module.exports = async function() {
         }
         installing = true;
         sb.modHubRestartGame();
-        assert.equal(reloaded, 0, '市场下载或安装中不得刷新页面');
+        assert.equal(timers.filter(timer => timer.delay === 450).length, 0, '市场下载或安装中不得安排页面刷新');
         installing = false;
         sb.modHubRestartGame();
-        assert.equal(reloaded, 1, '完成解锁后立即刷新，不以固定延时等待收尾');
         installing = true;
-        sb.modHubRestartGame();
-        assert.equal(reloaded, 1, '后续忙碌时刷新入口仍须阻止重载');
-        assert.equal(timers.filter(timer => timer.delay === 450).length, 0, '重载不应安排固定延时计时器');
+        timers.find(timer => timer.delay === 450).callback();
+        assert.equal(reloaded, 0, '延迟刷新执行前必须再次检查安装锁');
     }
 
     // 连续普通启禁、删除只累计管理页批次；框架强提醒必须在操作锁释放后创建。
@@ -971,11 +799,11 @@ module.exports = async function() {
         sb.addonBeautySelectorAddon = { saveOrder: async () => true };
         sb._modHubBeautyState = { enabledList: [{ type: '美化甲' }, { type: '美化乙' }], disabledList: [], allMap: new Map() };
         await sb.modHubMoveBeauty(0, 'bottom');
-        assert.equal(sb._modHubReloadRevision, 2, '美化排序即时应用，不得加入待重载批次');
+        assert.equal(sb._modHubReloadRevision, 3, '美化排序必须加入管理页待重载批次');
         const beauty = sb._modHubBeautyState.enabledList[0];
         sb._modHubBeautyState.allMap.set(beauty.type, beauty);
         await sb.modHubToggleBeauty(beauty.type, false);
-        assert.equal(sb._modHubReloadRevision, 2, '美化启禁即时应用，不得加入待重载批次');
+        assert.equal(sb._modHubReloadRevision, 4, '美化启禁必须加入管理页待重载批次');
         sb.modHubLoadBeautyState = async () => true;
         await sb.modHubToggleSideMod('ModA', false, { skipConfirm: true });
         assert.equal(prompts.length, 0, '普通启禁不得逐次弹出重载提示');

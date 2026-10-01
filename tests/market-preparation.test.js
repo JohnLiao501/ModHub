@@ -43,44 +43,12 @@ module.exports = async function () {
         sb.modHubGetController = () => ({ checkModZipFileIndexDB: async () => { state.reads++; return state.boot; } });
         sb.modHubHandleAddMod = async (files, options) => {
             assert.equal(options.keepCurrentTab, true, '准备后的市场导入仍保持市场页签');
-            state.restoreContext = options.restoreContext;
             state.imports++;
             return true;
         };
         sb.modHubConfirm = async () => { state.confirms++; return false; };
         return { sb, mod, releaseInfo, state, view, addCard, market: sb.modHubMarket };
     };
-    {
-        const { sb, market, mod, releaseInfo, state } = fixture();
-        const restore = sb.modHubRestore, finish = restore.finish;
-        let releaseFinish, signalFinish, context, operationCount = 0;
-        const gate = new Promise(resolve => { releaseFinish = resolve; });
-        const started = new Promise(resolve => { signalFinish = resolve; });
-        restore.withOperation = async (meta, action) => {
-            operationCount++; context = restore.createOperation(meta); restore.claim(context);
-            try { return await action(context); }
-            finally { signalFinish(); await gate; await finish(context); }
-        };
-        let offers = 0;
-        sb.modHubOfferReload = async () => {
-            offers++;
-            assert.equal(context.finished, true, '直接下载必须完成整理后提示');
-            assert.equal(market.isInstallBusy(), false, '直接下载必须释放市场忙碌标志后提示');
-            assert.equal(restore.isOperationBlocked(), false, '直接下载必须释放还原操作所有权后提示');
-            return false;
-        };
-        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
-        assert.equal(operationCount, 0, '只读准备不能建立安装上下文或还原点');
-        const installing = market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared, batchMode: true });
-        await started;
-        assert.equal(offers, 0, '直接下载整理未完成不得询问重载');
-        assert.equal(state.restoreContext, context, '直接下载将同一上下文显式传入管理器');
-        releaseFinish();
-        assert.equal(await installing, true);
-        assert.equal(operationCount, 1);
-        assert.equal(offers, 1, '直接下载完成后仅提示一次');
-        assert.equal(await sb.modHubCompleteOperationReload(context), false);
-    }
     {
         const { sb, market, mod, releaseInfo, state } = fixture();
         const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });

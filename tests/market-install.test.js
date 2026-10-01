@@ -6,97 +6,6 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
-    // 保留旧来源入口：通过真实导入、列表保存和重载接口核验最外层完成边界。
-    for (const route of ['旧单次安装', '旧批量安装', '旧全部更新']) {
-        const sb = loadMarket(), market = sb.modHubMarket;
-        const dependency = { id: 'legacy-dependency', name: 'LegacyDependency', bootNames: ['LegacyDependency'],
-            version: '1.0.0', githubUrl: 'https://github.com/ModHubTests/LegacyDependency', versionSource: 'github' };
-        const target = { id: 'legacy-target', name: 'LegacyTarget', bootNames: ['LegacyTarget'], version: '2.0.0',
-            githubUrl: 'https://github.com/ModHubTests/LegacyTarget', versionSource: 'github', dependencies: [{ id: dependency.id }] };
-        const boots = new Map(route === '旧全部更新' ? [[target.name, { name: target.name, version: '1.0.0' }],
-            [dependency.name, { name: dependency.name, version: dependency.version }]] : []);
-        const controller = createMockController({ enabled: route === '旧全部更新' ? [target.name] : [],
-            disabled: route === '旧全部更新' ? [dependency.name] : [], zips: [...boots.keys()] });
-        const fileBoot = bytes => bytes[0] === 1 ? { name: dependency.name, version: dependency.version }
-            : { name: target.name, version: target.version };
-        controller.checkModZipFileIndexDB = async bytes => fileBoot(bytes);
-        const imports = [], contexts = [];
-        const gui = {
-            listSideLoadModNameOnly: async () => [...controller.store.enabled],
-            listSideLoadHiddenModNameOnly: async () => [...controller.store.disabled],
-            async loadAndAddMod(input) {
-                const boot = fileBoot(new Uint8Array(await input.files[0].arrayBuffer()));
-                imports.push(boot.name); boots.set(boot.name, boot); controller.store.zips.add(boot.name);
-                if (!controller.store.enabled.includes(boot.name)) controller.store.enabled.push(boot.name);
-                controller.store.disabled = controller.store.disabled.filter(name => name !== boot.name);
-            }
-        };
-        sb.Blob = Blob;
-        sb.modHubGetGui = () => gui;
-        sb.modHubGetController = () => controller;
-        sb.modHubGetModInfo = name => ({ bootJson: boots.get(name) });
-        sb.modHubLoadDisabledModInfo = async () => {};
-        sb.modHubLoadBeautyState = async () => {};
-        sb.modHubReadLocalReadme = async () => null;
-        sb.modHubRenderModManageUI = () => {};
-        sb.modHubUpdateManagerStatus = () => {};
-        sb.modHubShowToast = () => {};
-        sb.modHubAlert = async () => {};
-        sb.modHubLoadModManageState = async () => (sb._modHubModState = {
-            sideMods: [...new Set([...controller.store.enabled, ...controller.store.disabled])].map(name => ({ name, enabled: controller.store.enabled.includes(name) })),
-            sideEnabled: [...controller.store.enabled], sideDisabled: [...controller.store.disabled], builtInMods: []
-        });
-        await sb.modHubLoadModManageState();
-        const handle = sb.modHubHandleAddMod, toggle = sb.modHubToggleSideMod;
-        sb.modHubHandleAddMod = (input, options) => { contexts.push(options.restoreContext); return handle(input, options); };
-        sb.modHubToggleSideMod = (name, enabled, options) => { contexts.push(options.restoreContext); return toggle(name, enabled, options); };
-        sb.fetch = async url => {
-            const value = String(url);
-            if (value.includes('release-index.json')) return { ok: true, json: async () => ({ schemaVersion: 1, mods: [target, dependency] }) };
-            if (value.includes('/releases?')) return { ok: true, json: async () => [] };
-            const mod = value.includes('LegacyDependency') ? dependency : target;
-            const name = `${mod.name}-v${mod.version}.zip`;
-            if (value.includes('/releases/latest')) return { ok: true, json: async () => ({ tag_name: `v${mod.version}`,
-                assets: [{ name, browser_download_url: `${mod.githubUrl}/releases/download/v${mod.version}/${name}` }] }) };
-            return { ok: true, headers: { get: () => null }, blob: async () => new Blob([new Uint8Array([mod === dependency ? 1 : 2])]) };
-        };
-        await market.loadMarketData(true);
-        const restore = sb.modHubRestore, finish = restore.finish;
-        let context, releaseFinish, signalFinish, roots = 0;
-        const gate = new Promise(resolve => { releaseFinish = resolve; });
-        const started = new Promise(resolve => { signalFinish = resolve; });
-        restore.withOperation = async (meta, action) => {
-            roots++; context = restore.createOperation(meta); restore.claim(context);
-            try { return await action(context); }
-            finally { signalFinish(); await gate; await finish(context); }
-        };
-        let offers = 0;
-        sb.modHubConfirm = async options => {
-            if (options.title.startsWith('重新载入游戏')) {
-                offers++;
-                assert.equal(context.finished, true);
-                assert.equal(market.isInstallBusy(), false);
-                assert.equal(restore.isOperationBlocked(), false);
-                return false;
-            }
-            return true;
-        };
-        if (route === '旧批量安装') {
-            market.toggleBatchSelection(true);
-            market.setBatchModSelected(market.getMarketModKey(target), true);
-        }
-        const installing = route === '旧单次安装' ? market.promptDownloadMirrorAndInstall(target)
-            : route === '旧批量安装' ? market.installSelectedMods() : market.updateAllMods();
-        await started;
-        assert.equal(offers, 0, `${route}：根整理未完成不得提示`);
-        releaseFinish();
-        assert.notEqual(await installing, false, `${route}：保持公开结果`);
-        assert.equal(roots, 1, `${route}：前置与目标共享唯一操作`);
-        assert.ok(contexts.length >= (route === '旧全部更新' ? 1 : 2) && contexts.every(value => value === context), `${route}：所有写入显式传相同上下文`);
-        assert.equal(offers, 1, `${route}：根整理后仅提示一次`);
-        assert.equal(imports.at(-1), target.name);
-        assert.equal(await sb.modHubPromptPendingReload(), false, '稍后重载不重复触发退出提醒');
-    }
     // 原生格式无需先解压成 Zip；下载字节原样交给 ModLoader，失败时不得导入。
     for (const extension of ['modpack', 'modpack.crypt']) {
         const sb = loadMarket();
@@ -642,15 +551,6 @@ module.exports = async function() {
     for (const mode of ['success', 'cancel', 'failed', 'unverified']) {
         const sb = loadMarket();
         const market = sb.modHubMarket;
-        const restore = sb.modHubRestore, finish = restore.finish;
-        let context, releaseFinish, signalFinish;
-        const finishGate = new Promise(resolve => { releaseFinish = resolve; });
-        const finishStarted = new Promise(resolve => { signalFinish = resolve; });
-        restore.withOperation = async (meta, action) => {
-            context = restore.createOperation(meta); restore.claim(context);
-            try { return await action(context); }
-            finally { signalFinish(); await finishGate; await finish(context); }
-        };
         const maple = { id: 'maplebirch', name: '秋枫白桦框架', version: '1.0.0', githubUrl: 'https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchframework' };
         const simple = { id: 'simple-framework', name: '简易框架', version: '1.0.0', githubUrl: 'https://github.com/emicoto/SCMLSimpleFramework' };
         const target = { id: 'disable-consumer', name: '本批框架使用者', version: '1.0.0', githubUrl: 'https://github.com/ModHubTests/DisableConsumer', dependencies: [{ id: maple.id }] };
@@ -664,19 +564,14 @@ module.exports = async function() {
         sb.modHubShowToast = () => {};
         sb.modHubAlert = async () => {};
         let reloadOffers = 0;
-        sb.modHubOfferReload = async () => {
-            assert.equal(context.finished, true, '旧批量入口的取消后提示也必须完成整理');
-            assert.equal(market.isInstallBusy(), false, '旧批量入口必须清理市场及批量锁后提示');
-            reloadOffers++;
-        };
+        sb.modHubOfferReload = async () => { reloadOffers++; };
         sb.fetch = async url => {
             if (String(url).includes('release-index.json')) return { ok: true, json: async () => ({ schemaVersion: 1, mods }) };
             return { ok: true, json: async () => ({ tag_name: 'v1.0.0', assets: [{ name: 'DisableConsumer.zip', browser_download_url: `${target.githubUrl}/releases/download/v1.0.0/DisableConsumer.zip` }] }) };
         };
         let toggles = 0;
-        sb.modHubToggleSideMod = async (rawName, enabled, options) => {
+        sb.modHubToggleSideMod = async (rawName, enabled) => {
             toggles++;
-            assert.equal(options.restoreContext, context, '旧快捷禁用显式使用当前批量上下文');
             assert.equal(rawName, maple.id, '快捷禁用必须使用真实本地名称');
             assert.equal(enabled, false, '快捷禁用不得意外启用框架');
             if (mode === 'success') {
@@ -708,11 +603,7 @@ module.exports = async function() {
         await market.loadMarketData(true);
         market.toggleBatchSelection(true);
         for (const mod of [target, simple]) market.setBatchModSelected(market.getMarketModKey(mod), true);
-        const installing = market.installSelectedMods();
-        await finishStarted;
-        assert.equal(reloadOffers, 0, '旧批量入口整理结束之前不能提示');
-        releaseFinish();
-        await installing;
+        await market.installSelectedMods();
         assert.ok(impactHtml.includes(target.name) && impactHtml.includes(localConsumerName), '禁用确认必须同时说明本地与本批依赖该框架的模组');
         assert.ok(impactHtml.includes('modhub-modal-affected-box') && impactHtml.includes('本地受影响模组') && impactHtml.includes('本次安装受影响目标'), '本地与本批影响应分区突出呈现');
         assert.equal(toggles, mode === 'cancel' ? 0 : 1, '取消快捷禁用不得写入控制器，其余场景只尝试一次');

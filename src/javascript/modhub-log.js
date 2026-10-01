@@ -147,7 +147,7 @@ const MODHUB_ERROR_PATTERNS = [
 
                     let desc = `模组【${modLabel}】在应用 TweeReplacer 补丁时有 ${countMatch[1]} 处未能匹配。`;
                     if (okCount) {
-                        desc += `（该模组其余 ${okCount} 处补丁已成功匹配）。`;
+                        desc += `（该模组其余 ${okCount} 处补丁均已成功生效）。`;
                     }
                     desc += '通常因为与其他模组修改了同一处文本、或当前游戏本体/汉化版本的用词存在出入。';
 
@@ -155,8 +155,7 @@ const MODHUB_ERROR_PATTERNS = [
                         id: 'twee-patch-mismatch',
                         title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
                         desc: desc,
-                        solution: '请定位具体未匹配的段落与文本，核对模组版本及加载顺序。成功匹配数量不能证明失败补丁不影响功能；若近期安装后出现异常，可在【还原点】中恢复安装前的配置。',
-                        isSummary: true
+                        solution: '①【不必担心】若游戏能正常进入，这通常仅影响个别次要分支或入口文本，绝大部分功能已成功生效，可放心游玩；② 可在【模组管理】中点击【智能整理模组与美化顺序】让基础框架与汉化模组优先加载；③ 点击上方“定位首处错误”可查看具体未匹配的段落与文本。'
                     };
                 }
                 return null;
@@ -182,28 +181,22 @@ const MODHUB_ERROR_PATTERNS = [
             const isWraithTemple = (rawModName.includes('Wraith') || modLabel.includes('怨灵')) &&
                 (passageName.includes('Temple Jordan') || findTarget.includes('Temple Chastity') || findTarget.includes('贞操带'));
 
-            const isOriginalOptimizationUiEntry = ['原版优化', 'doloptimization'].includes(rawModName.toLowerCase()) &&
-                ((passageName === 'Widgets Clothing Caption' && findTarget.includes('overlayReplace "startFeats"')) ||
-                 (passageName === 'StoryCaption' && findTarget.includes('overlayReplace "saves"')));
-            const isCheatLyraEntry = rawModName.toLowerCase() === 'cheat-lyra' && passageName === 'StoryCaption' &&
-                /\$cheatsEnabled\s+is\s+true\s+or\s+\$debug\s+is\s+1/.test(findTarget);
+            const isOriginalOptimizationUiEntry = (rawModName.includes('原版优化') || rawModName.toLowerCase().includes('doloptimization')) ||
+                (passageName.includes('Widgets Clothing Caption') || passageName.includes('StoryCaption'));
 
             if (isWraithTemple) {
                 desc = `模组【${modLabel}】尝试对神庙段落【Temple Jordan】打补丁寻找选项文本时未能匹配。成因解析：该模组基于特定中文汉化环境制作，而当前游戏本体底层段落为英文原版（或当前汉化版本用词存在出入）。该处仅用于在神庙修士处添加询问银海螺的次要选项，模组绝大部分核心剧情（象牙怨灵恋爱、偷还项链、专属特质与约会等）均已正常加载生效。`;
                 solution = '①【不必担心】若游戏能正常进入，这完全不会影响怨灵恋爱核心剧情与存档安全，可放心继续游玩；② 若您安装了独立的汉化模组，可在【模组管理】中点击【智能整理模组与美化顺序】，确保汉化模组优先于剧情模组生效；③ 此提示属于第三方模组写死特定汉化用词引发的正常现象，通常无需处理。';
             } else if (isOriginalOptimizationUiEntry) {
-                desc = `模组【${modLabel}】对界面段落【${passageName}】的管理器入口补丁未能匹配，可能与 ModHub 等模组改写同处入口或游戏文本变化有关。已安装 ModHub 时，可使用 ModHub 的管理器入口。`;
-                solution = '若仅此管理器入口补丁失败，通常不影响核心剧情，可正常游玩；仍应核对原始日志与实际功能。可使用【智能整理模组与美化顺序】检查加载次序；如果启动或其他功能异常，请使用【还原点】恢复之前的配置。';
-            } else if (isCheatLyraEntry) {
-                desc = `模组【${modLabel}】对【StoryCaption】中作弊按钮开放条件的补丁未能匹配。这不是 ModHub 管理器入口补丁；其他模组可能已修改该条件，也可能存在游戏版本差异，仅凭此日志不能确定冲突来源或功能影响。`;
-                solution = '请核对作弊入口是否正常显示，检查 Cheat-Lyra 与当前游戏版本及其他作弊模组的兼容情况。可查看完整日志与【智能整理模组与美化顺序】；如果安装后出现异常，在【还原点】中恢复安装前的配置。';
+                desc = `模组【${modLabel}】与【ModHub】同时对游戏界面段落【${passageName}】的管理器入口进行了改写，后加载模组未能匹配到原文本。由于您已安装 ModHub，原版优化自带的提示入口本就无需显示。`;
+                solution = '①【不必担心】这完全不会影响游戏核心剧情与角色数值，可正常游玩；② 建议在【模组管理】中点击【智能整理模组与美化顺序】优化模组加载次序。';
             } else if (isChineseSnippet && passageName) {
                 const previewSnippet = findTarget.length > 24 ? findTarget.slice(0, 24) + '...' : findTarget;
                 desc = `模组【${modLabel}】在尝试对段落【${passageName}】打补丁时未能匹配成功。成因解析：模组在代码中硬编码了特定汉化版本的中文文本（如“${previewSnippet}”），因当前游戏本体或汉化版本的词句、空格或换行不同而未能匹配。`;
                 solution = '①【不必担心】若游戏能正常进入，通常仅影响该处的局部剧情分支，绝大部分功能已成功生效，可放心游玩；② 建议在【模组管理】中使用【智能整理模组与美化顺序】让汉化模组优先加载；③ 若遇到特定场景异常，可关注模组作者发布的最新适配版本。';
             } else if (rawModName && passageName) {
                 desc = `模组【${modLabel}】尝试对游戏段落【${passageName}】打补丁时，未能找到指定的原版匹配文本。常见原因：① 补丁冲突：多个模组修改了同一处段落（排在前面的模组先改写了文本或换行，导致后加载模组匹配失败）；② 该模组版本未完全适配当前游戏本体文本。`;
-                solution = '请定位未匹配文本并核对实际功能，检查模组与游戏版本兼容情况。可使用【智能整理模组与美化顺序】检查加载次序；若近期安装后出现异常，在【还原点】中恢复安装前的配置。';
+                solution = '① 若游戏能正常游玩，通常绝大部分功能已成功生效，可放心继续游戏；② 尝试在【模组管理】中使用【智能整理模组与美化顺序】，让关键基础框架优先加载；③ 若调整顺序后仍报错且影响游玩，请检查报错模组是否与当前游戏版本兼容。';
             } else {
                 desc = 'TweeReplacer 补丁尝试改写游戏段落时未能找到指定的原版匹配文本。通常因为多个模组修改同一处文本产生冲突，或模组版本未适配当前游戏。';
                 solution = '① 若游戏能正常游玩，通常绝大部分功能已成功生效；② 尝试在【模组管理】中调整模组加载顺序（推荐使用【智能整理模组与美化顺序】）；③ 若持续影响游玩，请检查报错模组与当前游戏版本的兼容性。';
@@ -377,51 +370,47 @@ window.modHubGetRawModLoaderLogs = function() {
     const result = [];
     const seenConsole = new Set();
 
-    // 5. 合并早期恢复模块与常规捕获器的启动日志，保留原版日志未收录的条目。
-    let earlyLogs = [];
-    try {
-        const captured = window.modHubRestore?.getStartupLogs?.();
-        if (Array.isArray(captured)) earlyLogs = captured;
-    } catch (_) {}
-    const startupLogs = [...(Array.isArray(window._modHubStartupErrors) ? window._modHubStartupErrors : []), ...earlyLogs];
-    startupLogs.forEach(err => {
-        const rawMsg = String(typeof err === 'string' ? err : (err?.message || err?.str || '')).trim();
-        if (!rawMsg) return;
-        const rawLevel = typeof err === 'object' ? err?.level : 'error';
-        const level = rawLevel === 'warning' ? 'warn' : (['info', 'warn', 'error'].includes(rawLevel) ? rawLevel : 'error');
-        const cleanMsg = rawMsg.replace(/^\[(?:控制台报错|脚本异常|异步异常)\]\s*/, '').trim();
-        if (!cleanMsg || seenConsole.has(cleanMsg)) return;
-        seenConsole.add(cleanMsg);
-        const cleanLower = cleanMsg.toLowerCase();
+    // 5. 跨流去重导入控制台捕获的严重启动异常（仅保留原版日志未收录的外部异常）
+    if (Array.isArray(window._modHubStartupErrors) && window._modHubStartupErrors.length > 0) {
+        window._modHubStartupErrors.forEach(err => {
+            const rawMsg = String(err || '').trim();
+            if (!rawMsg || seenConsole.has(rawMsg)) return;
+            seenConsole.add(rawMsg);
 
-        // 过滤良性降级异常
-        if (cleanLower.includes('modlist.json') || cleanLower.includes('resizeobserver') || cleanLower.includes('duplicate name')) {
-            return;
-        }
+            const cleanMsg = rawMsg.replace(/^\[(?:控制台报错|脚本异常|异步异常)\]\s*/, '').trim();
+            const cleanLower = cleanMsg.toLowerCase();
 
-        // 比对 ModLoader 日志中是否已收录该错误（若已有则丢弃控制台重复条目）
-        const isDuplicate = modLoaderLogs.some(l => {
-            const lMsg = String(l.message || '');
-            const lLower = lMsg.toLowerCase();
-            if (lMsg && (lMsg.includes(cleanMsg) || cleanMsg.includes(lMsg))) return true;
-            if (cleanLower.includes('checkgameversion() not satisfies') && lLower.includes('checkgameversion() not satisfies')) {
-                const m1 = cleanMsg.match(/\["([^"]+)"/);
-                const m2 = lMsg.match(/mod\[([^\]]+)\]/);
-                if (m1 && m2 && m1[1] === m2[1]) return true;
-                if (!m1 && !m2) return true;
+            // 过滤良性降级异常
+            if (cleanLower.includes('modlist.json') || cleanLower.includes('resizeobserver') || cleanLower.includes('duplicate name')) {
+                return;
             }
-            return false;
-        });
 
-        if (!isDuplicate) {
-            result.push({
-                time: typeof err?.time === 'number' ? new Date(err.time).toLocaleTimeString('zh-CN', { hour12: false }) : err?.time || '',
-                level,
-                message: rawMsg,
-                isConsoleError: true
+            // 比对 ModLoader 日志中是否已收录该错误（若已有则丢弃控制台重复条目）
+            const isDuplicate = modLoaderLogs.some(l => {
+                const lMsg = String(l.message || '');
+                const lLower = lMsg.toLowerCase();
+                if (lMsg.includes(cleanMsg) || cleanMsg.includes(lMsg)) return true;
+                if (cleanLower.includes('checkgameversion() not satisfies') && lLower.includes('checkgameversion() not satisfies')) {
+                    const m1 = cleanMsg.match(/\["([^"]+)"/);
+                    const m2 = lMsg.match(/mod\[([^\]]+)\]/);
+                    if (m1 && m2 && m1[1] === m2[1]) return true;
+                    if (!m1 && !m2) return true;
+                }
+                if (cleanLower.includes('cannot find findstring') && lLower.includes('cannot find findstring')) return true;
+                if (cleanLower.includes('modloadcontroller') && lLower.includes('modloadcontroller')) return true;
+                return false;
             });
-        }
-    });
+
+            if (!isDuplicate) {
+                result.push({
+                    time: '',
+                    level: 'error',
+                    message: rawMsg,
+                    isConsoleError: true
+                });
+            }
+        });
+    }
 
     // 6. 追加原版 ModLoader 真实日志
     modLoaderLogs.forEach(item => result.push(item));
@@ -444,9 +433,7 @@ window.modHubAnalyzeLogs = function(rawContent) {
         };
     }
 
-    const allKnownMods = [...window.modHubGetAllKnownModNames()].filter(name => typeof name === 'string' && name)
-        .sort((a, b) => b.length - a.length)
-        .map(name => [name, new RegExp(`(^|[^\\p{L}\\p{N}_'’-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}_'’-])`, 'gu')]);
+    const allKnownMods = window.modHubGetAllKnownModNames();
     const parsedLines = [];
     const errorMods = new Set();
     const errorFiles = new Set();
@@ -541,10 +528,9 @@ window.modHubAnalyzeLogs = function(rawContent) {
         const foundModsInLine = new Set();
         const modRegexes = [
             /(?:mod|id|Mod|MOD)\s*\[([^\]]+)\]/g,
-            /(?:modName|mod_name|mod)\s*[:=]\s*"([^"]+)"/gi,
-            /(?:modName|mod_name|mod)[\s:=]+([A-Za-z0-9_\-\u4e00-\u9fa5]+)(?=\s*[,;]|$)/g,
+            /(?:modName|mod_name|mod)[\s:=]+([A-Za-z0-9_\-\u4e00-\u9fa5]+)/g,
             /on mod\[([^\]]+)\]/g,
-            /(?:cannot find (?:findString|findRegex)|do_patch\(\) done):\s*\[([^\]]+)\]/gi,
+            /(?:findString|findRegex|done):\s*\[([^\]]+)\]/g,
             /\[(TweeReplacer)\]/g
         ];
         modRegexes.forEach(reg => {
@@ -557,15 +543,8 @@ window.modHubAnalyzeLogs = function(rawContent) {
             }
         });
 
-        // 补丁正文可能包含代码或其他名称，仅使用真正的补丁来源字段。
-        if (!/cannot find (?:findString|findRegex):|do_patch\(\) done:/i.test(cleanMsg)) {
-            let nameText = cleanMsg;
-            for (const [known, pattern] of allKnownMods) {
-                nameText = nameText.replace(pattern, (_, prefix) => {
-                    foundModsInLine.add(known);
-                    return prefix + ' '.repeat(known.length);
-                });
-            }
+        for (const known of allKnownMods) {
+            if (cleanMsg.includes(known)) foundModsInLine.add(known);
         }
 
         // 提取文件名与段落名
@@ -598,8 +577,7 @@ window.modHubAnalyzeLogs = function(rawContent) {
                 if (isWeatherImageFailure && ['type-error', 'asset-missing'].includes(pattern.id)) return;
                 if (pattern.keywords.some(kw => lineLower.includes(kw.toLowerCase()))) {
                     const issue = typeof pattern.resolve === 'function' ? pattern.resolve(cleanMsg) : pattern;
-                    if (issue && (!matchedIssuesMap.has(issue.id) ||
-                        (matchedIssuesMap.get(issue.id).isSummary && !issue.isSummary))) {
+                    if (issue && !matchedIssuesMap.has(issue.id)) {
                         matchedIssuesMap.set(issue.id, issue);
                     }
                 }
@@ -656,7 +634,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
         <div class="childItem modhub-diagnosis-card diag-error">
             <div class="modhub-diag-header">
                 <div class="modhub-diag-title red">
-                    <span class="gold">[!]</span> 模组加载异常快速诊断 (发现 ${analysis.errorCount} 条错误日志)
+                    <span class="gold">[!]</span> 模组加载异常快速诊断 (发现 ${analysis.errorCount} 处错误)
                 </div>
                 <div class="modhub-diag-actions">
                     <button type="button" class="macro-button modhub-btn-primary modhub-btn-locate" onclick="window.modHubScrollToFirstError()">定位首处错误</button>

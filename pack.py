@@ -72,7 +72,7 @@ def pack_mod():
             if json.loads(zf.read('boot.json'))['version'] != version:
                 raise SystemExit('校验失败：包内版本与源码版本不一致')
             missing = []
-            for k in ['styleFileList', 'scriptFileList_inject_early', 'scriptFileList', 'tweeFileList', 'imgFileList']:
+            for k in ['styleFileList', 'scriptFileList', 'tweeFileList', 'imgFileList']:
                 for path in boot.get(k, []):
                     if path not in namelist:
                         missing.append((k, path))

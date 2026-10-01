@@ -1,12 +1,7 @@
 /**
  * ModHub - 公共提示与原生暗黑模态框。
- * 在早期注入阶段提供转义与弹窗接口；弹窗栈仅在本文件中维护。
+ * 共享转义接口由 modhub-manager.js 提供；弹窗栈仅在本文件中维护。
  */
-
-window.modHubEscapeHtml = function(str) {
-    return String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
-};
 
 // 统一 Toast 提示
 window.modHubShowToast = function(message, type = '', duration = 2500) {

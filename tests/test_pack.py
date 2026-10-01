@@ -96,20 +96,6 @@ class PackTests(unittest.TestCase):
                         self.run_pack()
                 self.assertEqual(self.snapshot(), before)
 
-    def test_early_script_validation_preserves_formal_package(self):
-        self.old_packages(['1.0.4'])
-        before = self.snapshot()
-        boot = json.loads(Path('src/boot.json').read_text())
-        boot['scriptFileList_inject_early'] = ['early.js']
-        Path('src/boot.json').write_text(json.dumps(boot), encoding='utf-8')
-        with self.assertRaises(SystemExit):
-            self.run_pack()
-        self.assertEqual(self.snapshot(), before)
-        Path('src/early.js').write_text('// 早期恢复入口\n', encoding='utf-8')
-        self.run_pack()
-        with zipfile.ZipFile(self.release / 'ModHub-v1.0.4.zip') as archive:
-            self.assertIn('early.js', archive.namelist())
-
     def test_lower_or_invalid_version_is_rejected_before_writes(self):
         self.old_packages(['1.0.2', '1.0.3', '1.0.4'])
         before = self.snapshot()

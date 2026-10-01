@@ -3328,10 +3328,6 @@
 
     // 按唯一模组执行；失败向依赖它的任务传播，独立分支继续。
     async function executeBatchInstallPlan(plan, options = {}) {
-        if (!options.restoreContext) {
-            return runMarketInstallTask(context => executeBatchInstallPlan(plan, { ...options, restoreContext: context }),
-                { label: '市场批量安装', names: plan.targets.map(mod => mod.name), reloadOnChange: false });
-        }
         const results = new Map(), changedMods = new Set();
         let currentPlan = plan;
         const refresh = options.refresh || (async () => { await window.modHubLoadModManageState?.(true); });
@@ -3342,13 +3338,12 @@
             }
             return downloadAndInstallMod(action.mod, currentMirrorId, {
             askRestart: false, skipReloadOffer: true, batchMode: true,
-            restoreContext: options.restoreContext,
             releaseInfo: options.releaseInfos?.get(action.key),
             dependencyRequirements: action.dependencyRequirements,
             onFailure: reason => { action.failureReason = reason; }
             });
         });
-        const enable = options.enable || (action => window.modHubToggleSideMod?.(action.local.name, true, { silentOfferReload: true, restoreContext: options.restoreContext }));
+        const enable = options.enable || (action => window.modHubToggleSideMod?.(action.local.name, true, { silentOfferReload: true }));
         const isEnabled = action => {
             const state = window._modHubModState;
             const item = state?.sideMods?.find(mod => mod.name === action.local?.name);
@@ -3373,7 +3368,7 @@
         let stopped = false;
         for (let index = 0; index < plan.actions.length; index++) {
             let action = plan.actions[index];
-            if (stopped || options.restoreContext?.cancelled || options.shouldStop?.()) {
+            if (stopped || options.shouldStop?.()) {
                 stopped = true;
                 setResult(action, 'skipped', '已停止后续安装');
                 continue;
@@ -3431,37 +3426,20 @@
             const key = getMarketModKey(mod);
             if (!results.has(key)) setResult({ key, mod, role: '目标模组' }, 'skipped', '本地已安装，无需重复安装');
         }
-        if (changedMods.size && options.restoreContext.reloadOnChange) {
-            window.modHubRegisterOperationReload(options.restoreContext, '市场批量安装已处理，重新载入后生效。',
-                { isFramework: [...changedMods].some(name => window.modHubIsFrameworkMod?.(name)) });
-        }
         return { results, changedMods };
     }
 
     let marketInstallBusy = false;
-    async function runMarketInstallTask(task, options = {}) {
+    async function runMarketInstallTask(task) {
         if (marketInstallBusy) {
             window.modHubShowToast('已有市场安装任务，请等待完成后再试', 'warning');
             return false;
         }
         marketInstallBusy = true;
-        let restoreContext;
-        try {
-            if (!window.modHubRestore) {
-                restoreContext = { reloadOnChange: options.reloadOnChange !== false };
-                try { return await task(restoreContext); }
-                finally { restoreContext.finished = true; }
-            }
-            return await window.modHubRestore.withOperation({ label: options.label || '市场安装或更新', names: options.names }, async context => {
-                restoreContext = context;
-                context.reloadOnChange = options.reloadOnChange !== false;
-                return task(context);
-            });
-        }
+        try { return await task(); }
         finally {
             marketInstallBusy = false;
-            if (restoreContext?.reloadOffer) await window.modHubCompleteOperationReload(restoreContext);
-            else if (!restoreContext?.finishError && window._modHubReloadExitPending) window.modHubPromptPendingReload?.();
+            if (window._modHubReloadExitPending) window.modHubPromptPendingReload?.();
         }
     }
 
@@ -3499,13 +3477,13 @@
     }
 
     async function installSelectedMods() {
-        return runMarketInstallTask(async restoreContext => {
+        return runMarketInstallTask(async () => {
             const originalTargets = marketModList.filter(mod => batchInstallState.selected.has(getMarketModKey(mod)) && isBatchInstallEligible(mod));
             if (!originalTargets.length) {
                 window.modHubShowToast('请先选择尚未安装的模组', 'info');
                 return false;
             }
-            if (window.modHubMarketInstaller) return window.modHubMarketInstaller.installBatch(originalTargets, { restoreContext });
+            if (window.modHubMarketInstaller) return window.modHubMarketInstaller.installBatch(originalTargets);
             const mirrorId = currentMirrorId;
             if (resolveMirrorServer(mirrorId).browserOnly) {
                 await window.modHubAlert('当前线路仅支持浏览器下载，请切换到加速通道再批量安装。', '当前线路不支持批量安装');
@@ -3594,7 +3572,7 @@
                                         button.disabled = true;
                                         pendingPlanChange = (async () => {
                                             try {
-                                                if (await disableInstallConflict(button.dataset.conflictRaw, button.dataset.conflictName, getAffectedTargets(button.dataset.conflictRaw), restoreContext)) onChanged(button.dataset.conflictRaw);
+                                                if (await disableInstallConflict(button.dataset.conflictRaw, button.dataset.conflictName, getAffectedTargets(button.dataset.conflictRaw))) onChanged(button.dataset.conflictRaw);
                                             } catch (error) { window.modHubShowToast(error.message || '快捷禁用失败', 'warning'); }
                                         })();
                                         await pendingPlanChange;
@@ -3622,12 +3600,11 @@
                     }
                     if (choice && !batchInstallState.stopRequested) {
                         await window.modHubLoadModManageState?.(true);
-                        if (await confirmInstallConflicts(() => ({ targetMod: null, actions: getPlan().actions }), { onChanged, getAffectedTargets, restoreContext })) {
+                        if (await confirmInstallConflicts(() => ({ targetMod: null, actions: getPlan().actions }), { onChanged, getAffectedTargets })) {
                             const plan = getPlan();
                             const approved = new Set(detectModInstallationConflicts(null, plan.actions).filter(item => item.localConflictMod.isEnabled).map(batchConflictKey));
                             const approvedActions = new Set(plan.actions.map(action => `${action.key}:${action.type}`));
                             outcome = await executeBatchInstallPlan(plan, {
-                                restoreContext,
                                 releaseInfos,
                                 getPlan,
                                 shouldStop: () => batchInstallState.stopRequested,
@@ -3645,7 +3622,7 @@
                                     };
                                     const conflicts = detectModInstallationConflicts(null, remaining().actions).filter(item => item.localConflictMod.isEnabled);
                                     if (!conflicts.some(item => !approved.has(batchConflictKey(item)))) return true;
-                                    if (!await confirmInstallConflicts(remaining, { onChanged, getAffectedTargets, restoreContext })) return false;
+                                    if (!await confirmInstallConflicts(remaining, { onChanged, getAffectedTargets })) return false;
                                     detectModInstallationConflicts(null, remaining().actions).forEach(item => approved.add(batchConflictKey(item)));
                                     return true;
                                 }
@@ -3671,7 +3648,13 @@
                 : '批量安装已取消。';
             if (changedMods.size) {
                 const isFramework = [...changedMods].some(name => window.modHubIsFrameworkMod?.(name));
-                window.modHubRegisterOperationReload(restoreContext, summary, { isFramework });
+                if (typeof window.modHubOfferReload === 'function') await window.modHubOfferReload(summary, { isFramework });
+                else {
+                    const reloadRevision = window._modHubReloadRevision;
+                    const restart = await window.modHubConfirm({ title: '批量安装结果', message: `${summary}\n\n是否立即重新载入游戏？`, confirmText: '立即重载', cancelText: '稍后重载', confirmType: 'primary' });
+                    window.modHubAcknowledgeReloadPrompt?.(reloadRevision);
+                    if (restart) setTimeout(() => window.modHubRestartGame ? window.modHubRestartGame() : location.reload(), 300);
+                }
             } else if (outcome) await window.modHubAlert(summary, '批量安装结果');
             return outcome || false;
         });
@@ -4172,7 +4155,7 @@
         `;
     }
 
-    async function disableInstallConflict(rawName, displayName, pendingTargets = [], restoreContext) {
+    async function disableInstallConflict(rawName, displayName, pendingTargets = []) {
         if (!rawName || typeof window.modHubToggleSideMod !== 'function') return false;
         await window.modHubLoadModManageState?.(true);
         const affectedMods = findDependentModsForConflict(rawName);
@@ -4192,7 +4175,7 @@
             confirmType: affectedMods.length || pendingTargets.length ? 'danger' : 'warning'
         });
         if (!confirmed) return false;
-        const result = await window.modHubToggleSideMod(rawName, false, { silentOfferReload: true, skipConfirm: true, restoreContext });
+        const result = await window.modHubToggleSideMod(rawName, false, { silentOfferReload: true, skipConfirm: true });
         if (result !== true) return false;
         await window.modHubLoadModManageState?.(true);
         const state = window._modHubModState;
@@ -4203,8 +4186,6 @@
             return false;
         }
         window.modHubShowToast(`已快捷禁用【${displayName}】，正在重新检查安装计划`, 'success');
-        if (restoreContext?.reloadOnChange) window.modHubRegisterOperationReload(restoreContext,
-            `模组【${displayName}】已禁用，重新载入后生效。`, { isFramework: window.modHubIsFrameworkMod?.(rawName) });
         return true;
     }
 
@@ -4267,7 +4248,7 @@
                                 button.disabled = true;
                                 const change = (async () => {
                                     try {
-                                        if (await disableInstallConflict(rawName, current.localConflictMod.name, options.getAffectedTargets?.(rawName), options.restoreContext)) {
+                                        if (await disableInstallConflict(rawName, current.localConflictMod.name, options.getAffectedTargets?.(rawName))) {
                                             await options.onChanged?.(rawName);
                                         }
                                     } catch (error) {
@@ -4474,10 +4455,6 @@
 
     async function downloadAndInstallMod(mod, mirrorId = currentMirrorId, options = {}) {
         if (!mod) return false;
-        if (!options.prepareOnly && !options.restoreContext) {
-            return runMarketInstallTask(context => downloadAndInstallMod(mod, mirrorId, { ...options, restoreContext: context }),
-                { label: `市场安装【${mod.name}】`, names: [mod.name], reloadOnChange: options.askRestart !== false && !options.skipReloadOffer });
-        }
         let progressReported = false;
         const failBatch = (reason, code = '') => {
             if (options.prepareOnly && progressReported) {
@@ -4886,15 +4863,12 @@
                 return failBatch('模组管理器正忙，请稍后重试');
             }
             if (controller?.signal.aborted) throw Object.assign(new Error('已取消安装'), { name: 'AbortError' });
-            if (typeof window.modHubHandleAddMod !== 'function' && options.restoreContext && window.modHubRestore?.prepare &&
-                !await window.modHubRestore.prepare(options.restoreContext)) return failBatch('已取消没有还原点的安装');
             if (typeof window.modHubHandleAddMod === 'function') {
                 const installed = await window.modHubHandleAddMod(dummyInput.files && dummyInput.files.length > 0 ? dummyInput : fileObjects, {
                     askRestart,
                     skipReloadOffer: options.skipReloadOffer,
                     // 市场内安装：「稍后重载」后停留市场页签，方便玩家连续安装多个模组
                     keepCurrentTab: true,
-                    restoreContext: options.restoreContext,
                     targetModName: mod._matchedLocal?.name || '',
                     displayName: mod.name || ''
                 });
@@ -4908,11 +4882,28 @@
                 await window.modHubInstallFilesViaIndexDB(fileObjects);
             } else if (typeof gui.loadAndAddMod === 'function') {
                 await gui.loadAndAddMod(dummyInput);
+                if (askRestart && !options.skipReloadOffer) {
+                    const isFramework = typeof window.modHubIsFrameworkMod === 'function' && window.modHubIsFrameworkMod(mod.name);
+                    if (isFramework && typeof window.modHubOfferReload === 'function') {
+                        await window.modHubOfferReload(`模组【${mod.name}】已成功安装并载入配置！`, { isFramework: true });
+                    } else {
+                        const reloadRevision = window._modHubReloadRevision;
+                        const ok = await window.modHubConfirm({
+                            title: '安装成功',
+                            message: `模组【${mod.name}】已成功安装并载入配置！\n\n是否立即重新载入游戏使模组生效？`,
+                            confirmText: '立即重载',
+                            cancelText: '稍后重载',
+                            confirmType: 'primary'
+                        });
+                        window.modHubAcknowledgeReloadPrompt?.(reloadRevision);
+                        if (ok) {
+                            setTimeout(() => window.modHubRestartGame ? window.modHubRestartGame() : location.reload(), 300);
+                        }
+                    }
+                }
             } else {
                 throw new Error('未找到 ModLoader 导入执行接口');
             }
-            if (options.restoreContext?.reloadOnChange) window.modHubRegisterOperationReload(options.restoreContext,
-                `模组【${mod.name}】已成功安装并载入配置。`, { isFramework: window.modHubIsFrameworkMod?.(mod.name) });
 
             // 安装完毕后记录版本确权，防止第三方 zip 内 boot.json 漏改版本号导致死循环更新
             const installedVer = (preparedPackage ? boots[0]?.version : '') || targetVersion || mod.version;
@@ -5509,13 +5500,13 @@
 
     /** 弹窗开始下载 */
     async function promptDownloadMirrorAndInstall(mod) {
-        return runMarketInstallTask(context => promptDownloadMirrorAndInstallUnlocked(mod, context));
+        return runMarketInstallTask(() => promptDownloadMirrorAndInstallUnlocked(mod));
     }
 
-    async function promptDownloadMirrorAndInstallUnlocked(mod, restoreContext) {
+    async function promptDownloadMirrorAndInstallUnlocked(mod) {
         if (isWithdrawn(mod)) return false;
         if (window.modHubMarketInstaller && mod.githubUrl && (mod.catalogSource !== 'community' || hasCommunityReleaseSource(mod))) {
-            return window.modHubMarketInstaller.install(mod, { restoreContext });
+            return window.modHubMarketInstaller.install(mod);
         }
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
         let externalOnly = !mod.githubUrl || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod));
@@ -5696,7 +5687,7 @@
                                 button.disabled = true;
                                 pendingConflictChange = (async () => {
                                     try {
-                                        if (await disableInstallConflict(button.dataset.conflictRaw, button.dataset.conflictName, getAffectedTargets(button.dataset.conflictRaw), restoreContext)) onConflictDisabled(button.dataset.conflictRaw);
+                                        if (await disableInstallConflict(button.dataset.conflictRaw, button.dataset.conflictName, getAffectedTargets(button.dataset.conflictRaw))) onConflictDisabled(button.dataset.conflictRaw);
                                     } catch (error) {
                                         console.error('[ModHub] 快捷禁用冲突模组失败:', error);
                                         window.modHubShowToast('快捷禁用未完成，请检查模组管理器状态', 'warning');
@@ -5749,7 +5740,7 @@
             }
         }
 
-        if (!await confirmInstallConflicts(getActivePlan, { onChanged: onConflictDisabled, getAffectedTargets, restoreContext })) {
+        if (!await confirmInstallConflicts(getActivePlan, { onChanged: onConflictDisabled, getAffectedTargets })) {
             resetDownloadProgress(mod.name);
             return false;
         }
@@ -5764,7 +5755,7 @@
                 window.open(manualSourceUrl, '_blank', 'noopener');
                 return true;
             }
-            return downloadAndInstallMod(mod, currentMirrorId, { releaseInfo, restoreContext });
+            return downloadAndInstallMod(mod, currentMirrorId, { releaseInfo });
         }
 
         const totalSteps = actionsToExecute.length + (externalOnly ? 0 : 1);
@@ -5783,13 +5774,11 @@
                     return local ? local.enabled === true : (state?.sideEnabled || []).includes(action.local.name);
                 };
                 if (!isEnabled()) {
-                    const enabled = await window.modHubToggleSideMod(action.local.name, true, { silentOfferReload: true, restoreContext });
+                    const enabled = await window.modHubToggleSideMod(action.local.name, true, { silentOfferReload: true });
                     if (enabled !== true || !isEnabled()) {
                         await window.modHubAlert(`前置依赖【${action.mod.name}】未能启用，已停止安装目标模组。`, '安装已停止');
                         return false;
                     }
-                    window.modHubRegisterOperationReload(restoreContext, '所选前置已启用，重新载入后生效。',
-                        { isFramework: window.modHubIsFrameworkMod?.(action.local.name) });
                 }
                 updateDownloadProgress(mod.name, 100, `${progressPrefix}已启用`);
                 continue;
@@ -5798,7 +5787,6 @@
             if (!await downloadAndInstallMod(action.mod, currentMirrorId, {
                 askRestart: false,
                 skipReloadOffer: true,
-                restoreContext,
                 progressTargetName: mod.name,
                 progressPrefix,
                 dependencyRequirements: action.dependencyRequirements
@@ -5817,7 +5805,6 @@
         if (!await downloadAndInstallMod(mod, currentMirrorId, {
             askRestart: false,
             skipReloadOffer: true,
-            restoreContext,
             progressPrefix: `${totalSteps}/${totalSteps} 目标模组【${mod.name}】：`,
             releaseInfo
         })) return false;
@@ -5825,8 +5812,23 @@
             window.modHubIsFrameworkMod(mod.name) ||
             actionsToExecute.some(a => window.modHubIsFrameworkMod(a.mod?.name) || window.modHubIsFrameworkMod(a.local?.name))
         ));
-        window.modHubRegisterOperationReload(restoreContext,
-            `模组【${mod.name}】${actionsToExecute.length ? '及所选前置依赖' : ''}已处理完成。`, { isFramework });
+        if (isFramework && typeof window.modHubOfferReload === 'function') {
+            await window.modHubOfferReload(`模组【${mod.name}】${actionsToExecute.length ? '及所选前置依赖' : ''}已处理完成。`, { isFramework: true });
+        } else {
+            const reloadRevision = window._modHubReloadRevision;
+            const restart = await window.modHubConfirm({
+                title: '安装完成',
+                message: `模组【${mod.name}】${actionsToExecute.length ? '及所选前置依赖' : ''}已处理完成。\n\n是否立即重新载入游戏使其生效？`,
+                confirmText: '立即重载',
+                cancelText: '稍后重载',
+                confirmType: 'primary'
+            });
+            window.modHubAcknowledgeReloadPrompt?.(reloadRevision);
+            if (restart) {
+                window.modHubShowToast('正在重新载入游戏...', 'warning');
+                setTimeout(() => window.modHubRestartGame ? window.modHubRestartGame() : location.reload(), 300);
+            }
+        }
         return true;
     }
 
@@ -6136,16 +6138,16 @@
 
     /** 一键全部批量更新 */
     async function updateAllMods() {
-        return runMarketInstallTask(context => updateAllModsUnlocked(context));
+        return runMarketInstallTask(() => updateAllModsUnlocked());
     }
 
-    async function updateAllModsUnlocked(restoreContext) {
+    async function updateAllModsUnlocked() {
         const updatables = getUpdatableMods();
         if (!updatables.length) {
             window.modHubShowToast('当前暂无可更新的模组', 'info');
             return;
         }
-        if (window.modHubMarketInstaller) return window.modHubMarketInstaller.installBatch(updatables.map(item => item.marketMod), { updateOnly: true, restoreContext });
+        if (window.modHubMarketInstaller) return window.modHubMarketInstaller.installBatch(updatables.map(item => item.marketMod), { updateOnly: true });
 
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
         if (selectedMirror.browserOnly) {
@@ -6166,16 +6168,12 @@
 
         let successCount = 0;
         let failCount = 0;
-        const updatedNames = [];
 
         for (let i = 0; i < updatables.length; i++) {
             const item = updatables[i];
             window.modHubShowToast(`[${i + 1}/${updatables.length}] 正在更新【${item.name}】...`, 'warning');
             try {
-                if (await downloadAndInstallMod(item.marketMod, currentMirrorId, { askRestart: false, skipReloadOffer: true, restoreContext })) {
-                    successCount++;
-                    updatedNames.push(item.name);
-                }
+                if (await downloadAndInstallMod(item.marketMod, currentMirrorId, { askRestart: false, skipReloadOffer: true })) successCount++;
                 else failCount++;
             } catch (err) {
                 console.error('[ModHub] 批量更新单个模组失败', item.name, err);
@@ -6185,9 +6183,25 @@
 
         renderMarketCards();
 
-        if (successCount) window.modHubRegisterOperationReload(restoreContext,
-            `批量更新已完成（成功 ${successCount} 个${failCount > 0 ? `，失败 ${failCount} 个` : ''}）。`,
-            { isFramework: updatedNames.some(name => window.modHubIsFrameworkMod?.(name)) });
+        const hasUpdatedFramework = updatables.slice(0, successCount).some(u => typeof window.modHubIsFrameworkMod === 'function' && window.modHubIsFrameworkMod(u.name));
+        const msg = `批量更新已完成！\n成功: ${successCount} 个${failCount > 0 ? `，失败: ${failCount} 个` : ''}。\n\n是否立即重新载入游戏以使新版本生效？`;
+        if (hasUpdatedFramework && typeof window.modHubOfferReload === 'function') {
+            await window.modHubOfferReload(`批量更新已完成（成功 ${successCount} 个${failCount > 0 ? `，失败 ${failCount} 个` : ''}，含核心框架）。`, { isFramework: true });
+        } else {
+            const reloadRevision = window._modHubReloadRevision;
+            const restart = await window.modHubConfirm({
+                title: '更新完成',
+                message: msg,
+                confirmText: '立即重载',
+                cancelText: '稍后重载',
+                confirmType: 'primary'
+            });
+            window.modHubAcknowledgeReloadPrompt?.(reloadRevision);
+            if (restart) {
+                window.modHubShowToast('正在重新载入游戏...', 'warning');
+                setTimeout(() => window.modHubRestartGame ? window.modHubRestartGame() : location.reload(), 300);
+            }
+        }
     }
 
     /** 从外部（模组管理页等）一键跳转到模组市场并开启更新筛选 */
@@ -6250,7 +6264,6 @@
         findMarketModByLocalName,
         cancelDownload,
         downloadAndInstallMod,
-        runInstallTask: runMarketInstallTask,
         deriveClassification,
         deriveTags,
         compareVersions,
