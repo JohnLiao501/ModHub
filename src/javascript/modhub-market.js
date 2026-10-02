@@ -43,6 +43,7 @@
     const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
     // 准备结果只在本次安装内复用，不能把换版后的包或外部构造的对象直接导入。
     const preparedMarketPackages = new WeakMap();
+    const modUpdateChecks = new Map();
     const COMPANION_ASSET_PATTERN = /(?:photo|image|resource|asset)[\s._-]*pack|图包|图片包|资源包|素材包/i;
 
     // 针对社区个别模组作者打包失误（如 Release 为新版但内部 boot.json 未递增）或 Wiki 录入虚高版本的容错规则库
@@ -1355,6 +1356,14 @@
             if (p1 < p2) return -1;
         }
         return 0;
+    }
+
+    function isSameVersion(left, right) {
+        const a = String(left || '').trim().replace(/^v(?=\d)/i, '');
+        const b = String(right || '').trim().replace(/^v(?=\d)/i, '');
+        if (!a || !b) return false;
+        const partsA = a.match(/^(\d+(?:\.\d+)*)(.*)$/), partsB = b.match(/^(\d+(?:\.\d+)*)(.*)$/);
+        return partsA && partsB ? partsA[2] === partsB[2] && compareVersions(partsA[1], partsB[1]) === 0 : a === b;
     }
 
     function satisfiesVersion(version, requirement) {
@@ -2719,6 +2728,49 @@
         }
     }
 
+    /** 更新状态复用历史选版证据，目录中的全局最新版仍保留为来源事实。 */
+    function getModUpdateInfo(mod) {
+        const versions = window.modHubMarketVersions;
+        const gameVersion = versions?.getGameVersion?.();
+        if (!mod?.id || !gameVersion || !versions?.getLatestGameCandidate) return { version: mod?.version || '' };
+        const signature = JSON.stringify([gameVersion, RELEASE_WORKER_API_BASE, mod.id, mod.githubUrl, mod.version,
+            mod.releaseUrl, mod.catalogSource, mod.autoInstall, mod.autoInstallScope, mod.revision, withdrawnRevision,
+            mod.identityId, mod.name, mod.sourceUrl, mod.repositoryKeys, mod.bootNames, mod.aliases,
+            mod.sharedRepository, mod.releaseCompatibility, mod.dependencies,
+            (mod.identityId || mod.id) === 'au-beautification' ? mod._matchedLocal?.name || '' : '']);
+        const cached = modUpdateChecks.get(signature);
+        if (cached && (cached.pending || Date.now() - cached.checkedAt < RELEASE_CACHE_TTL)) {
+            mod._updateCheck = cached;
+            return cached;
+        }
+        const state = mod._updateCheck = { signature, checkedAt: Date.now(), pending: true, version: '', release: null, error: '' };
+        modUpdateChecks.set(signature, state);
+        state.promise = Promise.resolve().then(async () => {
+            const candidates = [];
+            let history;
+            do {
+                history = await versions.fetchReleases(mod, { page: history ? history.page + 1 : 1 });
+                if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion || isWithdrawn(mod)) return;
+                candidates.push(...versions.buildCandidates(mod, history));
+            } while (history.hasMore);
+            state.release = versions.getLatestGameCandidate(mod, candidates);
+            const hasGameEvidence = candidates.some(candidate => candidate.compatibility?.evidence
+                && candidate.compatibility.evidence !== 'unknown');
+            if (!state.release && !hasGameEvidence && new Set(candidates.map(candidate => candidate.seriesKey)).size === 1) {
+                state.release = versions.rankCandidates(mod, candidates).candidates.find(candidate => candidate.version
+                    && candidate.compatibility?.status !== 'incompatible' && !candidate.compatibility?.referenceMismatch) || null;
+            }
+            state.version = state.release?.version || '';
+        }).catch(error => { state.error = error.message || '更新版本暂时无法核对'; }).finally(() => {
+            state.pending = false;
+            if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion) return;
+            const updates = getUpdatableMods();
+            window.modHubNotifyUpdateState?.(updates.length, updates);
+            renderMarketCards();
+        });
+        return state;
+    }
+
     /** 全面搜集本地已安装的模组档案 (支持已加载、已启用、已禁用全状态) */
     function getLocalInstalledProfiles() {
         const profiles = [];
@@ -3055,8 +3107,15 @@
 
         // 比对版本
         const localVer = matchedProfile.version;
-        const remoteVer = mod.version;
+        let remoteVer = mod.version;
         if (localVer && remoteVer) {
+            const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
+            const hasAuthoritativeRelease = Boolean(mod.releaseUrl || mod.versionSource === 'github' || mod.downloadUrl
+                || (Array.isArray(mod.assets) && mod.assets.length > 0));
+            // Wiki 人工版本与失效仓库不能作为真实更新依据。
+            if (isDead || !hasAuthoritativeRelease && mod.versionSource === 'wiki') return 'up_to_date';
+            remoteVer = getModUpdateInfo(mod).version;
+            if (!remoteVer) return 'up_to_date';
             // 1. 检查社区版本异常容错规则库（处理作者漏改内部版本号或 Wiki 虚高误录）
             const marketNorm = normalizeKey(cleanModTitle(mod.name));
             const marketRepo = extractRepoName(mod.githubUrl);
@@ -3073,26 +3132,6 @@
             // 2. 常规语义化版本比较；只有忽略记录实际挡住更新时才显示“已忽略”
             const cmp = compareVersions(remoteVer, localVer);
             if (cmp > 0) {
-                // 检查仓库是否已知失效（已被作者移除 404）
-                const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
-                if (isDead) {
-                    return 'up_to_date';
-                }
-
-                // 检查是否有真实可用的更新发布源：
-                // 若模组来自 release-index 统一索引，但 releaseUrl 为空且版本来源为 'wiki'，
-                // 说明远程未检测到 GitHub Release（仓库被删或未发 Release），版本仅为 Wiki 历史人工文本，不可作为更新依据
-                const hasAuthoritativeRelease = Boolean(
-                    mod.releaseUrl ||
-                    mod.versionSource === 'github' ||
-                    mod.downloadUrl ||
-                    (Array.isArray(mod.assets) && mod.assets.length > 0)
-                );
-
-                if (!hasAuthoritativeRelease && mod.versionSource === 'wiki') {
-                    return 'up_to_date';
-                }
-
                 const ignoredMap = getIgnoredUpdates();
                 const ignoredVer = ignoredMap[mod.name] || (matchedProfile.name ? ignoredMap[matchedProfile.name] : null);
                 if (ignoredVer && (ignoredVer === 'ignored' || compareVersions(remoteVer, ignoredVer) <= 0)) {
@@ -4457,6 +4496,11 @@
             (Array.isArray(boot.dependenceInfo) ? boot.dependenceInfo : []).filter(dependency => dependency.modName !== 'GameVersion')]));
     }
 
+    function formatVersionRiskMessage(message) {
+        return window.modHubEscapeHtml(String(message)).replace(/(【[^】]*】|\d+(?:\.\d+)+(?:[-+][0-9A-Za-z.-]+)?)/g,
+            '<strong class="gold">$1</strong>').replace(/\n/g, '<br>');
+    }
+
     function getPreparedCompatibilityRisks(boots) {
         const versions = window.modHubMarketVersions;
         if (!versions) return [];
@@ -4844,10 +4888,17 @@
             const approvedRisks = new Set(options.approvedCompatibilityRisks || []);
             const newRisks = getPreparedCompatibilityRisks(boots).filter(risk => !approvedRisks.has(risk.key));
             if (newRisks.length) {
+                const gameVersion = window.modHubMarketVersions?.getGameVersion();
+                const localProfiles = getLocalInstalledProfiles();
+                const context = `当前游戏版本：${gameVersion ? `DoL ${gameVersion}` : '未识别'}\n\n` + newRisks.map(risk => {
+                    const local = localProfiles.find(profile => String(profile.name).trim().toLowerCase() === String(risk.name).trim().toLowerCase());
+                    return `【${risk.name}】\n当前已安装版本：${local ? local.version || '未识别' : '未安装'}；所选模组版本：${risk.version || '未识别'}`;
+                }).join('\n\n');
+                const message = context + '\n\n' + newRisks.map(risk => `【${risk.name}】需要游戏版本：${formatVersionRange(risk.range)}，${risk.reason}`).join('\n')
+                    + '\n\n实际安装包的声明与当前游戏不匹配或无法核验，是否继续安装？';
                 const accepted = await window.modHubConfirm({
                     title: '所选包的游戏兼容性需要确认',
-                    message: newRisks.map(risk => `${risk.name}：${formatVersionRange(risk.range)}，${risk.reason}`).join('\n')
-                        + '\n\n实际安装包的声明与当前游戏不匹配或无法核验，是否继续安装？',
+                    message, trustedMessageHtml: formatVersionRiskMessage(message),
                     confirmText: '仍然安装', cancelText: '取消', confirmType: 'danger'
                 });
                 if (!accepted) {
@@ -4886,6 +4937,16 @@
                 return failBatch('模组管理器正忙，请稍后重试');
             }
             if (controller?.signal.aborted) throw Object.assign(new Error('已取消安装'), { name: 'AbortError' });
+            const primaryBoot = boots[0];
+            const installedProfile = primaryBoot && getLocalInstalledProfiles().find(profile =>
+                String(profile.name).trim().toLowerCase() === String(primaryBoot.name).trim().toLowerCase());
+            if (isSameVersion(primaryBoot?.version, installedProfile?.version)) {
+                clearActiveDownload();
+                resetDownloadProgress(mod.name);
+                if (progressTargetName !== mod.name) resetDownloadProgress(progressTargetName);
+                window.modHubShowToast('当前所选版本已安装，无需重复安装', 'info');
+                return failBatch('当前所选版本已安装，无需重复安装', 'ALREADY_INSTALLED');
+            }
             if (typeof window.modHubHandleAddMod !== 'function' && options.restoreContext && window.modHubRestore?.prepare &&
                 !await window.modHubRestore.prepare(options.restoreContext)) return failBatch('已取消没有还原点的安装');
             if (typeof window.modHubHandleAddMod === 'function') {
@@ -5001,6 +5062,7 @@
     // ==================== 界面渲染逻辑 ====================
 
     async function loadMarketData(forceRefresh = false) {
+        if (forceRefresh) modUpdateChecks.clear();
         if (!forceRefresh && marketModList.length > 0) return marketModList;
 
         if (!forceRefresh) {
@@ -5262,7 +5324,7 @@
                 updatableList.push({
                     marketMod: m,
                     localProfile: m._matchedLocal,
-                    newVersion: m.version,
+                    newVersion: getModUpdateInfo(m).version,
                     currentVersion: m._matchedLocal?.version || ''
                 });
             }
@@ -5296,6 +5358,7 @@
 
         const html = filtered.map(mod => {
             const modIndex = mod._marketIndex;
+            const updateInfo = mod._updateCheck ? getModUpdateInfo(mod) : { version: mod.version };
             const isCommunity = mod.catalogSource === 'community';
             const sourceName = { github: 'GitHub', tieba: '百度贴吧', discord: 'Discord' }[mod.sourcePlatform] || '其他社区';
             const externalText = isCommunity
@@ -5345,7 +5408,9 @@
                     badgeHtml = `<span class="modhub-market-badge badge-ignored">${isPermanentlyIgnored ? '已永久忽略' : '已忽略本次'}</span>`;
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="更新">更新</button>`;
                 } else {
-                    badgeHtml = `<span class="modhub-market-badge badge-installed">已是最新</span>`;
+                    const statusText = updateInfo.pending ? '正在检查更新' : updateInfo.error ? '更新检查失败'
+                        : mod._updateCheck && !updateInfo.version ? '更新版本待核对' : '已是最新';
+                    badgeHtml = `<span class="modhub-market-badge badge-installed"${updateInfo.error ? ` title="${escapeHtml(updateInfo.error)}"` : ''}>${statusText}</span>`;
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
                 }
                 if (window.modHubMarketInstaller && mod.githubUrl && (!isCommunity || hasCommunityReleaseSource(mod))) {
@@ -5373,7 +5438,7 @@
 
             const ignoreActionsHtml = isUpdatable
                 ? `<div class="modhub-market-ignore-actions">
-                    <button type="button" class="btn-market-ignore" data-mod-index="${modIndex}" data-ignore-mode="once" title="仅忽略 ${escapeHtml(formatVersionDisplay(mod.version))}，更高版本仍会提醒">忽略本次</button>
+                    <button type="button" class="btn-market-ignore" data-mod-index="${modIndex}" data-ignore-mode="once" title="仅忽略 ${escapeHtml(formatVersionDisplay(updateInfo.version))}，更高版本仍会提醒">忽略本次</button>
                     <button type="button" class="btn-market-ignore" data-mod-index="${modIndex}" data-ignore-mode="always" title="以后不再提示此模组更新">永久忽略</button>
                    </div>`
                 : (isIgnored && currentStatusFilter === 'ignored'
@@ -5392,11 +5457,12 @@
                     </div>
                     <div class="modhub-market-meta grey">
                         <span>作者: ${escapeHtml(mod.author)}</span>
-                        ${mod.updateDate ? `<span>更新: ${escapeHtml(mod.updateDate)}</span>` : ''}
-                        ${mod.version || mod.versionLabel ? `<span>版本: ${escapeHtml(mod.version ? formatVersionDisplay(mod.version) : mod.versionLabel)}</span>` : ''}
+                        ${updateInfo.release?.updateDate || mod.updateDate ? `<span>更新: ${escapeHtml(updateInfo.release?.updateDate || mod.updateDate)}</span>` : ''}
+                        ${updateInfo.version || mod.versionLabel ? `<span>版本: ${escapeHtml(updateInfo.version ? formatVersionDisplay(updateInfo.version) : mod.versionLabel)}</span>` : ''}
                         ${localVerText}
                     </div>
                     ${sourceInfo}
+                    ${updateInfo.error ? `<div class="modhub-market-meta grey">更新检查详情：${escapeHtml(updateInfo.error)}。可刷新市场后重试。</div>` : ''}
                     <div class="modhub-market-desc">
                         ${escapeHtml(mod.description)}
                     </div>
@@ -5461,7 +5527,8 @@
                     confirmType: 'primary'
                 });
                 if (ok) {
-                    const ignoredVersion = isPermanent ? 'ignored' : (targetMod.version || 'ignored');
+                    const ignoredVersion = isPermanent ? 'ignored' : getModUpdateInfo(targetMod).version;
+                    if (!ignoredVersion) return;
                     setModUpdateIgnored(targetMod.name, ignoredVersion, true);
                     if (targetMod._matchedLocal?.name) {
                         setModUpdateIgnored(targetMod._matchedLocal.name, ignoredVersion, true);
@@ -6053,7 +6120,7 @@
         if (!list || !list.length) {
             const cached = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL);
             if (cached && Array.isArray(cached) && cached.length > 0) {
-                list = cached;
+                list = marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: cached });
             }
         }
         if (!list || !list.length) return [];
@@ -6069,7 +6136,7 @@
                     name: mod.name,
                     localName: mod._matchedLocal?.name || mod.name,
                     currentVersion: mod._matchedLocal?.version || '',
-                    newVersion: mod.version || ''
+                    newVersion: getModUpdateInfo(mod).version || ''
                 });
             }
         }
@@ -6227,6 +6294,7 @@
         getAssetVersionParts,
         getMatchingCompanionAssets,
         getPreparedCompatibilityRisks,
+        formatVersionRiskMessage,
         getReleaseInstallAssets,
         formatReleaseInstallPlanHtml,
         getModDependencies,
@@ -6246,6 +6314,7 @@
         readDownloadResponse,
         verifyAssetDigest,
         getLocalInstalledProfiles,
+        getModUpdateInfo,
         checkModInstallStatus,
         findMarketModByLocalName,
         cancelDownload,
@@ -6254,6 +6323,7 @@
         deriveClassification,
         deriveTags,
         compareVersions,
+        isSameVersion,
         satisfiesVersion,
         buildDependencyPlan,
         buildBatchInstallPlan,

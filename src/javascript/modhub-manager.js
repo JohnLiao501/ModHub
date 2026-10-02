@@ -842,6 +842,24 @@ window.modHubNotifyUpdateState = function(count, list) {
     }
     window._modHubUpdatableMap = map;
 
+    // 逐行同步已有节点，保留滚动位置与正在进行的拖拽。
+    const manager = document.getElementById('modHubModManageContainer');
+    for (const row of manager?.querySelectorAll('li[data-mod-name]') || []) {
+        const modName = row.dataset.modName;
+        const update = map.get(modName) || map.get(modName.toLowerCase());
+        const version = update?.newVersion ? (window.modHubFormatVersion ? window.modHubFormatVersion(update.newVersion) : update.newVersion) : '';
+        const tag = row.querySelector('.modhub-update-tag');
+        const button = row.querySelector('.btn-inline-update');
+        if (tag) {
+            tag.textContent = version ? ` | [可更新 -> ${version}]` : '';
+            tag.style.display = version ? '' : 'none';
+        }
+        if (button) {
+            button.title = version ? `立即升级至 ${version}` : '';
+            button.style.display = version ? '' : 'none';
+        }
+    }
+
     // 1. 同步顶部 Tab 徽标
     window.modHubUpdateMarketTabBadge(window._modHubUpdatableCount);
 
@@ -876,6 +894,16 @@ window.modHubNotifyUpdateState = function(count, list) {
                 <div class="modhub-stat-num gold modhub-pulse-gold">${window._modHubUpdatableCount}</div>
                 <div class="gold modhub-stat-label">发现新版</div>
             `;
+        } else {
+            const mlVersion = window.modHubGetGui()?.gModUtils?.version || window.modUtils?.version || '2.x';
+            fourthCard.className = 'childItem modhub-stat-card';
+            fourthCard.title = '';
+            fourthCard.onclick = null;
+            fourthCard.style.borderColor = '';
+            fourthCard.innerHTML = `
+                <div class="modhub-stat-num">${window.modHubEscapeHtml(mlVersion)}</div>
+                <div class="grey modhub-stat-label">加载器版本</div>
+            `;
         }
     }
 };
@@ -895,13 +923,13 @@ window.modHubUpdateGeneralInfo = async function() {
             .filter(name => !enabledNames.has(name.trim().toLowerCase()));
 
         // 尝试从模组市场接口直接检测可更新项
-        let updatables = [];
+        let updatables = null;
         if (window.modHubMarket?.getUpdatableMods) {
             try {
                 updatables = window.modHubMarket.getUpdatableMods() || [];
             } catch (_) {}
         }
-        const updatableCount = updatables.length || (window._modHubUpdatableCount || 0);
+        const updatableCount = updatables ? updatables.length : (window._modHubUpdatableCount || 0);
 
         const fourthCardHtml = updatableCount > 0
             ? `<div id="modHubEnvInfoCardFourth" class="childItem modhub-stat-card modhub-clickable" onclick="window.modHubGoToMarketUpdates()" title="点击前往模组市场查看并升级" style="border-color: var(--gold, #d4af37);">
@@ -1246,6 +1274,10 @@ window.modHubTriggerImport = function() {
     input.click();
 };
 
+window.modHubFormatReloadMessage = function(message) {
+    return window.modHubEscapeHtml(message).replace(/((?:模组|核心框架)【)([^】]+)】/g, '$1<strong class="gold">$2</strong>】').replace(/\n/g, '<br>');
+};
+
 window.modHubHandleAddMod = async function(fileInput, options = {}) {
     const gui = window.modHubGetGui();
     if (!gui) {
@@ -1363,9 +1395,11 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             }
 
             const reloadRevision = window._modHubReloadRevision;
+            const message = `${label}已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`;
             const ok = await window.modHubConfirm({
                 title: '重新载入游戏',
-                message: `${label}已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`,
+                message,
+                trustedMessageHtml: window.modHubFormatReloadMessage(message),
                 confirmText: '立即重载',
                 cancelText: '稍后重载',
                 confirmType: 'primary'
@@ -1844,23 +1878,17 @@ window.modHubRenderModManageUI = function() {
 
             // 检查是否有可升级新版本
             const updateInfo = updatableMap ? (updatableMap.get(modName) || updatableMap.get(modName.toLowerCase())) : null;
-            let updateTagHtml = '';
-            let updateBtnHtml = '';
-            if (updateInfo && updateInfo.newVersion) {
-                const newVerText = window.modHubFormatVersion ? window.modHubFormatVersion(updateInfo.newVersion) : updateInfo.newVersion;
-                updateTagHtml = `<span class="gold modhub-update-tag" style="font-weight:bold;">[可更新 -&gt; ${window.modHubEscapeHtml(newVerText)}]</span>`;
-                updateBtnHtml = `<button class="macro-button modhub-btn-primary btn-inline-update" data-mod-action="update" title="立即升级至 ${window.modHubEscapeHtml(newVerText)}">更新</button>`;
-            }
+            const newVerText = updateInfo?.newVersion ? (window.modHubFormatVersion ? window.modHubFormatVersion(updateInfo.newVersion) : updateInfo.newVersion) : '';
+            const updateTagHtml = `<span class="gold modhub-update-tag" style="font-weight:bold;${newVerText ? '' : 'display:none;'}">${newVerText ? ` | [可更新 -&gt; ${window.modHubEscapeHtml(newVerText)}]` : ''}</span>`;
+            const updateBtnHtml = `<button class="macro-button modhub-btn-primary btn-inline-update" data-mod-action="update" title="${newVerText ? `立即升级至 ${window.modHubEscapeHtml(newVerText)}` : ''}"${newVerText ? '' : ' style="display:none;"'}>更新</button>`;
 
             const descParts = [];
             if (isRecovery) descParts.push('<span class="gold">为确保时间点还原正常运行，不可调整顺序</span>');
             if (isEnabled) {
                 if (versionText) descParts.push(versionText);
-                if (updateTagHtml) descParts.push(updateTagHtml);
                 if (subText) descParts.push(`<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>`);
             } else {
                 descParts.push('已禁用');
-                if (updateTagHtml) descParts.push(updateTagHtml);
                 if (subText) descParts.push(`<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>`);
             }
             const descHtml = descParts.join(' | ') || '<span class="grey">外部模组</span>';
@@ -1872,7 +1900,7 @@ window.modHubRenderModManageUI = function() {
                         ${isRecovery ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>'}
                         <div class="modhub-item-main">
                             <div class="modhub-item-title ${isEnabled ? '' : 'grey'}">${window.modHubEscapeHtml(modName)}</div>
-                            <div class="grey modhub-item-desc">${descHtml}</div>
+                            <div class="grey modhub-item-desc">${descHtml}${updateTagHtml}</div>
                         </div>
                     </div>
                     <div class="modhub-btn-group">
@@ -2178,9 +2206,8 @@ window.modHubOfferReload = async function(message = '配置已更新。', option
 
     if (isFramework) {
         promptMsg = `${message}\n\n【强烈建议】：检测到底层核心框架状态发生变更。\n核心框架的加载与 ModLoader 运行时状态强相关，强烈建议立即重新载入游戏以刷新系统状态，确保后续模组冲突检测与正常运行！\n\n是否立即重新载入游戏？`;
-        const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
         trustedMessageHtml = `
-            <div style="line-height: 1.5;">${escape(message)}</div>
+            <div style="line-height: 1.5;">${window.modHubFormatReloadMessage(message)}</div>
             <div class="modhub-modal-framework-alert" style="margin-top: 10px; padding: 10px 14px; background: rgba(255, 170, 0, 0.12); border: 1px solid rgba(255, 170, 0, 0.4); border-radius: 4px;">
                 <div class="gold" style="font-weight: bold; margin-bottom: 4px;">强烈建议立即重新载入</div>
                 <div class="grey" style="font-size: 0.9em; line-height: 1.45;">
@@ -2201,7 +2228,7 @@ window.modHubOfferReload = async function(message = '配置已更新。', option
     try { ok = await window.modHubConfirm({
         title,
         message: promptMsg,
-        trustedMessageHtml: trustedMessageHtml || undefined,
+        trustedMessageHtml: trustedMessageHtml || window.modHubFormatReloadMessage(promptMsg),
         confirmText,
         cancelText,
         confirmType: isFramework ? 'danger' : 'primary'

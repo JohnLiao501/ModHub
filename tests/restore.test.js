@@ -106,6 +106,7 @@ function harness(options = {}) {
     const storage = options.storage || new Map([['modhub_sideload_mod_order', '["前置","ModHub","B","A"]'], ['dol_opt_auto_enable_sideload_beauty', 'false'], ['modhub_auto_open_log_on_error', 'true'], ['game-save', '不变']]);
     const hooks = new Map();
     const controller = { logRecordBeforeAnyLogHookRegister: options.cachedLogs || [], addLifeTimeCircleHook: (id, hook) => hooks.set(id, hook), async checkModZipFileIndexDB(data) {
+        if (options.checkPackage) return options.checkPackage(data);
         const text = Buffer.from(data).toString();
         if (text.startsWith('ModHub')) return { name: 'ModHub', version: '1.2.0', dependenceInfo: [{ modName: '前置', version: '^1.0.0' }] };
         if (text.startsWith('前置')) return { name: '前置', version: '1.0.0' };
@@ -533,9 +534,174 @@ async function protectionControls() {
     console.log('手动保护、独立系统保护、普通历史配额与原子元数据测试通过');
 }
 
+async function storageListMissingBody() {
+    const enabled = ['前置', 'ModHub', 'A', '残留启用记录'];
+    const disabled = ['B', '残留禁用记录'];
+    const h = harness({ confirm: () => true });
+    await h.api.startupReady;
+    h.mod.data.set('enabled-custom', JSON.stringify(enabled));
+    h.mod.data.set('disabled-custom', JSON.stringify(disabled));
+    const originalKeys = [...h.mod.data.keys()].filter(key => key.startsWith('package-custom:')).sort();
+    const manualId = await h.api.createPoint('包含残留启禁记录的手动点');
+    const manual = h.mod.data.get(pointKey).find(point => point.id === manualId);
+    assert.equal(manual.kind, 'manual');
+    assert.deepEqual([...manual.state.enabled], enabled, '无包体的启用记录仍完整保存');
+    assert.deepEqual([...manual.state.disabled], disabled, '无包体的禁用记录仍完整保存');
+    assert.deepEqual(manual.state.packages.map(item => `package-custom:${item.name}`).sort(), originalKeys, '只归档真实存储包体，不为残留列表记录虚构包体');
+
+    const context = await prepareChange(h, '含残留记录的模组操作');
+    const modifiedEnabled = ['前置', 'ModHub', 'B', 'C', '后来残留记录'];
+    const modifiedDisabled = ['A', '残留启用记录'];
+    h.mod.data.set('package-custom:A', pack('A 新包'));
+    h.mod.data.set('package-custom:C', pack('C 后来安装包'));
+    h.mod.data.set('enabled-custom', JSON.stringify(modifiedEnabled));
+    h.mod.data.set('disabled-custom', JSON.stringify(modifiedDisabled));
+    await h.api.finish(context);
+    assert.equal(context.finishError, undefined, '操作收尾允许启禁列表与包体清单独立存在');
+    const point = h.mod.data.get(pointKey).find(item => item.id === context.id);
+    assert.equal(point.pending, false);
+    assert.deepEqual([...point.state.enabled], enabled);
+    assert.deepEqual([...point.state.disabled], disabled);
+    assert.deepEqual([...point.summary.updated], ['A']);
+    assert.deepEqual([...point.summary.installed], ['C']);
+    assert.equal(h.mod.data.has('package-custom:残留启用记录'), false);
+    assert.equal(h.mod.data.has('package-custom:残留禁用记录'), false);
+    const preview = await h.api.preview(context.id);
+    assert.equal(preview.canRestore, true, '含残留列表记录的还原点可以预览与恢复');
+    const risks = preview.riskMessages.join('\n');
+    assert.ok(risks.includes('残留启用记录') && risks.includes('残留禁用记录'), '预览明确列出没有备份包体的启禁记录');
+    assert.ok(risks.includes('包体') && risks.includes('重新导入'), '预览说明缺失安装包不能通过还原点恢复');
+
+    h.mod.failPut = key => key === 'package-custom:A' ? new Error('残留列表场景恢复中断') : null;
+    await assert.rejects(h.api.restore(context.id), /残留列表场景恢复中断/);
+    assert.equal(h.mod.data.get(journalKey).phase, 'prepared');
+    assert.equal(h.mod.data.get('enabled-custom'), JSON.stringify(modifiedEnabled), '包体事务失败时两份列表一起回滚');
+    assert.equal(h.mod.data.get('disabled-custom'), JSON.stringify(modifiedDisabled));
+    assert.deepEqual([...h.mod.data.get('package-custom:A')], [...pack('A 新包')]);
+    assert.equal(h.mod.data.has('package-custom:C'), true);
+    assert.equal(h.mod.data.has(successKey), false);
+    assert.equal(h.reloads(), 0);
+    const confirmation = h.dialogs.find(dialog => dialog.title === '确认时间点还原');
+    assert.ok(confirmation.message.includes('残留启用记录') && confirmation.message.includes('残留禁用记录'), '最终确认继续说明残留列表记录的包体限制');
+    const safety = h.mod.data.get(pointKey).find(item => item.id === h.mod.data.get(journalKey).safetyPointId);
+    assert.deepEqual([...safety.state.enabled], modifiedEnabled, '强制还原前安全点也完整记录无包体名称');
+    assert.deepEqual([...safety.state.disabled], modifiedDisabled);
+    h.mod.failPut = null;
+    h.mod.lockRegistry.clear();
+    const resumed = harness({ mod: h.mod, beauty: h.beauty, storage: h.storage, confirm: () => true });
+    await resumed.api.startupReady;
+    assert.equal(resumed.mod.data.get('enabled-custom'), JSON.stringify(enabled));
+    assert.equal(resumed.mod.data.get('disabled-custom'), JSON.stringify(disabled));
+    assert.deepEqual([...resumed.mod.data.get('package-custom:A')], [...pack('A 旧包')]);
+    assert.deepEqual([...resumed.mod.data.keys()].filter(key => key.startsWith('package-custom:')).sort(), originalKeys, '恢复移除后来安装包且不补造残留记录包体');
+    assert.equal(resumed.mod.data.has(journalKey), false);
+    assert.equal(resumed.mod.data.get(successKey).pointId, context.id);
+    assert.equal(resumed.reloads(), 1, '含残留列表记录的恢复中断可在启动时重放');
+
+    const damaged = harness({ confirm: () => true });
+    await damaged.api.startupReady;
+    damaged.mod.data.set('enabled-custom', JSON.stringify(enabled));
+    damaged.mod.data.set('disabled-custom', JSON.stringify(disabled));
+    const damagePoint = await prepareChange(damaged, '残留记录与真实归档校验');
+    damaged.mod.data.set('package-custom:A', pack('A 待还原包'));
+    await damaged.api.finish(damagePoint);
+    const archived = damaged.mod.data.get(pointKey).find(item => item.id === damagePoint.id).state.packages.find(item => item.name === 'A');
+    damaged.mod.data.set(blobPrefix + archived.hash, pack('损坏归档'));
+    const writes = damaged.mod.writes;
+    const damagedPreview = await damaged.api.preview(damagePoint.id);
+    assert.equal(damagedPreview.canRestore, false);
+    assert.match(damagedPreview.reason, /校验失败/);
+    await assert.rejects(damaged.api.restore(damagePoint.id), /校验失败/);
+    assert.equal(damaged.mod.writes, writes, '允许残留列表记录不能放宽真实包体完整性校验');
+    assert.deepEqual([...damaged.mod.data.get('package-custom:A')], [...pack('A 待还原包')]);
+    assert.equal(damaged.mod.data.has(journalKey), false);
+    assert.equal(damaged.mod.data.has(successKey), false);
+    assert.equal(damaged.api.isRestoring(), false);
+    const missingDependency = harness({ confirm: () => true });
+    await missingDependency.api.startupReady;
+    missingDependency.mod.data.delete('package-custom:前置');
+    const dependencyPointId = await missingDependency.api.createPoint('必要前置包体缺失');
+    const dependencyWrites = missingDependency.mod.writes;
+    const dependencyPreview = await missingDependency.api.preview(dependencyPointId);
+    assert.equal(dependencyPreview.canRestore, false, '残留启用记录不能冒充恢复工具可用的必要前置');
+    assert.match(dependencyPreview.reason, /必要前置【前置】缺失或未启用/);
+    await assert.rejects(missingDependency.api.restore(dependencyPointId), /必要前置【前置】缺失或未启用/);
+    assert.equal(missingDependency.mod.writes, dependencyWrites, '必要前置缺包必须在所有恢复写入之前拒绝');
+    assert.equal(missingDependency.mod.data.has(journalKey), false);
+    assert.equal(missingDependency.mod.data.has(successKey), false);
+    assert.equal(missingDependency.reloads(), 0);
+    console.log('启禁列表残留记录、真实包体独立快照与中断重放测试通过');
+}
+
+async function restorePackageVersions() {
+    const unsafeName = '<img src=x onerror=bad()> & "模组"';
+    const unsafeTarget = '1.0.0 <script>bad()</script> & "旧"';
+    const unsafeCurrent = '2.0.0 <img src=x onerror=bad()> & "新"';
+    const versionPack = (name, version, note = '') => pack(JSON.stringify({ name, version, note, ...(name === 'ModHub' ? { dependenceInfo: [{ modName: '前置', version: '^1.0.0' }] } : {}) }));
+    const h = harness({ checkPackage: data => JSON.parse(Buffer.from(data).toString()), confirm: () => true });
+    await h.api.startupReady;
+    for (const [name, version] of [['前置', '1.0.0'], ['ModHub', '1.2.1'], ['A', '1.0.0'], ['B', '0.8.0'], ['版本未识别', undefined], ['同版本模组', '4.0.0'], [unsafeName, unsafeTarget]]) {
+        h.mod.data.set(`package-custom:${name}`, versionPack(name, version, '建点时包体'));
+    }
+    const enabled = ['前置', 'ModHub', 'A', '版本未识别', '同版本模组', unsafeName];
+    h.mod.data.set('enabled-custom', JSON.stringify(enabled));
+    const pointId = await h.api.createPoint('旧格式还原点的真实版本');
+    const point = h.mod.data.get(pointKey).find(item => item.id === pointId);
+    assert.ok(point.state.packages.every(item => !Object.hasOwn(item, 'version')), '版本读取不修改既有包体快照格式');
+    assert.equal(Object.hasOwn(point.state, 'packageVersions'), false, '版本对照不持久化到旧还原点');
+    h.mod.data.set('package-custom:A', versionPack('A', '2.0.0'));
+    h.mod.data.delete('package-custom:B');
+    h.mod.data.set('package-custom:C', versionPack('C', '3.0.0'));
+    h.mod.data.set('package-custom:版本未识别', pack('当前故障包无法解析'));
+    h.mod.data.set('package-custom:同版本模组', versionPack('同版本模组', '4.0.0', '同版本不同包体'));
+    h.mod.data.set(`package-custom:${unsafeName}`, versionPack(unsafeName, unsafeCurrent));
+    const currentSelf = versionPack('ModHub', '1.2.2', '保留当前恢复工具');
+    h.mod.data.set('package-custom:ModHub', currentSelf);
+    h.mod.data.set('enabled-custom', JSON.stringify([...enabled, 'C']));
+    h.mod.data.set('disabled-custom', '[]');
+    const preview = await h.api.preview(pointId);
+    assert.equal(preview.canRestore, true, '当前故障包无法读出版本仍可恢复正常目标包');
+    assert.deepEqual([...preview.changes.installed], ['B']);
+    assert.deepEqual([...preview.changes.removed], ['C']);
+    assert.ok(preview.changes.updated.includes('同版本模组'), '同版本号不同包体仍按真实 hash 显示回退');
+    assert.deepEqual(JSON.parse(JSON.stringify(preview.packageVersions)), {
+        B: { current: null, target: '0.8.0' },
+        A: { current: '2.0.0', target: '1.0.0' },
+        '版本未识别': { current: '', target: '' },
+        '同版本模组': { current: '4.0.0', target: '4.0.0' },
+        [unsafeName]: { current: unsafeCurrent, target: unsafeTarget },
+        C: { current: '3.0.0', target: null },
+    }, '版本仅来自实际当前包体与已校验目标档案，未安装与未识别分别表示');
+    assert.equal(Object.hasOwn(preview.packageVersions, 'ModHub'), false, '保留当前 ModHub 后不展示其历史版本回退');
+    assert.ok([...preview.changes.installed, ...preview.changes.updated, ...preview.changes.removed].every(name => typeof name === 'string'), 'changes 保持既有名称数组契约');
+
+    h.mod.data.set('package-custom:A', versionPack('A', '3.1.0', '预览后当前包变化'));
+    await h.api.restore(pointId);
+    const confirmation = h.dialogs.find(item => item.title === '确认时间点还原');
+    const versionTexts = ['当前版本：3.1.0；还原后版本：1.0.0', '当前版本：未安装；还原后版本：0.8.0', '当前版本：3.0.0；还原后版本：未安装', '当前版本：未识别；还原后版本：未识别', '当前版本：4.0.0；还原后版本：4.0.0'];
+    versionTexts.forEach(text => {
+        assert.ok(confirmation.message.includes(text), '最终确认正文按提交时真实包体重新计算版本');
+        assert.ok(confirmation.trustedMessageHtml.includes(text), '最终确认安全 HTML 使用同一版本对照');
+    });
+    assert.ok(!confirmation.message.includes('当前版本：2.0.0；还原后版本：1.0.0'), '最终确认不使用已过期的预览版本');
+    assert.ok(confirmation.message.includes(unsafeName) && confirmation.message.includes(unsafeTarget) && confirmation.message.includes(unsafeCurrent), '纯文本确认保留原始模组名和版本');
+    assert.ok(confirmation.trustedMessageHtml.includes('&lt;img src=x onerror=bad()&gt; &amp; &quot;模组&quot;'));
+    assert.ok(confirmation.trustedMessageHtml.includes('1.0.0 &lt;script&gt;bad()&lt;/script&gt; &amp; &quot;旧&quot;'));
+    assert.ok(confirmation.trustedMessageHtml.includes('2.0.0 &lt;img src=x onerror=bad()&gt; &amp; &quot;新&quot;'));
+    assert.ok(!confirmation.trustedMessageHtml.includes('<img') && !confirmation.trustedMessageHtml.includes('<script>'), '模组版本与名称均经过 HTML 转义');
+    assert.deepEqual([...h.mod.data.get('package-custom:ModHub')], [...currentSelf]);
+    assert.deepEqual([...h.mod.data.get('package-custom:A')], [...versionPack('A', '1.0.0', '建点时包体')]);
+    assert.deepEqual([...h.mod.data.get('package-custom:B')], [...versionPack('B', '0.8.0', '建点时包体')]);
+    assert.equal(h.mod.data.has('package-custom:C'), false);
+    assert.equal(h.reloads(), 1);
+    console.log('还原包体版本对照、旧点兼容、最终确认重算与转义测试通过');
+}
+
 async function run() {
     await storageControls();
     await protectionControls();
+    await storageListMissingBody();
+    await restorePackageVersions();
     const old = createBaseSandbox();
     loadScripts(old, ['javascript/modhub-restore.js']);
     assert.ok(old.modHubRestore, '旧沙箱暴露接口且不自动访问数据库');
@@ -696,11 +862,16 @@ async function run() {
     assert.equal(await quota.api.prepare(unavailable), false, '空间不足默认取消实际操作');
     assert.equal(quota.mod.data.get(pointKey).length, 0, '失败事务不留下半个还原点');
     assert.equal(quota.dialogs[0].cancelText, '取消操作');
+    const backupWarning = '无法进行自动备份，备份尚未执行。\n\n继续进行将跳过本次备份。如果后续出现问题，可能无法恢复到本次操作前的状态。\n\n建议取消操作然后重试。如果问题持续存在，请提供以下错误详情以便排查。\n\n错误详情：';
+    assert.equal(quota.dialogs[0].message, backupWarning + '存储已满', '自动备份失败提示使用用户确认的原文并保留真实原因');
     assert.equal(quota.api.isOperationBlocked(quota.api.createOperation()), false, '取消后释放操作所有权');
     assert.equal(unavailable.cancelled, true);
     const quotaDialogs = quota.dialogs.length;
     assert.equal(await quota.api.prepare(unavailable), false);
     assert.equal(quota.dialogs.length, quotaDialogs, '同批次取消不会重复弹窗');
+    quota.mod.failPut = key => key === pointKey ? new Error('模拟目录写入失败') : null;
+    assert.equal(await quota.api.prepare(quota.api.createOperation()), false);
+    assert.equal(quota.dialogs.at(-1).message, backupWarning + '模拟目录写入失败', '不同错误统一使用用户确认的原文');
 
     const quotaRace = harness({ confirm: () => true });
     await quotaRace.api.startupReady;

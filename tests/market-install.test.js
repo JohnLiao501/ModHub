@@ -475,13 +475,90 @@ module.exports = async function() {
         assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', options), false, '导入器无成功返回值不能算批量成功');
         sb.modHubHandleAddMod = async (_input, installOptions) => { importedOptions.push(installOptions); return true; };
         sb._modHubModState = { sideMods: [{ name: mod.name, enabled: true }] };
-        sb.modHubGetModInfo = () => ({ bootJson: { name: mod.name, version: mod.version } });
+        sb.modHubGetModInfo = () => ({ bootJson: { name: mod.name, version: '0.9.0' } });
         assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', options), true, '下载并得到导入器确认后才统计成功');
         assert.equal(importedOptions.length, 3, '每项安装只应调用一次导入器');
         for (const installOptions of importedOptions) {
             assert.equal(installOptions.keepCurrentTab, true, '批量导入必须保持市场页签');
             assert.equal(installOptions.askRestart, false, '批量导入必须关闭逐项重载确认');
             assert.equal(installOptions.skipReloadOffer, true, '批量导入必须关闭框架逐项重载提示');
+        }
+    }
+
+    // 最终写入入口以真实主包和当前同名本地档案阻止重复安装。
+    {
+        const fixture = () => {
+            const sb = loadMarket(), market = sb.modHubMarket;
+            const mod = { id: 'repeat-install', name: '重复安装检查', bootNames: ['RepeatedFixture'], version: '2.0.0',
+                githubUrl: 'https://github.com/ModHubTests/RepeatedFixture' };
+            const releaseInfo = { version: '2.0.0', assets: [{ name: 'RepeatedFixture-v2.0.0.zip',
+                downloadUrl: `${mod.githubUrl}/releases/download/v2.0.0/RepeatedFixture-v2.0.0.zip` }] };
+            const state = { imports: 0, reloads: 0, waits: 0, failure: null, boot: { name: 'RepeatedFixture', version: '1.0.0' } };
+            const card = createStubElement(); card.dataset.modName = mod.name;
+            sb.Blob = Blob; sb.AbortController = AbortController;
+            sb.document.querySelectorAll = selector => selector === '.modhub-market-card' ? [card] : [];
+            sb.modHubGetGui = () => ({});
+            sb.modHubGetController = () => ({ checkModZipFileIndexDB: async () => state.boot });
+            sb.modHubLoadModManageState = async () => {};
+            sb.modHubShowToast = () => {};
+            sb.modHubAlert = async () => {};
+            sb.modHubConfirm = async () => { throw new Error('最终同版校验不得增加确认弹窗'); };
+            sb.modHubOfferReload = async () => { state.reloads++; };
+            sb.modHubWaitManagerIdle = async () => { state.waits++; return true; };
+            sb.fetch = async () => ({ ok: true, headers: { get: () => null }, blob: async () => new Blob(['重复安装回归包体']) });
+            sb.modHubHandleAddMod = async () => { state.imports++; setLocal(state.boot.version); return true; };
+            const setLocal = (version, name = 'RepeatedFixture') => {
+                sb._modHubModState = { sideMods: version === null ? [] : [{ name, enabled: true }] };
+                sb.modHubGetModInfo = requested => version !== null && requested === name ? { bootJson: { name, version } } : null;
+            };
+            setLocal(null);
+            const options = { releaseInfo, batchMode: true, onFailure: (reason, code) => { state.failure = { reason, code }; } };
+            return { sb, market, mod, releaseInfo, state, card, setLocal, options };
+        };
+        for (const preparedFirst of [false, true]) {
+            const f = fixture();
+            let prepared;
+            if (preparedFirst) {
+                prepared = await f.market.downloadAndInstallMod(f.mod, 'ddlc', { ...f.options, prepareOnly: true });
+                assert.ok(prepared);
+                assert.equal(f.state.imports, 0);
+                f.sb.modHubWaitManagerIdle = async () => { f.state.waits++; f.setLocal('1.0.0'); return true; };
+            } else {
+                f.setLocal('1.0.0');
+                f.mod._matchedLocal = { name: '过期档案', version: '9.0.0' };
+            }
+            assert.equal(await f.market.downloadAndInstallMod(f.mod, 'ddlc', { ...f.options, ...(prepared ? { preparedPackage: prepared } : {}) }), false,
+                preparedFirst ? '准备后直到等待管理器时才出现同版本，也必须在真实导入前阻止' : '直接调用也须核对真实包内版本，不能凭发布版本更高覆盖同号包');
+            assert.equal(f.state.waits, 1, '最后的同版检查必须在管理器等待完成后读取本地状态');
+            assert.equal(f.state.imports, 0);
+            assert.equal(f.state.reloads, 0);
+            assert.deepEqual(f.state.failure, { reason: '当前所选版本已安装，无需重复安装', code: 'ALREADY_INSTALLED' });
+            assert.equal(f.sb.localStorage.getItem('modhub_market_confirmed_updates_v1'), null, '阻止重复安装不得登记版本确权');
+            assert.equal(f.card.querySelector('.modhub-download-progress').hidden, true, '阻止重复后清理下载进度');
+        }
+        {
+            const f = fixture();
+            f.setLocal('v1.0');
+            f.state.boot.version = '1.0.0';
+            assert.equal(await f.market.downloadAndInstallMod(f.mod, 'ddlc', f.options), false, '版本前缀和尾部零段不同仍属于同版，不能重复安装');
+            assert.equal(f.state.imports, 0);
+            assert.deepEqual(f.state.failure, { reason: '当前所选版本已安装，无需重复安装', code: 'ALREADY_INSTALLED' });
+        }
+        for (const entry of [
+            { local: '', incoming: '1.0.0', note: '本地版本未知不能误判同版' },
+            { local: '1.0.0', incoming: '', note: '真实包版本未知不能误判同版' },
+            { local: '1.0.0', incoming: '2.0.0', note: '真实新版仍允许安装' },
+            { local: '2.0.0', incoming: '1.0.0', note: '其他历史版本仍允许安装' },
+            { local: '1.0.0-beta.1', incoming: '1.0.0', note: '预发布版升级到正式版不能误判为同版' },
+            { local: '1.0.0-cn', incoming: '1.0.0-en', note: '语言后缀不同的完整版本不能误判为同版' },
+            { local: '1.0.0', incoming: '1.0.0', name: 'AnotherFixture', note: '另一个模组的同号版本不能误阻止主包' }
+        ]) {
+            const f = fixture();
+            f.setLocal(entry.local, entry.name);
+            f.state.boot.version = entry.incoming;
+            assert.equal(await f.market.downloadAndInstallMod(f.mod, 'ddlc', { ...f.options, askRestart: false }), true, entry.note);
+            assert.equal(f.state.imports, 1);
+            assert.equal(f.state.failure, null);
         }
     }
 

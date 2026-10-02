@@ -580,7 +580,7 @@ export async function fetchModRelease(mod, options = {}) {
 
   const sharedRepository = !!mod.sharedRepository && !parsed.tag;
   const releasePath = parsed.tag ? `tags/${encodeURIComponent(parsed.tag)}` : 'latest';
-  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], 'modpack-v1']))}`;
+  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], 'modpack-v1', 'asset-version-v1']))}`;
 
   if (useCache) {
     const cached = readCache(cacheKey);
@@ -630,7 +630,13 @@ export async function fetchModRelease(mod, options = {}) {
   const gameVersion = String(best?.name || '').match(/(?:^|[\s_.-])(?:for[\s._-]*)?dol[\s._-]*v?(0\.\d+\.\d+(?:\.\d+)?)(?=[\s_.-]|$)/i)?.[1]
     || (assetVersions.length > 1 ? assetVersions.find(version => /^0\.5\.\d+(?:\.\d+)?$/.test(version)) : '');
   const assetVersion = String(best?.name || '').replace(gameVersion || '', '').match(/\d+(?:\.\d+)+/)?.[0];
-  const version = sharedRepository ? assetVersion || mod.wikiVersion || mod.tableVersion || null : releaseData.tag_name || mod.version || null;
+  const releaseTitle = String(releaseData.name || '').trim();
+  const explicitTitleVersion = releaseTitle.match(/^v?(\d+(?:\.\d+){1,3}(?:-[0-9a-z][0-9a-z.-]*)?)$/i)?.[1];
+  const tagName = String(releaseData.tag_name || '');
+  const tagVersion = /^(?:v?\d)|(?:^|[^a-z0-9])(?:v\d|\d+\.\d+)/i.test(tagName) ? tagName : '';
+  const prefixedTitleVersion = releaseTitle.match(/^v(\d+(?:\.\d+){1,3})(?=$|[\s(（-])/i)?.[1];
+  const version = sharedRepository ? assetVersion || mod.wikiVersion || mod.tableVersion || null
+    : assetVersion || explicitTitleVersion || tagVersion || prefixedTitleVersion || mod.version || null;
   const updateDate = releaseData.published_at
     ? releaseData.published_at.slice(0, 10)
     : mod.updateDate || null;

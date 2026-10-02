@@ -162,6 +162,10 @@ async function run() {
     await h.api.startupReady;
     const button = h.document.getElementById('modHubRestoreStartupButton');
     const hook = h.hooks.get('modHubRestore');
+    const footerButtonStyle = h.document.getElementById('modHubRestoreStartupStyle').textContent.match(/#modHubRestoreStartupHost \.modhub-modal-footer>button\{([^}]+)\}/)?.[1] || '';
+    for (const rule of ['flex:1 1 0', 'box-sizing:border-box', 'min-width:0!important', 'max-width:100%', 'height:auto!important', 'min-height:32px', 'white-space:normal!important', 'overflow-wrap:anywhere', 'line-height:1.4!important']) {
+        assert.ok(footerButtonStyle.includes(rule), `普通样式加载前的页脚长按钮必须完整换行：${rule}`);
+    }
     assert.equal(button.textContent, '加载遇到问题？尝试时间点恢复');
     assert.equal(button.style.display, 'none', '正常加载不展示恢复按钮');
     await hook.Load_start('A', 'a.js');

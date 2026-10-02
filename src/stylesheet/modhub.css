@@ -2378,7 +2378,9 @@ button.modhub-btn-primary:active,
 
 .modhub-modal-footer {
     display: flex;
-    align-items: center;
+    flex-wrap: wrap;
+    flex-shrink: 0;
+    align-items: stretch;
     justify-content: flex-end;
     gap: 12px;
     padding: 12px 16px;
@@ -2387,10 +2389,18 @@ button.modhub-btn-primary:active,
 }
 
 .modhub-modal-footer .macro-button {
+    box-sizing: border-box;
+    flex-shrink: 0;
+    width: auto !important;
+    max-width: 100%;
+    height: auto !important;
+    min-height: 32px;
     padding: 6px 16px !important;
     font-size: 0.9em !important;
     min-width: 80px !important;
-    white-space: nowrap !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    line-height: 1.4 !important;
     cursor: pointer !important;
     border-radius: 3px !important;
 }

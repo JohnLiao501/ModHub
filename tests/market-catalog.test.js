@@ -95,6 +95,13 @@ module.exports = async function() {
         assert.deepEqual(Array.from(normalizedMod.bootNames), indexedMod.bootNames, '独立刷新不得丢失模组身份名称');
         assert.equal(JSON.stringify(normalizedMod.releaseCompatibility), JSON.stringify(indexedMod.releaseCompatibility), 'v1 索引必须保留精确发布的兼容声明与空前置列表');
         assert.equal(splitIndex.catalogUpdatedAt, '2026-09-27T00:02:00.000Z', '归一化不得改写目录刷新时间');
+        const assetVersionEntry = { ...indexedMod, version: '1.0.3', releaseAssetVersion: '1.0.3',
+            releaseUrl: 'https://github.com/JohnLiao501/ModHub/releases/tag/9.26' };
+        const [assetVersionMod] = market.normalizeReleaseIndex({ ...splitIndex, mods: [assetVersionEntry] });
+        assert.equal(assetVersionMod.releaseAssetVersion, '1.0.3', 'v1 索引须保留可选的已核验附件版本字段');
+        assert.equal(assetVersionMod.version, '1.0.3', '归一化不得用原始发布标签9.26覆盖已核验附件版号');
+        assert.equal(assetVersionMod.releaseUrl, assetVersionEntry.releaseUrl, '已核验附件版号不得改写原始发布来源');
+        assert.equal(normalizedMod.releaseAssetVersion, undefined, '不含附件版本字段的旧v1索引仍须正常消费');
 
         // 10.6 手动刷新绕过列表缓存，并重新验证各镜像的 HTTP 缓存
         const oldMod = { name: 'ModHub', version: '1.0.1', githubUrl: 'https://github.com/JohnLiao501/ModHub' };
@@ -1155,6 +1162,231 @@ module.exports = async function() {
         assert.equal(await sb.modHubMarket.downloadAndInstallMod(manual, 'ddlc', { batchMode: true, onFailure: reason => { batchFailure = reason; } }), false);
         assert.ok(batchFailure.includes('文件或分支'));
         assert.equal(dialogs.length, 1, '批量应记录原因且不弹单装对话框');
+    }
+
+    // 更新提醒、统计和忽略记录必须指向当前游戏的最新版，而非仓库最高版本。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        sb.StartConfig = { version: '0.5.11.9' };
+        const market = sb.modHubMarket, versions = sb.modHubMarketVersions;
+        let [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ id: 'maplebirch', identityId: 'maplebirch', name: '秋枫白桦框架', bootNames: ['maplebirch'],
+            githubUrl: 'https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchframework',
+            repositoryKeys: ['MaplebirchLeaf/SCML-DOL-maplebirchframework'], version: '5.2.1', versionSource: 'github',
+            releaseUrl: 'https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchframework/releases/tag/v5.2.1' }] });
+        let localVersion = '5.1.3';
+        const localMod = () => ({ name: 'maplebirch', bootJson: { name: 'maplebirch', version: localVersion, repository: mod.githubUrl } });
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [localMod()], getModListNameNoAlias: () => ['maplebirch'] } });
+        sb.modHubGetModInfo = name => name === 'maplebirch' ? localMod() : null;
+        const makeRelease = (version, target) => {
+            const name = `maplebirch-v${version}${target ? `-DoL-${target}` : ''}.zip`;
+            return { tagName: `v${version}`, name: version, publishedAt: '2026-10-02T00:00:00Z',
+                htmlUrl: `${mod.githubUrl}/releases/tag/v${version}`,
+                assets: [{ name, size: 100, downloadUrl: `${mod.githubUrl}/releases/download/v${version}/${name}` }] };
+        };
+        const pages = [makeRelease('5.2.1', '0.5.12.13'), makeRelease('5.1.1', '0.5.11.9'), makeRelease('5.1.3', '0.5.11.9')];
+        const requestedPages = [];
+        versions.fetchReleases = async (_mod, { page = 1 } = {}) => {
+            requestedPages.push(page);
+            return { id: _mod.id, sourceUrl: mod.githubUrl, page, nextPage: page + 1, hasMore: page < pages.length,
+                fetchedAt: '2026-10-02T00:00:00Z', releases: [pages[page - 1]] };
+        };
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
+        [mod] = await market.loadMarketData();
+        assert.notEqual(market.checkModInstallStatus(mod), 'update_available', '适配信息读取完成前不能用另一游戏版本误报更新');
+        const pending = market.getModUpdateInfo(mod);
+        assert.equal(pending.pending, true);
+        const pendingClone = { ...mod };
+        delete pendingClone._updateCheck;
+        market.checkModInstallStatus(pendingClone);
+        assert.equal(market.getModUpdateInfo(pendingClone).promise, pending.promise, '检测中的独立模组副本必须共用同一请求，不能重新分页读取');
+        await pending.promise;
+        const current = market.getModUpdateInfo(mod);
+        assert.equal(current.pending, false);
+        assert.equal(current.version, '5.1.3', '应跨页选择当前游戏最高模组版本，不能停在先读到的5.1.1');
+        assert.equal(current.release.version, '5.1.3');
+        assert.deepEqual(requestedPages, [1, 2, 3], '历史未读完时必须继续核对后续页');
+        assert.equal(market.checkModInstallStatus(mod), 'up_to_date', '当前游戏已装5.1.3时不能提示适配0.5.12的5.2.1');
+        assert.equal(market.getModUpdateInfo({ ...mod }).version, '5.1.3', '卡片副本必须复用同来源同游戏检测结果');
+        assert.deepEqual(requestedPages, [1, 2, 3], '重绘与重复检测不得重复读取历史');
+        assert.equal(mod.version, '5.2.1', '适配检测不得覆写统一索引版本或破坏历史缓存签名');
+
+        localVersion = '5.1.1';
+        assert.equal(market.checkModInstallStatus(mod), 'update_available', '当前游戏的旧版仍须提示5.1.3更新');
+        const elements = new Map(['modHubMarketCardsContainer', 'modHubMarketStats'].map(id => [id, createStubElement()]));
+        const cards = elements.get('modHubMarketCardsContainer');
+        const ignoreOnce = createStubElement('button');
+        ignoreOnce.dataset = { modIndex: '0', ignoreMode: 'once' };
+        cards.querySelectorAll = selector => selector === '.btn-market-ignore' ? [ignoreOnce] : [];
+        sb.document.getElementById = id => elements.get(id) || null;
+        const notifications = [];
+        sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
+        market.renderMarketCards();
+        assert.ok(cards.innerHTML.includes('发现新版') && cards.innerHTML.includes('5.1.3'), '卡片更新提醒应展示当前游戏候选');
+        assert.ok(/版本:\s+v?5\.1\.3/.test(cards.innerHTML) && !cards.innerHTML.includes('5.2.1'), '卡片版本字段不得仍显示另一游戏系列的最新版');
+        assert.ok(/仅忽略\s+v?5\.1\.3/.test(cards.innerHTML), '忽略本次说明必须引用当前游戏候选');
+        assert.equal(notifications.at(-1).count, 1);
+        assert.equal(notifications.at(-1).list[0].newVersion, '5.1.3', '管理页徽标与统计必须使用同一个候选版本');
+        assert.equal(market.getUpdatableMods()[0].newVersion, '5.1.3', '全部更新和管理页直接更新列表必须使用同一个候选版本');
+        await ignoreOnce.onclick();
+        assert.equal(market.getIgnoredUpdates()[mod.name], '5.1.3', '忽略本次不能把另一游戏系列5.2.1一并忽略');
+        assert.equal(market.getUpdatableMods().length, 0);
+        market.setModUpdateIgnored(mod.name, '', false);
+        market.setModUpdateIgnored('maplebirch', '', false);
+
+        sb.StartConfig.version = '0.5.12.13';
+        assert.notEqual(market.checkModInstallStatus(mod), 'update_available', '切换游戏版本后须重新核对，不能复用旧游戏结论');
+        await market.getModUpdateInfo(mod).promise;
+        assert.equal(market.getModUpdateInfo(mod).version, '5.2.1');
+        assert.equal(market.checkModInstallStatus(mod), 'update_available', '切到0.5.12后应提示该系列5.2.1');
+        assert.deepEqual(requestedPages, [1, 2, 3, 1, 2, 3]);
+        assert.equal(mod.version, '5.2.1');
+
+        const expired = market.getModUpdateInfo(mod), requestsBeforeExpiry = requestedPages.length;
+        expired.checkedAt -= 6 * 60 * 60 * 1000 + 1;
+        const renewed = market.getModUpdateInfo(mod);
+        assert.equal(renewed.pending, true);
+        assert.notEqual(renewed.promise, expired.promise, '超过六小时的检测结论必须重新核对');
+        await renewed.promise;
+        assert.equal(requestedPages.length, requestsBeforeExpiry + 3);
+        assert.equal(market.getModUpdateInfo(mod).version, '5.2.1');
+
+        sb.StartConfig.version = '0.5.11.9';
+        const lowerLatest = { ...mod, id: 'lower-global-latest', version: '5.0.0' };
+        market.checkModInstallStatus(lowerLatest);
+        await market.getModUpdateInfo(lowerLatest).promise;
+        assert.equal(market.getModUpdateInfo(lowerLatest).version, '5.1.3');
+        assert.equal(market.checkModInstallStatus(lowerLatest), 'update_available', '仓库最新发布维护较低分支时，仍须发现当前游戏5.1.3高于本地5.1.1');
+        assert.equal(lowerLatest.version, '5.0.0', '当前游戏较高版本检测不得改写较低分支的目录版本');
+        sb.StartConfig.version = '0.5.12.13';
+
+        versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
+            fetchedAt: '2026-10-02T00:00:00Z', releases: [makeRelease('5.2.1')] });
+        const unlabelled = { ...mod, id: 'unlabelled-update' };
+        assert.notEqual(market.checkModInstallStatus(unlabelled), 'update_available');
+        await market.getModUpdateInfo(unlabelled).promise;
+        assert.equal(market.checkModInstallStatus(unlabelled), 'update_available', '单一系列未声明适配时仍应比较真实历史候选版本');
+        assert.equal(market.getModUpdateInfo(unlabelled).version, '5.2.1');
+        assert.equal(market.getModUpdateInfo(unlabelled).release.version, '5.2.1');
+
+        versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
+            fetchedAt: '2026-10-02T00:00:00Z', releases: [makeRelease('5.1.3', '0.5.11.9')] });
+        const mismatched = { ...mod, id: 'mismatched-update' };
+        market.checkModInstallStatus(mismatched);
+        await market.getModUpdateInfo(mismatched).promise;
+        assert.ok(!market.getModUpdateInfo(mismatched).version);
+        assert.notEqual(market.checkModInstallStatus(mismatched), 'update_available', '有其他游戏适配证据但无当前候选时不得回退到仓库最高版本');
+
+        versions.fetchReleases = async () => { throw new Error('测试历史服务离线'); };
+        const unavailable = mod;
+        unavailable.revision = 1;
+        assert.notEqual(market.checkModInstallStatus(unavailable), 'update_available');
+        market.renderMarketCards();
+        assert.ok(cards.innerHTML.includes('正在检查更新') && !cards.innerHTML.includes('已是最新'), '新来源读取期间只能显示待检查状态');
+        await market.getModUpdateInfo(unavailable).promise;
+        const failed = market.getModUpdateInfo(unavailable);
+        assert.equal(failed.pending, false);
+        assert.ok(!failed.version && String(failed.error?.message || failed.error).includes('测试历史服务离线'), '读取失败必须保留未知结论及具体原因');
+        assert.notEqual(market.checkModInstallStatus(unavailable), 'update_available', '读取失败不能回退到另一游戏系列的仓库最高版本');
+        market.renderMarketCards();
+        assert.ok(cards.innerHTML.includes('更新检查失败') && cards.innerHTML.includes('测试历史服务离线')
+            && !cards.innerHTML.includes('已是最新'), '失败卡片必须说明具体原因，不能声称已是最新');
+        assert.equal(market.getUpdatableMods().length, 0);
+        assert.equal(mod.version, '5.2.1');
+
+        let retryRequests = 0;
+        versions.fetchReleases = async source => {
+            retryRequests++;
+            return { id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
+                fetchedAt: '2026-10-02T00:00:00Z', releases: [makeRelease('5.2.1', '0.5.12.13')] };
+        };
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [{ ...mod }] }) });
+        [mod] = await market.loadMarketData(true);
+        market.checkModInstallStatus(mod);
+        const retry = market.getModUpdateInfo(mod);
+        assert.equal(retry.pending, true, '手动刷新市场须清除失败结论，不能继续等待六小时缓存过期');
+        assert.notEqual(retry.promise, failed.promise);
+        await retry.promise;
+        assert.equal(retryRequests, 1, '刷新后同来源副本只能重试一次');
+        assert.equal(market.checkModInstallStatus(mod), 'update_available');
+        assert.equal(market.getModUpdateInfo(mod).version, '5.2.1');
+        assert.ok(!market.getModUpdateInfo(mod).error);
+    }
+
+    // 发布标题为日期时，更新入口必须使用真实安装包版号，且不猜测多个产品系列。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        sb.StartConfig = { version: '0.5.11.9' };
+        const market = sb.modHubMarket, versions = sb.modHubMarketVersions;
+        let [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ id: 'universal-combat-zed-fix', identityId: 'universal-combat-zed-fix',
+            name: '战斗美化修复', bootNames: ['通用战斗美化-zed修复'], repositoryKeys: ['Zed660033/mysterious'],
+            githubUrl: 'https://github.com/Zed660033/mysterious', version: '9.26', versionSource: 'github',
+            releaseUrl: 'https://github.com/Zed660033/mysterious/releases/tag/9.26' }] });
+        let localVersion = '1.0.3';
+        const localMod = () => ({ name: '通用战斗美化-zed修复', bootJson: { name: '通用战斗美化-zed修复', version: localVersion, repository: mod.githubUrl } });
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [localMod()], getModListNameNoAlias: () => ['通用战斗美化-zed修复'] } });
+        sb.modHubGetModInfo = name => name === '通用战斗美化-zed修复' ? localMod() : null;
+        const makeRelease = names => ({ tagName: '9.26', name: '9.26', version: '9.26', publishedAt: '2026-09-26T00:00:00Z',
+            htmlUrl: `${mod.githubUrl}/releases/tag/9.26`,
+            assets: names.map(name => ({ name, size: 100, downloadUrl: `${mod.githubUrl}/releases/download/9.26/${name}` })) });
+        let releases = [makeRelease(['Z-outdate-UCB-zedfix-1.0.0.zip', 'Z-outdate-UCB-zedfix-1.0.1.zip',
+            'Z-outdate-UCB-zedfix-1.0.2.zip', 'UCB-zedfix-1.0.3.zip'])];
+        versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
+            fetchedAt: '2026-10-02T00:00:00Z', releases });
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
+        [mod] = await market.loadMarketData();
+        market.checkModInstallStatus(mod);
+        await market.getModUpdateInfo(mod).promise;
+        const current = market.getModUpdateInfo(mod);
+        assert.equal(current.version, '1.0.3', '目录9.26不能覆盖安装包中可识别的1.0.3版号');
+        assert.equal(current.release.assetName, 'UCB-zedfix-1.0.3.zip', '无游戏证据的单一系列也须保留真实发布候选');
+        assert.equal(current.release.version, '1.0.3');
+        assert.equal(market.checkModInstallStatus(mod), 'up_to_date', '本地1.0.3不能因日期Tag9.26误报新版');
+        assert.equal(market.getUpdatableMods().length, 0);
+        assert.equal(mod.version, '9.26', '检测不能改写统一目录原始版本');
+
+        localVersion = '1.0.2';
+        assert.equal(market.checkModInstallStatus(mod), 'update_available');
+        const elements = new Map(['modHubMarketCardsContainer', 'modHubMarketStats'].map(id => [id, createStubElement()]));
+        const cards = elements.get('modHubMarketCardsContainer'), ignoreOnce = createStubElement('button');
+        ignoreOnce.dataset = { modIndex: '0', ignoreMode: 'once' };
+        cards.querySelectorAll = selector => selector === '.btn-market-ignore' ? [ignoreOnce] : [];
+        sb.document.getElementById = id => elements.get(id) || null;
+        const notifications = [];
+        sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
+        market.renderMarketCards();
+        assert.ok(cards.innerHTML.includes('发现新版') && /版本:\s+v?1\.0\.3/.test(cards.innerHTML), '卡片应展示安装包1.0.3版号');
+        assert.ok(!/版本:\s+v?9\.26/.test(cards.innerHTML), '卡片不能把发布日期当作模组版本');
+        assert.ok(/仅忽略\s+v?1\.0\.3/.test(cards.innerHTML));
+        assert.equal(notifications.at(-1).list[0].newVersion, '1.0.3', '管理页徽标必须共用真实包版号');
+        assert.equal(market.getUpdatableMods()[0].newVersion, '1.0.3', '管理页直接更新和全部更新必须共用真实包版号');
+        await ignoreOnce.onclick();
+        assert.equal(market.getIgnoredUpdates()[mod.name], '1.0.3', '忽略本次应记录安装包版号，不能记录日期Tag');
+        assert.equal(market.getUpdatableMods().length, 0);
+        market.setModUpdateIgnored(mod.name, '', false);
+        market.setModUpdateIgnored('通用战斗美化-zed修复', '', false);
+
+        releases = [makeRelease(['UCB-zedfix-1.0.2.zip', 'UCB-zedfix-1.0.4.zip', 'UCB-zedfix-1.0.3.zip'])];
+        const unordered = { ...mod, id: 'unlabelled-unordered' };
+        market.checkModInstallStatus(unordered);
+        await market.getModUpdateInfo(unordered).promise;
+        assert.equal(market.getModUpdateInfo(unordered).version, '1.0.4', '单一系列无适配证据时应按模组版号选择最高候选，不能按资产顺序选择');
+
+        releases = [makeRelease(['UCB-zedfix-EN-1.0.3.zip', 'UCB-zedfix-CN-1.0.4.zip'])];
+        const ambiguous = { ...mod, id: 'unlabelled-multiple-series' };
+        market.checkModInstallStatus(ambiguous);
+        await market.getModUpdateInfo(ambiguous).promise;
+        assert.ok(!market.getModUpdateInfo(ambiguous).version && !market.getModUpdateInfo(ambiguous).release);
+        assert.notEqual(market.checkModInstallStatus(ambiguous), 'update_available', '无适配声明的多语言系列不能猜测更新目标或回退目录9.26');
+
+        releases = [];
+        const noPackage = { ...mod, id: 'unlabelled-no-package' };
+        market.checkModInstallStatus(noPackage);
+        await market.getModUpdateInfo(noPackage).promise;
+        assert.ok(!market.getModUpdateInfo(noPackage).version);
+        assert.notEqual(market.checkModInstallStatus(noPackage), 'update_available', '历史没有可安装候选时不得回退目录9.26误报更新');
+        assert.equal(mod.version, '9.26');
     }
 
     /* =========================================================================

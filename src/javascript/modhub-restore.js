@@ -230,8 +230,7 @@
             blobs.set(blob.hash, blob.data);
         }
         packages.sort((a, b) => a.name.localeCompare(b.name));
-        const names = new Set(packages.map(item => item.name));
-        if ([...enabled, ...disabled].some(name => !names.has(name))) fail('已登记的模组缺少包体，无法建立完整还原点');
+        // 启禁记录可能残留已缺失的包名；分别保存原始列表与真实仓库包体，不虚构安装包。
         const beauty = await beautyValue(beautyDescriptor(env));
         validateBeauty(beauty);
         return { state: { schema: { dbName: env.dbName, storeName: env.storeName, enabledKey: env.enabledKey, disabledKey: env.disabledKey, prefix: env.prefix }, enabled, disabled, packages, beauty, settings: readSettings() }, blobs, rows };
@@ -454,7 +453,7 @@
                 await window.modHubConfirm?.({ title: '模组操作正被占用', message: error.message, cancelText: '' });
                 return false;
             }
-            const proceed = await window.modHubConfirm?.({ title: '未能建立还原点', message: `本次操作已暂停：${error.message}\n\n建议取消并释放浏览器空间。只有明确选择继续，本次操作才会在没有还原点的情况下执行。`, confirmText: '不建立还原点，继续操作', cancelText: '取消操作', confirmType: 'danger' });
+            const proceed = await window.modHubConfirm?.({ title: '未能建立还原点', message: `无法进行自动备份，备份尚未执行。\n\n继续进行将跳过本次备份。如果后续出现问题，可能无法恢复到本次操作前的状态。\n\n建议取消操作然后重试。如果问题持续存在，请提供以下错误详情以便排查。\n\n错误详情：${error.message}`, confirmText: '不建立还原点，继续操作', cancelText: '取消操作', confirmType: 'danger' });
             if (!proceed) { context.cancelled = true; release(context); return false; }
             context.prepared = true;
             context.withoutPoint = true;
@@ -554,12 +553,17 @@
         return `<section class="modhub-restore-notice-section"><p>将删除 <strong class="red">${points.length} 个还原点</strong>：</p><ul class="modhub-restore-notice-list" tabindex="0" aria-label="将删除的还原点">${points.map(point => `<li><strong class="gold">${escapeHtml(point.label)}</strong><br><span class="grey">${escapeHtml(pointDate(point.at))}</span></li>`).join('')}</ul></section><p><strong class="red">删除后无法通过这些还原点恢复。</strong></p><p>只有<strong class="gold">不再被其他还原点或恢复记录引用的包体</strong>才会清理。</p>`;
     }
 
-    function restoreConfirmationHtml(point, change, riskMessages) {
+    function packageVersionText(versions) {
+        const display = value => value === null ? '未安装' : value || '未识别';
+        return `当前版本：${display(versions.current)}；还原后版本：${display(versions.target)}`;
+    }
+
+    function restoreConfirmationHtml(point, change, riskMessages, packageVersions) {
         const items = [];
         [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '移除后来安装的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].forEach(([key, label]) => {
             if (!change[key].length) return;
             const color = key === 'removed' || key === 'disabled' ? 'red' : 'gold';
-            items.push(`<li><strong class="${color}">${label}（${change[key].length} 个）</strong><br>${change[key].map(name => `<strong class="gold">${escapeHtml(name)}</strong>`).join('<br>')}</li>`);
+            items.push(`<li><strong class="${color}">${label}（${change[key].length} 个）</strong><br>${change[key].map(name => `<strong class="gold">${escapeHtml(name)}</strong>${['installed', 'updated', 'removed'].includes(key) ? `<br><span class="grey">${escapeHtml(packageVersionText(packageVersions[name]))}</span>` : ''}`).join('<br>')}</li>`);
         });
         [['orderChanged', '恢复加载顺序'], ['beautyChanged', '恢复美化配置'], ['settingsChanged', '恢复管理配置']].forEach(([key, label]) => { if (change[key]) items.push(`<li><strong class="gold">${label}</strong></li>`); });
         const list = items.length ? `<ul class="modhub-restore-notice-list" tabindex="0" aria-label="还原变更">${items.join('')}</ul>` : '<p class="grey">目标与当前模组状态一致。</p>';
@@ -632,7 +636,7 @@
         if (!same(state?.schema, { dbName: env.dbName, storeName: env.storeName, enabledKey: env.enabledKey, disabledKey: env.disabledKey, prefix: env.prefix })) fail('还原点来自不同存储位置，未写入数据');
         if (!validNames(state.enabled) || !validNames(state.disabled) || state.enabled.some(name => state.disabled.includes(name)) || !Array.isArray(state.packages)) fail('还原点模组列表损坏');
         const names = state.packages.map(item => item.name);
-        if (!validNames(names) || state.packages.some(item => !/^[a-f0-9]{64}$/.test(item.hash) || !Number.isSafeInteger(item.size) || item.size < 0) || [...state.enabled, ...state.disabled].some(name => !names.includes(name))) fail('还原点包体清单损坏');
+        if (!validNames(names) || state.packages.some(item => !/^[a-f0-9]{64}$/.test(item.hash) || !Number.isSafeInteger(item.size) || item.size < 0)) fail('还原点包体清单损坏');
         validateBeauty(state.beauty);
         if (!same(beautyDescriptor(env), { dbName: state.beauty.dbName, storeName: state.beauty.storeName, key: state.beauty.key })) fail('美化存储位置已改变，未写入数据');
         if (!state.settings || !same(Object.keys(state.settings).sort(), [...MODHUB_SETTINGS].sort()) || MODHUB_SETTINGS.some(key => state.settings[key] !== null && typeof state.settings[key] !== 'string')) fail('还原点设置格式未知');
@@ -753,7 +757,8 @@
             embedded.find(item => normalize(item.name) === normalize(name))?.bootJson ||
             (!profiles.length ? window.modHubGetModInfo?.(name)?.bootJson : null) ||
             (!Array.isArray(raw) ? utils?.getMod?.(name)?.bootJson : null) || {};
-        const available = [...new Set([...names, ...embedded.map(item => item.name).filter(Boolean)])];
+        // 恢复时以包体档案为准，只有启用记录的名字不能充当恢复工具的必要前置。
+        const available = [...new Set([...names.filter(name => !profiles.length || profiles.some(item => normalize(item.name) === normalize(name))), ...embedded.map(item => item.name).filter(Boolean)])];
         // 当前页面仍在运行的旁加载档案，不代表玩家选择在下一次启动时启用它。
         const self = available.find(name => normalize(name) === 'modhub');
         if (!self) return { order: names.slice(), protectedNames: [], issues: [] };
@@ -802,14 +807,21 @@
         return getRecoveryInfo(names, profiles).order;
     }
 
-    async function targetProfiles(env, target, current) {
+    async function targetProfiles(env, target, current, allowUnreadable = false) {
         const controller = window.modModLoadController || env.utils.getModLoadController?.();
         if (typeof controller?.checkModZipFileIndexDB !== 'function') fail('当前 ModLoader 无法校验还原包体的真实档案');
         const profiles = [];
         for (const item of target.packages) {
             const data = current.blobs.get(item.hash) || current.rows.get(MODHUB_BLOB_PREFIX + item.hash);
-            const boot = await controller.checkModZipFileIndexDB(data);
-            if (!boot || typeof boot !== 'object' || String(boot.name || '').toLowerCase() !== item.name.toLowerCase()) fail(`还原包体档案不一致：${item.name}`);
+            let boot;
+            try {
+                boot = await controller.checkModZipFileIndexDB(data);
+                if (!boot || typeof boot !== 'object' || String(boot.name || '').toLowerCase() !== item.name.toLowerCase()) fail(`还原包体档案不一致：${item.name}`);
+            } catch (error) {
+                if (!allowUnreadable) throw error;
+                // 当前故障包仍允许被正常归档恢复；读取失败仅表示其版本未识别。
+                boot = {};
+            }
             profiles.push({ name: item.name, bootJson: boot });
         }
         return profiles;
@@ -841,6 +853,9 @@
             target.enabled.push(self.name);
             target.disabled = target.disabled.filter(name => name.toLowerCase() !== 'modhub');
         }
+        const names = new Set(target.packages.map(item => item.name));
+        const missing = [...target.enabled, ...target.disabled].filter(name => !names.has(name));
+        if (missing.length) riskMessages.push(`以下模组只有启禁记录，没有备份包体：${missing.join('、')}。将还原这些记录的原始状态，无法恢复缺失的安装包；需要时请重新导入。`);
         // 当前工具由本次快照与真实包档案核验，旧点的工具归档不参与最终恢复。
         const archived = { ...target, packages: target.packages.filter(item => item.name !== self?.name) };
         await loadBlobs(env, archived, current.rows);
@@ -861,11 +876,19 @@
         for (const key of MODHUB_SETTINGS) {
             if (target.settings[key] === null && window.localStorage.getItem(key.replace(/^modhub_/, 'dol_opt_')) !== null) target.settings[key] = key.endsWith('mod_order') ? '[]' : 'true';
         }
-        return { target, changes: describeChanges(current.state, target), riskMessages };
+        const changes = describeChanges(current.state, target);
+        const changedNames = new Set([...changes.installed, ...changes.updated, ...changes.removed]);
+        const currentProfiles = await targetProfiles(env, { packages: current.state.packages.filter(item => changedNames.has(item.name)) }, current, true);
+        const versionOf = (list, name) => {
+            const profile = list.find(item => item.name === name);
+            return profile ? (typeof profile.bootJson.version === 'string' ? profile.bootJson.version : '') : null;
+        };
+        const packageVersions = Object.fromEntries([...changedNames].map(name => [name, { current: versionOf(currentProfiles, name), target: versionOf(profiles, name) }]));
+        return { target, changes, riskMessages, packageVersions };
     }
 
     async function preview(id) {
-        const result = { id, label: '', at: null, changes: { installed: [], updated: [], removed: [], enabled: [], disabled: [], orderChanged: false, beautyChanged: false, settingsChanged: false }, riskMessages: [], canRestore: false };
+        const result = { id, label: '', at: null, changes: { installed: [], updated: [], removed: [], enabled: [], disabled: [], orderChanged: false, beautyChanged: false, settingsChanged: false }, riskMessages: [], packageVersions: {}, canRestore: false };
         try {
             const env = environment();
             const current = await snapshot(env);
@@ -875,7 +898,7 @@
             result.at = point.at;
             if (restoring || owner || window._modHubManagerBusy || current.rows.get(MODHUB_JOURNAL_KEY)) fail('另一项模组操作或恢复仍在进行');
             const built = await buildTarget(env, current, point);
-            return { ...result, changes: built.changes, riskMessages: built.riskMessages, canRestore: true };
+            return { ...result, changes: built.changes, riskMessages: built.riskMessages, packageVersions: built.packageVersions, canRestore: true };
         } catch (error) {
             return { ...result, reason: error.message || String(error) };
         }
@@ -921,12 +944,12 @@
             const point = readPoints(current.rows).find(item => item.id === id);
             if (!point) fail('还原点不存在或已过保留期限');
             // 每次提交从真实当前状态重新构建目标，不使用界面预览缓存。
-            const { target, changes: change, riskMessages } = await buildTarget(env, current, point);
-            const changes = [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '移除后来安装的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].filter(([key]) => change[key].length).map(([key, label]) => `${label}：${change[key].join('、')}`);
+            const { target, changes: change, riskMessages, packageVersions } = await buildTarget(env, current, point);
+            const changes = [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '移除后来安装的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].filter(([key]) => change[key].length).map(([key, label]) => `${label}：${change[key].map(name => `${name}${['installed', 'updated', 'removed'].includes(key) ? `（${packageVersionText(packageVersions[name])}）` : ''}`).join('、')}`);
             if (change.orderChanged) changes.push('恢复加载顺序');
             if (change.beautyChanged) changes.push('恢复美化配置');
             if (change.settingsChanged) changes.push('恢复管理配置');
-            const confirmed = await window.modHubConfirm?.({ title: '确认时间点还原', message: `将还原到“${point.label}”对应的模组状态。\n时间：${pointDate(point.at)}\n\n${changes.join('\n') || '目标与当前模组状态一致'}\n\n还原前会保存当前模组状态。当前 ModHub 恢复工具与游戏存档保留；还原完成后重新加载。${riskMessages.length ? '\n\n' + riskMessages.join('\n') : ''}`, trustedMessageHtml: restoreConfirmationHtml(point, change, riskMessages), dialogClass: 'modhub-restore-notice', confirmText: '确认还原并重新加载', cancelText: '取消还原', confirmType: 'danger', onRender: dialog => mountDialog(dialog, !startupFinished) });
+            const confirmed = await window.modHubConfirm?.({ title: '确认时间点还原', message: `将还原到“${point.label}”对应的模组状态。\n时间：${pointDate(point.at)}\n\n${changes.join('\n') || '目标与当前模组状态一致'}\n\n还原前会保存当前模组状态。当前 ModHub 恢复工具与游戏存档保留；还原完成后重新加载。${riskMessages.length ? '\n\n' + riskMessages.join('\n') : ''}`, trustedMessageHtml: restoreConfirmationHtml(point, change, riskMessages, packageVersions), dialogClass: 'modhub-restore-notice', confirmText: '确认还原并重新加载', cancelText: '取消还原', confirmType: 'danger', onRender: dialog => mountDialog(dialog, !startupFinished) });
             if (!confirmed) { restoring = false; recoveryContext.releaseStorageLock?.(); return false; }
             const safety = { version: 1, id: `before-restore-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, label: '还原前状态', kind: 'preRestore', userProtected: false, roundId: bootRound, at: Date.now(), source: sourceMetadata(env), state: current.state };
             const journal = { version: 1, pointId: id, pointLabel: point.label, pointAt: point.at, safetyPointId: safety.id, phase: 'prepared', source: current.state, target };
@@ -998,6 +1021,7 @@
         const style = document.createElement('style');
         style.id = 'modHubRestoreStartupStyle';
         style.textContent = '#modHubRestoreStartupHost{font:16px/1.6 sans-serif;text-align:left;white-space:normal;pointer-events:auto}#modHubRestoreStartupHost .modhub-modal-backdrop{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.75);backdrop-filter:blur(2px);padding:16px;box-sizing:border-box}#modHubRestoreStartupHost .modhub-modal-dialog{width:100%;max-width:440px;max-height:calc(100dvh - 92px);overflow:auto;background:var(--850,#222);border:1px solid var(--600,#666);box-shadow:0 10px 30px rgba(0,0,0,.85);color:var(--100,#eee);padding:16px;box-sizing:border-box}#modHubRestoreStartupHost .modhub-modal-header,#modHubRestoreStartupHost .modhub-modal-footer{display:flex;gap:8px;flex-wrap:wrap;align-items:center;justify-content:space-between}#modHubRestoreStartupHost .modhub-modal-title{color:#d6b365}#modHubRestoreStartupHost .modhub-modal-message{margin:12px 0;overflow-wrap:anywhere}#modHubRestoreStartupHost .modhub-modal-select-wrap{display:block}#modHubRestoreStartupHost select{width:100%;min-width:0;min-height:32px;background:#333;color:#eee}#modHubRestoreStartupHost button{min-height:32px;flex-shrink:0;background:#333;color:#eee;border:1px solid #777;padding:6px 10px}#modHubRestoreStartupHost .modhub-modal-footer{margin-top:16px}#modHubRestoreStartupHost .modhub-modal-btn-confirm{border-color:#d6b365}#modHubRestoreStartupHost .modhub-modal-close{margin-left:auto}#modHubRestoreStartupHost .modhub-modal-body{padding-bottom:60px}';
+        style.textContent += '#modHubRestoreStartupHost .modhub-modal-footer>button{flex:1 1 0;box-sizing:border-box;min-width:0!important;max-width:100%;height:auto!important;min-height:32px;white-space:normal!important;overflow-wrap:anywhere;line-height:1.4!important}';
         style.textContent += '#modHubRestoreStartupHost .modhub-modal-backdrop:has(>.modhub-restore-notice){padding:16px 16px calc(60px + env(safe-area-inset-bottom))}#modHubRestoreStartupHost .modhub-modal-dialog.modhub-restore-notice{max-width:560px;max-height:calc(100dvh - 76px - env(safe-area-inset-bottom));display:flex;flex-direction:column;min-height:0;overflow:hidden}#modHubRestoreStartupHost .modhub-restore-notice .modhub-modal-header,#modHubRestoreStartupHost .modhub-restore-notice .modhub-modal-footer{flex-shrink:0}#modHubRestoreStartupHost .modhub-restore-notice .modhub-modal-body,#modHubRestoreStartupHost .modhub-restore-notice .modhub-modal-message{display:flex;flex-direction:column;min-height:0;overflow:hidden;padding-bottom:0}#modHubRestoreStartupHost .modhub-restore-notice p{margin:0 0 12px;flex-shrink:0}#modHubRestoreStartupHost .modhub-restore-notice-section{min-height:0;display:flex;flex-direction:column}#modHubRestoreStartupHost .modhub-restore-notice-list{min-height:0;max-height:min(260px,30dvh);overflow:auto;overscroll-behavior:contain;padding:0 0 0 24px;margin:0 0 12px;scrollbar-gutter:stable;-webkit-overflow-scrolling:touch}#modHubRestoreStartupHost .modhub-restore-notice-list li{padding:4px 0;overflow-wrap:anywhere}#modHubRestoreStartupHost .modhub-restore-notice .gold{color:var(--gold,#d6b365)}#modHubRestoreStartupHost .modhub-restore-notice .red{color:var(--red,#ed7878)}#modHubRestoreStartupHost .modhub-restore-notice .green{color:var(--green,#88bd86)}#modHubRestoreStartupHost .modhub-restore-notice .grey{color:var(--400,#aaa)}';
         document.head.appendChild(style);
     }

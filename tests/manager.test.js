@@ -1,15 +1,88 @@
 // ModHub 加载契约、管理器状态与公共弹窗。
 const {
-    assert, fs, path, srcRoot, bootJson,
+    assert, fs, path, srcRoot, bootJson, readStyles,
     createStubElement, createBaseSandbox, loadScripts, loadManager, createMockController,
 } = require('./helpers');
 
 module.exports = async function() {
+    // 异步适配核验撤销更新提醒时，第四卡片与旧统计必须同步恢复。
+    {
+        const sb = createBaseSandbox();
+        loadScripts(sb, [...bootJson.scriptFileList_inject_early, 'javascript/modhub-manager.js', 'javascript/modhub-market.js']);
+        const elements = new Map(['modHubUpdateBanner', 'modHubEnvInfoCardFourth', 'modHubEnvInfo', 'modHubModManageContainer'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        sb.modHubGetGui = () => ({ gModUtils: { version: '2.3.4', getModListNameNoAlias: () => [] } });
+        sb._modHubModState = { sideEnabled: [], sideDisabled: [], sideMods: [] };
+        const row = createStubElement('li'), tag = createStubElement('span'), button = createStubElement('button');
+        row.dataset.modName = '测试模组';
+        row.querySelector = selector => selector === '.modhub-update-tag' ? tag : selector === '.btn-inline-update' ? button : null;
+        const manager = elements.get('modHubModManageContainer');
+        manager.scrollTop = 123;
+        manager.querySelectorAll = selector => selector === 'li[data-mod-name]' ? [row] : [];
+        Object.defineProperty(manager, 'innerHTML', { get: () => '保留原有管理列表', set: () => { throw new Error('通知不得重绘管理列表'); } });
+        const card = elements.get('modHubEnvInfoCardFourth');
+        sb.modHubNotifyUpdateState(1, [{ name: '测试模组', newVersion: '1.1.0' }]);
+        assert.ok(card.innerHTML.includes('发现新版') && card.innerHTML.includes('gold'));
+        assert.equal(typeof card.onclick, 'function');
+        assert.equal(tag.textContent, ' | [可更新 -> v1.1.0]');
+        assert.equal(tag.style.display, '');
+        assert.equal(button.title, '立即升级至 v1.1.0');
+        assert.equal(button.style.display, '');
+        sb.modHubNotifyUpdateState(1, [{ localProfile: { name: '测试模组' }, newVersion: '1.2.0' }]);
+        assert.equal(tag.textContent, ' | [可更新 -> v1.2.0]', '新候选须在原标签节点内同步版号');
+        assert.equal(button.title, '立即升级至 v1.2.0');
+        assert.equal(manager.querySelectorAll('li[data-mod-name]')[0], row, '通知须保留原行节点');
+        assert.equal(row.querySelector('.modhub-update-tag'), tag);
+        assert.equal(row.querySelector('.btn-inline-update'), button);
+        assert.equal(manager.scrollTop, 123, '通知不得改变管理列表滚动位置');
+        sb.modHubNotifyUpdateState(0, []);
+        assert.equal(tag.textContent, '', '零更新须连同前导分隔符清除旧标签');
+        assert.equal(tag.style.display, 'none');
+        assert.equal(button.style.display, 'none');
+        assert.equal(button.title, '');
+        assert.ok(card.innerHTML.includes('加载器版本') && card.innerHTML.includes('2.3.4'));
+        assert.ok(!card.innerHTML.includes('gold') && !card.className.includes('modhub-clickable'), '零更新须清除金色更新样式');
+        assert.equal(card.onclick, null, '零更新须清除旧更新跳转');
+        assert.equal(card.title, '', '零更新须清除旧更新说明');
+        assert.equal(card.style.borderColor, '', '零更新须清除金色边框');
+        assert.equal(elements.get('modHubUpdateBanner').style.display, 'none');
+        assert.equal(sb._modHubUpdatableMap.size, 0);
+        sb.modHubNotifyUpdateState(1, [{ name: '旧检测结果', newVersion: '1.1.0' }]);
+        sb.modHubMarket = { getUpdatableMods: () => [] };
+        await sb.modHubUpdateGeneralInfo();
+        assert.ok(elements.get('modHubEnvInfo').innerHTML.includes('加载器版本'));
+        assert.ok(!elements.get('modHubEnvInfo').innerHTML.includes('发现新版'), '成功核验为零不能回退到旧更新数量');
+        assert.equal(elements.get('modHubUpdateBanner').style.display, 'none');
+    }
+
+    // 未发现更新时仍保留隐藏节点，后续异步通知复用原事件委托。
+    {
+        const sb = createBaseSandbox();
+        loadScripts(sb, [...bootJson.scriptFileList_inject_early, 'javascript/modhub-manager.js']);
+        const manager = createStubElement();
+        sb.document.getElementById = id => id === 'modHubModManageContainer' ? manager : null;
+        sb.modHubGetGui = () => null;
+        sb.modHubGetModInfo = () => ({ bootJson: { version: '1.0.0' } });
+        sb.modHubGetModSubtext = () => '';
+        sb.modHubProtectedRecoveryNames = () => [];
+        sb.modHubEnsureModStateSync = sb.modHubUpdateManagerStatus = sb.modHubRenderBeautyUI = sb.modHubUpdateGeneralInfo = () => {};
+        sb._modHubModState = { sideMods: [{ name: '测试模组', enabled: true }], builtInMods: [] };
+        sb.modHubRenderModManageUI();
+        assert.match(manager.innerHTML, /class="gold modhub-update-tag" style="font-weight:bold;display:none;">\s*<\/span>/, '初次渲染必须保留隐藏标签且不留下分隔符');
+        assert.match(manager.innerHTML, /class="macro-button modhub-btn-primary btn-inline-update" data-mod-action="update" title="" style="display:none;"/, '初次渲染必须保留隐藏更新按钮');
+        let updatedName;
+        sb.modHubUpdateModDirectly = async name => { updatedName = name; };
+        const row = { dataset: { modName: '测试模组' } };
+        const button = { dataset: { modAction: 'update' }, closest: () => row };
+        await manager.onclick({ target: { closest: () => button } });
+        assert.equal(updatedName, '测试模组', '隐藏占位按钮显示后须继续使用现有更新委托');
+    }
+
     /* =========================================================================
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.2.0', 'boot.json 版本号必须为 1.2.0');
+    assert.equal(bootJson.version, '1.2.1', 'boot.json 版本号必须为 1.2.1');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
@@ -416,6 +489,18 @@ module.exports = async function() {
             return { sb, controller, stored, checks, tabs, gui };
         };
         const file = (name, marker) => ({ name, arrayBuffer: async () => new Uint8Array([marker, 42, 255, 0]).buffer });
+        for (const displayName of ['ModHub', `${'较长的模组名称'.repeat(12)}<img src=x onerror="bad()"> & "测试"`]) {
+            const f = createImporter();
+            let prompt;
+            f.sb.modHubConfirm = async options => { prompt = options; return false; };
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [file('native.modpack', 1)] },
+                { askRestart: true, keepCurrentTab: true, displayName }), true);
+            assert.equal(prompt.message, `模组【${displayName}】已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`, '名称高亮不得改写原有重载文案');
+            assert.ok(prompt.trustedMessageHtml.includes(`模组【<strong class="gold">${f.sb.modHubEscapeHtml(displayName)}</strong>】`), '普通安装重载提示必须完整显示并金色加粗模组名');
+            assert.ok(!prompt.trustedMessageHtml.includes('<img'), '模组显示名不得作为 HTML 执行');
+            assert.equal(prompt.cancelText, '稍后重载');
+            assert.deepEqual(f.tabs, [], '市场安装选择稍后重载后必须停留当前页签');
+        }
         {
             const f = createImporter();
             f.sb.modHubReadLocalReadme = async () => '# 原生包说明';
@@ -641,6 +726,14 @@ module.exports = async function() {
         const sb = loadManager();
         assert.equal(typeof sb.modHubConfirm, 'function', '必须封装游戏原生暗黑确认框');
         assert.equal(typeof sb.modHubAlert, 'function', '必须封装游戏原生暗黑提示框');
+        const css = readStyles();
+        const footerStyle = css.match(/^\.modhub-modal-footer\s*\{([^}]+)\}/m)[1];
+        const buttonStyle = css.match(/^\.modhub-modal-footer \.macro-button\s*\{([^}]+)\}/m)[1];
+        assert.match(footerStyle, /flex-wrap:\s*wrap/, '公共弹窗按钮不足一行时必须换行');
+        for (const rule of [/white-space:\s*normal\s*!important/, /width:\s*auto\s*!important/, /height:\s*auto\s*!important/, /max-width:\s*100%/, /overflow-wrap:\s*anywhere/]) {
+            assert.match(buttonStyle, rule, '公共弹窗长标签必须在按钮内完整换行，不受原生固定高度限制');
+        }
+        assert.match(css, /@media\s*\(max-width:\s*768px\)\s*\{\s*\.modhub-modal-footer\s*\{[^}]+\}\s*\.modhub-modal-footer \.macro-button\s*\{[^}]*flex:\s*1 1 0;[^}]*min-width:\s*0\s*!important;[^}]*min-height:\s*40px/, '所有公共弹窗在窄屏均分按钮宽度并保留触控区域');
         // 9.1 确认按钮交互：模拟用户点击确认
         const confirmPromise = sb.modHubConfirm({ title: '测试', message: '确认吗', confirmType: 'danger' });
         const overlay = sb.document.body.children.find(el => el.id === 'modHubConfirmOverlay');
@@ -735,6 +828,13 @@ module.exports = async function() {
         selected = true;
         selectionDialog.modHubSyncConfirmState();
         assert.equal(selectionDialog.querySelector('.modhub-modal-btn-confirm').disabled, false);
+        for (const tag of ['summary', 'button', 'a', 'select', 'input', 'textarea']) {
+            const control = { tagName: tag.toUpperCase(), closest: selector => selector === '.modhub-modal-dialog' ? selectionDialog : control };
+            handleKeydown({ key: 'Enter', target: control, preventDefault: () => prevented++ });
+        }
+        assert.equal(prevented, 1, '弹窗内原生交互控件的 Enter 必须保留自身行为，不能代替确认');
+        handleKeydown({ key: 'Enter', defaultPrevented: true, preventDefault: () => prevented++ });
+        assert.equal(prevented, 1, '已经处理的 Enter 不能再次确认弹窗');
         handleKeydown({ key: 'Enter', preventDefault: () => prevented++ });
         assert.equal(await selectionPromise, true);
     }
@@ -813,6 +913,29 @@ module.exports = async function() {
         sb.modHubShowToast = () => {};
         return sb;
     }
+    // 普通重载与操作收尾后的框架重载统一突出名称，并保留警告与转义。
+    for (const isFramework of [false, true]) {
+        const sb = loadReloadManager(), prompts = [];
+        const name = `${'较长的模组名称'.repeat(12)}<img src=x onerror="bad()"> & "测试"`;
+        const message = `${isFramework ? '核心框架' : '模组'}【${name}】已成功导入。\n请确认。`;
+        sb.modHubConfirm = async options => { prompts.push(options); return false; };
+        if (isFramework) {
+            const context = sb.modHubRestore.createOperation();
+            assert.equal(await sb.modHubOfferReload(message, { isFramework, restoreContext: context }), true);
+            assert.equal(await sb.modHubCompleteOperationReload(context), false);
+            assert.equal(prompts.length, 0, '操作收尾完成前不得显示框架重载提示');
+            context.finished = true;
+            await sb.modHubCompleteOperationReload(context);
+        } else await sb.modHubOfferReload(message);
+        assert.equal(prompts.length, 1);
+        const prompt = prompts[0], html = prompt.trustedMessageHtml;
+        assert.ok(html.includes(`<strong class="gold">${sb.modHubEscapeHtml(name)}</strong>`), '共用与延期重载提示必须完整高亮长模组名');
+        assert.ok(html.includes('&lt;img src=x onerror=&quot;bad()&quot;&gt; &amp; &quot;测试&quot;') && !html.includes('<img'), '重载提示中的模组名必须先转义再高亮');
+        assert.ok(html.includes('<br>请确认。'), '高亮后必须保留原有换行');
+        assert.ok(html.includes('重新载入可能丢失尚未存档的游戏进度，请先存档。'), '高亮后必须保留存档提醒');
+        if (isFramework) assert.ok(html.includes('强烈建议立即重新载入') && html.includes('检测到底层核心框架状态发生变更。'), '延期框架提示必须保留原有强提醒');
+        assert.equal(prompt.cancelText, '稍后重载');
+    }
     {
         const sb = loadReloadManager();
         let dialogs = 0, finishDialog;
@@ -851,7 +974,7 @@ module.exports = async function() {
         sb.document.getElementById = id => id === 'customOverlay' ? overlay : id === 'modHubModManageContainer' && managing ? manager : null;
         sb.document.addEventListener = (name, handler, capture) => { if (name === 'click') clicks.push({ handler, capture }); };
         sb.$ = sb.jQuery = () => ({ on: (name, handler) => bindings.push({ name, handler }) });
-        loadScripts(sb, ['javascript/modhub-manager.js']);
+        loadScripts(sb, ['javascript/modhub-dialog.js', 'javascript/modhub-manager.js']);
         sb.modHubShowToast = () => {};
         sb.modHubBindReloadReminder();
         const clickCount = clicks.length, closeCount = bindings.length;

@@ -218,6 +218,8 @@ window.modHubConfirm = function(options) {
                 e.preventDefault();
                 closeWith(false);
             } else if (e.key === 'Enter') {
+                if (e.defaultPrevented || (e.target?.closest?.('button, a, input, select, textarea, summary, [contenteditable="true"]')
+                    && e.target.closest('.modhub-modal-dialog') === dialog)) return;
                 e.preventDefault();
                 if (canConfirm()) closeWith(getConfirmResult());
             }

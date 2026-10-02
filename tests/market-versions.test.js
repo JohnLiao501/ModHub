@@ -87,6 +87,24 @@ module.exports = async function() {
         assert.equal(requests, 2, '格式支持升级后不得等旧缓存六小时过期');
     }
     {
+        const { versions } = loadVersions();
+        const mod = { id: 'universal-combat-zed-fix', name: '战斗美化修复', bootNames: ['通用战斗美化-zed修复'],
+            githubUrl: 'https://github.com/Zed660033/mysterious', version: '9.26' };
+        const names = ['Z-outdate-UCB-zedfix-1.0.0.zip', 'Z-outdate-UCB-zedfix-1.0.1.zip',
+            'Z-outdate-UCB-zedfix-1.0.2.zip', 'UCB-zedfix-1.0.3.zip'];
+        const candidates = versions.buildCandidates(mod, [{ tagName: '9.26', name: '9.26', version: '9.26',
+            htmlUrl: `${mod.githubUrl}/releases/tag/9.26`, publishedAt: '2026-09-26T00:00:00Z',
+            assets: names.map(name => ({ name, size: 100, downloadUrl: `${mod.githubUrl}/releases/download/9.26/${name}` })) }]);
+        assert.deepEqual(Array.from(candidates, item => item.assetName), ['UCB-zedfix-1.0.3.zip'], '作者标记过期的三个旧包不得进入历史安装候选');
+        assert.equal(candidates[0].version, '1.0.3', '安装包版本必须优先于日期形式的发布标题、Tag及索引版号');
+        assert.deepEqual(Array.from(candidates[0].assets, item => item.name), ['UCB-zedfix-1.0.3.zip']);
+        assert.equal(candidates[0].compatibility.evidence, 'unknown', '模组版号不能误识别成游戏适配证据');
+        assert.equal(versions.getLatestGameCandidate(mod, candidates), null, '没有游戏适配证据不能冒充当前游戏的兼容候选');
+        const ranked = versions.rankCandidates(mod, candidates);
+        assert.equal(ranked.candidates[0].version, '1.0.3');
+        assert.equal(ranked.recommendedKey, '', '普通选版仍需用户核对未声明适配的安装包');
+    }
+    {
         const { sb, versions, calls } = loadVersions();
         sb.StartConfig.version = 'v0.5.10.12-cn+test';
         assert.equal(versions.getGameVersion(), '0.5.10.12', '版本比较必须保留第四段并去除版本后缀');
@@ -177,6 +195,12 @@ module.exports = async function() {
         assert.equal(conflicts[0].compatibility.status, 'incompatible', '声明不匹配必须优先于文件名提示');
         assert.equal(versions.rankCandidates(baseMod, conflicts).recommendedKey, '');
         assert.equal(versions.getCandidateStatus(conflicts[0]).tone, 'red', '红色风险只用于明确的作者支持范围不符');
+        const mixedEvidence = versions.buildCandidates(baseMod, [release('1.0', [asset('Example-v1.0.zip')], declaration),
+            release('2.0', [asset('Example-v2.0-DoL-0.5.10.12.zip')]), release('3.0', [asset('Example-v3.0-DoL-0.5.11.0.zip')])]);
+        assert.equal(versions.getLatestGameCandidate(baseMod, mixedEvidence).version, '2.0', '更新检测先排除其他游戏分支，再比较最高模组版本，不因证据等级推荐旧版');
+        assert.equal(versions.rankCandidates(baseMod, mixedEvidence, { updateOnly: true, localVersion: '1.0' }).recommendedKey,
+            mixedEvidence.find(candidate => candidate.version === '2.0').candidateKey);
+        assert.equal(versions.getLatestGameCandidate(neutralMod, variants), null, '多个语言或型号仍应留给用户选择');
         const mismatched = versions.buildCandidates(baseMod, [release('3.0', [asset('Example-v3.0-DoL-0.5.9.0.zip')]),
             release('2.0', [asset('Example-v2.0.zip')])]);
         const referenceMismatch = mismatched.find(candidate => candidate.version === '3.0');
@@ -231,11 +255,11 @@ module.exports = async function() {
             releases: [release('1.0', [asset('Example-v1.0.zip')])] });
         sb.fetch = async url => {
             calls++;
+            if (fail) throw new Error('模拟离线');
             assert.ok(String(url).includes('/mod-releases?'));
             assert.equal(new URL(url).origin, new URL(sb.modHubMarket.RELEASE_WORKER_API_BASE).origin,
                 '目录镜像可返回索引，但历史请求必须使用真实 Worker API，避免本地游戏收到无跨域响应头的 404');
             const page = Number(new URL(url).searchParams.get('page'));
-            if (fail) throw new Error('模拟离线');
             return { ok: true, json: async () => responseFor(baseMod, page) };
         };
         await versions.fetchReleases(baseMod);
@@ -279,6 +303,197 @@ module.exports = async function() {
         sb.modHubMarket.isWithdrawn = () => false;
         sb.modHubMarket.hasCommunityReleaseSource = () => false;
         await assert.rejects(versions.fetchReleases({ ...baseMod, catalogSource: 'community' }), error => error.code === 'MANUAL_SOURCE', '社区手动来源不能变成自动历史下载');
+    }
+
+    {
+        const valid = () => ({ schemaVersion: 1, id: baseMod.id, sourceUrl: baseMod.githubUrl, page: 1,
+            hasMore: false, fetchedAt: new Date().toISOString(), communityRevision: 0, releases: [release('1.0', [asset('Example-v1.0.zip')])] });
+        for (const stage of ['headers', 'body', 'error-body']) {
+            for (const supportsAbort of [true, false]) {
+                const { sb, versions } = loadVersions();
+                sb.modHubMarket.getCommunityRevision = () => 0;
+                sb.modHubMarket.hasCommunityReleaseSource = () => true;
+                sb.AbortController = supportsAbort ? AbortController : undefined;
+                const timers = new Map(), writes = [];
+                sb.setTimeout = (callback, delay) => { timers.set(1, { callback, delay }); return 1; };
+                sb.clearTimeout = id => timers.delete(id);
+                sb.localStorage.setItem = (key, value) => writes.push([key, value]);
+                let finish, requestSignal;
+                const delayed = new Promise(resolve => { finish = resolve; });
+                sb.fetch = async (_, options) => {
+                    requestSignal = options.signal;
+                    return stage === 'headers' ? delayed : { ok: stage !== 'error-body', status: 502, json: () => delayed };
+                };
+                const pending = versions.fetchReleases({ ...baseMod, catalogSource: 'community', autoInstall: true });
+                const timer = timers.get(1);
+                assert.equal(timer.delay, 20000, '前端必须允许 Worker 的 15 秒上游查询完成并保留网络往返时间');
+                for (let index = 0; index < 10; index++) await Promise.resolve();
+                timer.callback();
+                await assert.rejects(pending, error => error.code === 'RELEASE_TIMEOUT' && error.name === 'TimeoutError'
+                    && /20 秒/.test(error.message), `${stage} 等待必须有明确上限，不能透出无原因的 AbortError`);
+                assert.equal(timers.size, 0, '超时后应清理计时器');
+                if (supportsAbort) {
+                    assert.equal(requestSignal.aborted, true, '支持取消时同时停止实际网络请求');
+                    assert.equal(requestSignal.reason.code, 'RELEASE_TIMEOUT');
+                }
+                finish(stage === 'headers' ? { ok: true, json: async () => valid() } : valid());
+                await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+                assert.equal(writes.length, 0, '超时后迟到的响应不得污染历史缓存');
+            }
+        }
+        const { sb, versions } = loadVersions();
+        sb.modHubMarket.getCommunityRevision = () => 0;
+        sb.AbortController = AbortController;
+        const timers = new Map();
+        sb.setTimeout = callback => { timers.set(1, callback); return 1; };
+        sb.clearTimeout = id => timers.delete(id);
+        sb.fetch = async () => ({ ok: true, json: async () => valid() });
+        await versions.fetchReleases(baseMod);
+        let requestSignal;
+        sb.fetch = async (_, options) => { requestSignal = options.signal; return { ok: true, json: () => new Promise(() => {}) }; };
+        const timedOut = versions.fetchReleases(baseMod, { useCache: false });
+        timers.get(1)();
+        const fallback = await timedOut;
+        assert.equal(fallback.fromCache, true);
+        assert.equal(fallback.stale, true, '请求超时可回退经来源核验的旧缓存');
+        const cancellation = new AbortController();
+        const canceled = versions.fetchReleases(baseMod, { useCache: false, signal: cancellation.signal });
+        cancellation.abort();
+        await assert.rejects(canceled, error => error.name === 'AbortError' && error.code === 'ABORT_ERR', '用户取消必须结束等待且不得改为缓存成功');
+        assert.equal(requestSignal.aborted, true);
+        assert.equal(timers.size, 0, '用户取消后应清理计时器');
+        await assert.rejects(versions.fetchReleases(baseMod, { signal: cancellation.signal }), error => error.code === 'ABORT_ERR', '已有新鲜缓存也不能越过用户取消');
+        sb.AbortController = undefined;
+        const oldBrowserCancellation = new AbortController();
+        const oldBrowserRequest = versions.fetchReleases(baseMod, { useCache: false, signal: oldBrowserCancellation.signal });
+        oldBrowserCancellation.abort();
+        await assert.rejects(oldBrowserRequest, error => error.code === 'ABORT_ERR', '缺少内部 AbortController 时仍须立即结束用户取消的等待');
+    }
+
+    {
+        for (const action of ['timeout', 'cancel']) {
+            for (const supportsAbort of [true, false]) {
+                const { sb, versions } = loadVersions();
+                sb.AbortController = supportsAbort ? AbortController : undefined;
+                const timers = new Map();
+                let timerId = 0, directSignal, calls = 0, writes = 0;
+                sb.setTimeout = (callback, delay) => { timers.set(++timerId, { callback, delay }); return timerId; };
+                sb.clearTimeout = id => timers.delete(id);
+                sb.localStorage.setItem = () => { writes++; };
+                sb.fetch = async (url, options) => {
+                    calls++;
+                    if (!String(url).startsWith('https://api.github.com/')) throw new Error('模拟 Worker 连接失败');
+                    directSignal = options.signal;
+                    return { ok: true, json: () => new Promise(() => {}) };
+                };
+                const cancellation = new AbortController();
+                const pending = versions.fetchReleases(baseMod, { signal: cancellation.signal });
+                for (let index = 0; index < 10; index++) await Promise.resolve();
+                assert.equal(calls, 2);
+                assert.equal(timers.size, 1, '进入直连前应清理 Worker 等待计时器');
+                const timer = [...timers.values()][0];
+                assert.equal(timer.delay, 10000, '历史直连包含响应体的等待上限为 10 秒，合计最多 30 秒');
+                if (action === 'timeout') timer.callback();
+                else cancellation.abort();
+                await assert.rejects(pending, error => action === 'timeout'
+                    ? error.code === 'RELEASE_TIMEOUT' && /GitHub.*10 秒/.test(error.message)
+                    : error.code === 'ABORT_ERR', '直连也必须支持超时与用户取消');
+                assert.equal(timers.size, 0);
+                assert.equal(writes, 0);
+                if (supportsAbort) assert.equal(directSignal.aborted, true);
+            }
+        }
+        for (const status of [403, 503]) {
+            const { sb, versions } = loadVersions();
+            sb.modHubMarket.getCommunityRevision = () => 0;
+            let timer, calls = 0;
+            sb.setTimeout = callback => { timer = callback; return 1; };
+            sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, id: baseMod.id, sourceUrl: baseMod.githubUrl,
+                page: 1, hasMore: false, communityRevision: 0, fetchedAt: new Date().toISOString(), releases: [] }) });
+            await versions.fetchReleases(baseMod);
+            sb.fetch = async () => { calls++; return { ok: false, status, json: () => new Promise(() => {}) }; };
+            const pending = versions.fetchReleases(baseMod, { useCache: false });
+            for (let index = 0; index < 10; index++) await Promise.resolve();
+            timer();
+            await assert.rejects(pending, error => error.code === 'RELEASE_TIMEOUT' && error.status === status,
+                '已收到拒绝或无法核验响应时，错误体停滞不能借超时改名绕过来源限制');
+            assert.equal(calls, 1, '安全错误既不回退缓存，也不直连');
+        }
+    }
+
+    {
+        const rawRelease = (version, assets, tag = `v${version}`) => ({ tag_name: tag, name: version,
+            published_at: '2026-09-30T00:00:00Z', assets: assets.map(item => ({ name: item.name, size: item.size,
+                browser_download_url: item.downloadUrl.replace(/\/download\/[^/]+\//, `/download/${tag}/`) })) });
+        const { sb, versions } = loadVersions();
+        sb.modHubMarket.getCommunityRevision = () => 0;
+        const calls = [];
+        const current = rawRelease('2.0', [asset('Example-v2.0-DoL-0.5.10.12.modpack'), asset('Other-v9.0.zip')]);
+        sb.fetch = async (url, options) => {
+            calls.push(url);
+            if (!String(url).startsWith('https://api.github.com/')) throw new Error('模拟 Worker 连接失败');
+            assert.equal(new URL(url).searchParams.get('page'), '2');
+            assert.equal(new URL(url).searchParams.get('per_page'), '20');
+            assert.equal(options.headers.Accept, 'application/vnd.github+json');
+            return { ok: true, headers: { get: () => '<https://api.github.com/repos/owner/example/releases?page=3>; rel="next"' }, json: async () => [
+                current, { ...current, tag_name: 'draft', draft: true }, { ...current, prerelease: true },
+                rawRelease('3.0', [asset('Example-v3.0.zip', { downloadUrl: 'https://github.com/Owner/Other/releases/download/v3/Example-v3.0.zip' })]),
+                rawRelease('4.0', [asset('Unrelated-v4.0.zip')]) ] };
+        };
+        const direct = await versions.fetchReleases({ ...baseMod, sharedRepository: true }, { page: 2 });
+        assert.equal(direct.fromGithub, true);
+        assert.equal(direct.hasMore, true);
+        assert.equal(direct.releases.length, 1, '直连历史排除草稿、预发布、异仓库附件与其他共享产品');
+        assert.deepEqual(Array.from(versions.buildCandidates({ ...baseMod, sharedRepository: true }, direct), item => item.version), ['2.0']);
+        assert.equal(calls.length, 2, 'Worker 网络错误应回退同仓库的历史分页接口');
+        const reused = await versions.fetchReleases({ ...baseMod, sharedRepository: true }, { page: 2, useCache: false });
+        assert.equal(reused.stale, true);
+        assert.equal(calls.length, 3, '同来源成功缓存优先于再次直连');
+
+        const pinned = { ...baseMod, githubUrl: `${baseMod.githubUrl}/releases/download/main/Example-v1.0.zip`,
+            releaseCompatibility: [{ releaseTag: 'v0.9', assetName: 'Example-v0.9.zip', gameVersionRange: '^0.5.10.12',
+                evidenceUrl: `${baseMod.githubUrl}/releases/tag/v0.9`, dependencies: [{ id: 'old-framework' }] }] };
+        const pinnedCalls = [];
+        sb.fetch = async url => {
+            if (!String(url).startsWith('https://api.github.com/')) throw new Error('模拟 Worker 连接失败');
+            pinnedCalls.push(url);
+            const tag = decodeURIComponent(new URL(url).pathname.split('/').pop());
+            assert.ok(['main', 'v0.9'].includes(tag), '固定渠道只查询自身与审核声明过的历史标签');
+            return { ok: true, json: async () => rawRelease(tag === 'main' ? '1.0' : '0.9',
+                [asset(tag === 'main' ? 'Example-v1.0.zip' : 'Example-v0.9.zip'), asset('Other-v9.0.zip')], tag) };
+        };
+        const history = await versions.fetchReleases(pinned);
+        assert.equal(pinnedCalls.length, 2);
+        assert.equal(history.releases.length, 2);
+        assert.equal(history.releases[0].assets.length, 1, '固定附件渠道不能混入同标签其他产品');
+        const old = versions.buildCandidates(pinned, history).find(item => item.version === '0.9');
+        assert.equal(old.compatibility.evidence, 'declaration');
+        assert.equal(old.dependencies[0].id, 'old-framework', '直连回退保留历史标签的适配声明与版本专属前置');
+
+        for (const status of [400, 401, 403, 404, 409, 503]) {
+            const loaded = loadVersions();
+            let requests = 0;
+            loaded.sb.fetch = async () => { requests++; return { ok: false, status, json: async () => ({
+                code: status === 503 ? 'CATALOG_UNAVAILABLE' : 'RELEASE_UPSTREAM_FAILED', error: '模拟来源核验失败' }) }; };
+            await assert.rejects(loaded.versions.fetchReleases(baseMod), /模拟来源核验失败/);
+            assert.equal(requests, 1, '来源或审核错误禁止用 GitHub 绕过');
+        }
+        for (const status of [500, 502, 503]) {
+            const loaded = loadVersions();
+            loaded.sb.modHubMarket.getCommunityRevision = () => 0;
+            let requests = 0;
+            loaded.sb.fetch = async url => { requests++; return String(url).startsWith('https://api.github.com/')
+                ? { ok: true, json: async () => [current] }
+                : { ok: false, status, json: async () => ({ code: 'RELEASE_UPSTREAM_FAILED', error: '模拟上游服务失败' }) }; };
+            assert.equal((await loaded.versions.fetchReleases(baseMod)).fromGithub, true);
+            assert.equal(requests, 2, '已明确的临时上游服务错误允许历史直连回退');
+        }
+        const community = loadVersions();
+        community.sb.modHubMarket.hasCommunityReleaseSource = () => true;
+        let communityCalls = 0;
+        community.sb.fetch = async () => { communityCalls++; throw new Error('模拟 Worker 连接失败'); };
+        await assert.rejects(community.versions.fetchReleases({ ...baseMod, catalogSource: 'community', autoInstall: true }), /模拟 Worker 连接失败/);
+        assert.equal(communityCalls, 1, '社区模组仍须经过 Worker 当前审核，不能直连绕过撤回');
     }
 
     {

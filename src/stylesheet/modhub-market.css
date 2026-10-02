@@ -940,6 +940,63 @@
     padding: 2px;
 }
 
+.modhub-version-context {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-group {
+    margin: 8px 0;
+    min-width: 0;
+}
+
+.modhub-version-group-summary {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px 8px;
+    min-width: 0;
+    min-height: 32px;
+    padding: 8px 10px;
+    border: 1px solid var(--600, #444);
+    background: var(--800, #222);
+    box-sizing: border-box;
+    list-style: none;
+    cursor: pointer;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-group-summary::-webkit-details-marker {
+    display: none;
+}
+
+.modhub-version-group-summary::before {
+    content: '';
+    flex-shrink: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--gold, #d4af37);
+}
+
+.modhub-version-group[open] > .modhub-version-group-summary::before {
+    transform: rotate(90deg);
+}
+
+.modhub-version-group-summary > strong {
+    min-width: 0;
+    flex: 1 1 160px;
+}
+
+.modhub-version-group-summary:hover,
+.modhub-version-group-summary:focus-visible,
+.modhub-version-list:focus-visible {
+    outline: 1px solid var(--gold, #d4af37);
+    outline-offset: -1px;
+}
+
 .modhub-version-option {
     display: flex;
     align-items: flex-start;
@@ -957,6 +1014,12 @@
 .modhub-version-option > input {
     flex-shrink: 0;
     margin: 4px 0 0;
+    accent-color: var(--gold, #d4af37);
+}
+
+.modhub-version-option > input:focus {
+    outline: none !important;
+    box-shadow: none !important;
 }
 
 .modhub-version-option > span,
@@ -1001,6 +1064,7 @@
     font-weight: 600;
     line-height: 1.35;
     overflow-wrap: anywhere;
+    color: var(--gold, #d4af37);
 }
 
 .modhub-version-badge {

@@ -4,7 +4,8 @@
 
     const MODHUB_HISTORY_CACHE_PREFIX = 'modhub_market_history_v1_';
     const MODHUB_HISTORY_CACHE_TTL = 6 * 60 * 60 * 1000;
-    const MODHUB_HISTORY_TIMEOUT = 10000;
+    // Worker 的上游查询最多等待 15 秒，为往返与目录核验保留时间。
+    const MODHUB_HISTORY_TIMEOUT = 20000;
 
     function normalizeGameVersion(value) {
         if (typeof value !== 'string') return '';
@@ -137,11 +138,105 @@
         });
     }
 
+    async function requestHistoryJson(url, { signal, headers, timeoutMs = MODHUB_HISTORY_TIMEOUT, service = '历史发布服务' } = {}) {
+        if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+        const controller = typeof AbortController === 'function' ? new AbortController() : null;
+        let rejectRequest;
+        let responseStatus;
+        const stopped = new Promise((_, reject) => { rejectRequest = reject; });
+        const abort = () => {
+            const error = Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+            rejectRequest(error);
+            controller?.abort(error);
+        };
+        signal?.addEventListener?.('abort', abort, { once: true });
+        const timeout = setTimeout(() => {
+            const error = Object.assign(historyError(`${service}在 ${timeoutMs / 1000} 秒内未完成响应，请重试版本列表`, 'RELEASE_TIMEOUT', responseStatus), { name: 'TimeoutError' });
+            rejectRequest(error);
+            controller?.abort(error);
+        }, timeoutMs);
+        try {
+            // 等待上限覆盖响应体；旧浏览器或迟到的请求也不能持续等待或写入缓存。
+            return await Promise.race([stopped, (async () => {
+                const response = await fetch(String(url), { signal: controller?.signal || signal, ...(headers ? { headers } : {}) });
+                if (!response.ok) responseStatus = response.status;
+                if (!response.ok) {
+                    let failure = null;
+                    try { failure = await response.json(); } catch (_) {}
+                    throw historyError(failure?.error || failure?.message || `${service}暂不可用（HTTP ${response.status}）`, failure?.code || 'RELEASE_UPSTREAM_FAILED', response.status);
+                }
+                try { return { data: await response.json(), response }; } catch (error) {
+                    if (error?.name === 'SyntaxError') throw historyError('历史发布数据格式异常，请稍后重试', 'RELEASE_RESPONSE_INVALID');
+                    throw error;
+                }
+            })()]);
+        } finally {
+            clearTimeout(timeout);
+            signal?.removeEventListener?.('abort', abort);
+        }
+    }
+
+    async function fetchGithubHistory(mod, source, page, signal, communityRevision) {
+        const market = window.modHubMarket;
+        const rules = Array.isArray(mod.releaseCompatibility) ? mod.releaseCompatibility : [];
+        const tags = [...new Set([source.tag, ...rules.map(rule => rule.releaseTag)].filter(Boolean))];
+        const selectedTags = tags.slice((page - 1) * 20, page * 20);
+        const request = path => requestHistoryJson(`https://api.github.com/repos/${source.key}/releases${path}`,
+            { signal, headers: { Accept: 'application/vnd.github+json' }, timeoutMs: 10000, service: 'GitHub 历史发布服务' });
+        let raw, hasMore;
+        if (source.tag) {
+            const responses = await Promise.all([...new Set([source.tag, ...selectedTags])].map(async tag => {
+                try {
+                    const { data } = await request(`/tags/${encodeURIComponent(tag)}`);
+                    if (data?.tag_name !== tag) throw historyError('历史发布标签与目录来源不一致', 'RELEASE_SOURCE_CHANGED');
+                    return data;
+                } catch (error) {
+                    if (error.status === 404 && tag !== source.tag) return null;
+                    throw error;
+                }
+            }));
+            const pinned = responses.find(release => release?.tag_name === source.tag);
+            if (source.assetName && !pinned?.assets?.some(asset => asset.name === source.assetName)) throw historyError('指定模组附件已不存在，请核对作者主页', 'RELEASE_NOT_FOUND', 404);
+            raw = responses.filter(release => selectedTags.includes(release?.tag_name));
+            hasMore = tags.length > page * 20;
+        } else {
+            const { data, response } = await request(`?per_page=20&page=${page}`);
+            if (!Array.isArray(data)) throw historyError('GitHub 历史发布数据格式异常，请稍后重试', 'RELEASE_RESPONSE_INVALID');
+            raw = data;
+            hasMore = /<[^>]+>;\s*rel="next"/.test(response.headers?.get?.('Link') || '') || raw.length === 20;
+        }
+        const shared = mod.sharedRepository || market.getMarketMods?.().some(item => item.id !== mod.id && getReleaseSource(item.githubUrl)?.key === source.key);
+        const releases = raw.flatMap(release => {
+            if (!release || release.draft || release.prerelease || typeof release.tag_name !== 'string' || !Array.isArray(release.assets)) return [];
+            const reviewed = rules.filter(rule => rule.releaseTag === release.tag_name);
+            const general = reviewed.find(rule => !rule.assetName);
+            const declaration = rule => ({ gameVersionRange: rule.gameVersionRange, evidenceUrl: rule.evidenceUrl || '' });
+            const normalized = { tagName: release.tag_name, name: typeof release.name === 'string' ? release.name : release.tag_name,
+                htmlUrl: `https://github.com/${source.key}/releases/tag/${encodeURIComponent(release.tag_name)}`,
+                publishedAt: release.published_at || null, assets: [], ...(general ? { compatibility: declaration(general) } : {}) };
+            normalized.assets = release.assets.flatMap(asset => {
+                const rule = reviewed.find(item => item.assetName === asset?.name);
+                const value = { name: asset?.name, size: asset?.size, downloadUrl: asset?.browser_download_url,
+                    digest: typeof asset?.digest === 'string' ? asset.digest : '', ...(rule ? { compatibility: declaration(rule) } : {}),
+                    ...(Array.isArray(rule?.dependencies) ? { dependencies: rule.dependencies } : {}) };
+                return validHistoricalRelease({ ...normalized, assets: [value] }, mod, source) ? [value] : [];
+            });
+            const plan = market.buildReleaseAssetPlan(normalized.assets, '', { ...mod, sharedRepository: Boolean(shared) }, { preserveVersions: true });
+            if (!plan.candidates?.length) return [];
+            normalized.assets = plan.availableAssets;
+            const dependencyRule = general || (normalized.assets.length === 1 && reviewed.find(rule => rule.assetName === normalized.assets[0].name));
+            if (Array.isArray(dependencyRule?.dependencies)) normalized.dependencies = dependencyRule.dependencies;
+            return [normalized];
+        });
+        return { schemaVersion: 1, id: mod.id, sourceUrl: normalizeSource(mod.githubUrl), page, hasMore, communityRevision,
+            fetchedAt: new Date().toISOString(), stale: false, fromGithub: true, releases };
+    }
+
     async function fetchReleases(mod, { page = 1, signal, useCache = true } = {}) {
         const market = window.modHubMarket;
         if (!mod?.id || !Number.isSafeInteger(page) || page < 1) throw historyError('无法识别模组历史发布请求', 'INVALID_RELEASE_REQUEST');
         if (market?.isWithdrawn?.(mod)) throw historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE');
-        if (mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) throw historyError('该社区模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE');
+        if (mod.autoInstall === false || mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) throw historyError('该模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE');
         const sourceUrl = normalizeSource(mod.githubUrl);
         const source = getReleaseSource(sourceUrl);
         if (!sourceUrl || !source) throw historyError('该模组没有可用的发布来源', 'MANUAL_SOURCE');
@@ -161,47 +256,35 @@
             && (!Number.isSafeInteger(communityRevision) || data.communityRevision === communityRevision)
             && Array.isArray(data.releases) && data.releases.every(release => validHistoricalRelease(release, mod, source));
         if (cached?.signature !== signature || !Number.isFinite(cached?.timestamp) || !validResponse(cached?.data)) cached = null;
-        if (signal?.aborted) throw historyError('已取消获取历史版本', 'ABORT_ERR');
+        if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
         if (useCache && cached && !cached.data.stale && Date.now() - cached.timestamp < MODHUB_HISTORY_CACHE_TTL) return { ...cached.data, fromCache: true };
         const url = new URL('/mod-releases', base.origin);
         url.searchParams.set('id', mod.id);
         url.searchParams.set('page', String(page));
-        const controller = typeof AbortController === 'function' ? new AbortController() : null;
-        const abort = () => controller?.abort();
-        signal?.addEventListener?.('abort', abort, { once: true });
-        const timeout = controller ? setTimeout(() => controller.abort(), MODHUB_HISTORY_TIMEOUT) : null;
+        let data;
         try {
-            const response = await fetch(url.toString(), { signal: controller?.signal || signal });
-            if (!response.ok) {
-                let failure = null;
-                try { failure = await response.json(); } catch (_) {}
-                throw historyError(failure?.error || `历史发布服务暂不可用（HTTP ${response.status}）`, failure?.code || 'RELEASE_UPSTREAM_FAILED', response.status);
-            }
-            let data;
-            try { data = await response.json(); } catch (error) {
-                if (error?.name === 'SyntaxError') throw historyError('历史发布数据格式异常，请稍后重试', 'RELEASE_RESPONSE_INVALID');
-                throw error;
-            }
-            if (signal?.aborted) throw historyError('已取消获取历史版本', 'ABORT_ERR');
+            ({ data } = await requestHistoryJson(url, { signal }));
             if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
-            const fetchedAt = Math.min(Date.now(), Date.parse(data.fetchedAt));
-            data = { ...data, stale: Boolean(data.stale || Date.now() - fetchedAt >= MODHUB_HISTORY_CACHE_TTL) };
-            try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
-            return data;
         } catch (error) {
-            if (signal?.aborted) throw error;
+            if (signal?.aborted || error?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
             const unsafe = ['INVALID_RELEASE_REQUEST', 'MOD_RELEASES_UNAVAILABLE', 'MANUAL_SOURCE', 'RELEASE_NOT_FOUND', 'RELEASE_SOURCE_CHANGED', 'RELEASE_RESPONSE_INVALID', 'CATALOG_UNAVAILABLE'].includes(error?.code)
-                || [400, 401, 403, 404, 409, 503].includes(error?.status);
+                || [400, 401, 403, 404, 409].includes(error?.status)
+                || error?.status === 503 && error?.code !== 'RELEASE_UPSTREAM_FAILED';
             if (unsafe) {
                 try { localStorage.removeItem(cacheKey); } catch (_) {}
                 throw error;
             }
             if (cached) return { ...cached.data, fromCache: true, stale: true };
-            throw error;
-        } finally {
-            if (timeout !== null) clearTimeout(timeout);
-            signal?.removeEventListener?.('abort', abort);
+            if (mod.catalogSource === 'community') throw error;
+            data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
+            if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
         }
+        if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+        if (market.isWithdrawn?.(mod)) throw historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE');
+        const fetchedAt = Math.min(Date.now(), Date.parse(data.fetchedAt));
+        data = { ...data, stale: Boolean(data.stale || Date.now() - fetchedAt >= MODHUB_HISTORY_CACHE_TTL) };
+        try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
+        return data;
     }
 
     function candidateCompatibility(asset, release, gameVersion) {
@@ -277,6 +360,19 @@
         return candidates;
     }
 
+    function getLatestGameCandidate(mod, candidates) {
+        const market = window.modHubMarket;
+        const gameVersion = getGameVersion();
+        if (!gameVersion || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
+        return [...candidates].filter(candidate => {
+            const info = candidate.compatibility || {};
+            return normalizeGameVersion(candidate.version) && !info.referenceMismatch && info.status !== 'incompatible'
+                && (info.evidence === 'declaration' && info.status === 'compatible'
+                    || info.evidence === 'filename' && info.targetGameVersion && market.compareVersions(info.targetGameVersion, gameVersion) === 0);
+        }).sort((a, b) => market.compareVersions(b.version, a.version)
+            || String(b.updateDate).localeCompare(String(a.updateDate)))[0] || null;
+    }
+
     function rankCandidates(mod, candidates, { updateOnly = false, localVersion = mod?._matchedLocal?.version || '' } = {}) {
         const market = window.modHubMarket;
         const gameVersion = getGameVersion();
@@ -291,9 +387,9 @@
         const sorted = [...candidates].sort((a, b) => rank(a) - rank(b)
             || market.compareVersions(b.version, a.version) || String(b.updateDate).localeCompare(String(a.updateDate)));
         const series = new Set(sorted.map(candidate => candidate.seriesKey));
-        const eligible = sorted.filter(candidate => rank(candidate) < 2
-            && (!updateOnly || Boolean(localVersion && candidate.version) && market.compareVersions(candidate.version, localVersion) > 0));
-        return { candidates: sorted, recommendedKey: series.size === 1 ? eligible[0]?.candidateKey || '' : '', gameVersion };
+        const recommended = updateOnly ? getLatestGameCandidate(mod, sorted) : series.size === 1 ? sorted.find(candidate => rank(candidate) < 2) : null;
+        return { candidates: sorted, recommendedKey: recommended
+            && (!updateOnly || localVersion && market.compareVersions(recommended.version, localVersion) > 0) ? recommended.candidateKey : '', gameVersion };
     }
 
     function renderCandidateOptions(candidates, recommendedKey = '') {
@@ -306,5 +402,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, buildCandidates, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, buildCandidates, getLatestGameCandidate, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

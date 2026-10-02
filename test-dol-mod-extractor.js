@@ -4,6 +4,7 @@ const path = require('node:path');
 
 async function main() {
   const source = await readFile(path.join(__dirname, 'dol-mod-extractor.js'), 'utf8');
+  assert.deepEqual(await readFile(path.join(__dirname, 'dolmod-site', 'dist', 'dol-mod-extractor.js')), Buffer.from(source), '根目录与网站提取器副本必须逐字节相同');
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories,
     modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName } = await import(moduleUrl);
@@ -283,6 +284,39 @@ async function main() {
     assert.deepEqual(sharedNative.assets.map(item => item.name), ['Second-v2.0.modpack.crypt'], '加密包尾缀不得破坏共享仓库产品隔离');
     responses.set(`${apiUrl}/tags/unsupported`, { tag_name: 'unsupported', assets: [{ name: 'Installer.exe', browser_download_url: 'https://example.test/installer.exe' }] });
     assert.equal((await fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/unsupported` })).assetUrl, null, '不支持的附件不得成为默认下载');
+
+    const ucbIdentity = catalog.mods.find(mod => mod.id === 'universal-combat-zed-fix');
+    const ucbUrl = `https://github.com/${ucbIdentity.repositoryKeys[0]}`;
+    const ucbMod = { ...ucbIdentity, githubUrl: ucbUrl, version: '9.26' };
+    const ucbApi = `https://api.github.com/repos/${ucbIdentity.repositoryKeys[0]}/releases/latest`;
+    const oldCacheKey = `dol_mod_release_v2_${ucbIdentity.repositoryKeys[0]}/latest//${encodeURIComponent(JSON.stringify([ucbMod.id, false, ucbMod.bootNames, [], 'modpack-v1']))}`;
+    cache.set(oldCacheKey, JSON.stringify({ data: { version: '9.26', tagName: '9.26' }, timestamp: Date.now() }));
+    responses.set(ucbApi, { tag_name: '9.26', name: 'UCB-ZedFix', published_at: '2024-09-26T13:10:50Z', assets: [
+      { name: 'UCB-zedfix-1.0.3.zip', browser_download_url: `${ucbUrl}/releases/download/9.26/UCB-zedfix-1.0.3.zip` },
+      ...['1.0.0', '1.0.1', '1.0.2'].map(version => ({ name: `Z-outdate-UCB-zedfix-${version}.zip`,
+        browser_download_url: `${ucbUrl}/releases/download/9.26/Z-outdate-UCB-zedfix-${version}.zip` })),
+    ] });
+    const ucb = await fetchModRelease(ucbMod);
+    assert.equal(ucb.version, '1.0.3', '日期发布标签不能覆盖唯一主包中的模组版本');
+    assert.equal(ucb.tagName, '9.26', '实际发布标签仍用于来源与下载链接');
+    assert.equal(ucb.updateDate, '2024-09-26');
+    assert.deepEqual(ucb.assets.map(asset => asset.name), ['UCB-zedfix-1.0.3.zip'], '明确过时附件不能影响主包与版号选择');
+    assert.equal(ucb.fromCache, undefined, '新规则不得复用旧日期版号缓存');
+    assert.ok(requests.includes(ucbApi), '旧缓存存在时仍须重新请求实际发布');
+    assert.equal((await fetchModRelease(ucbMod)).fromCache, true, '修正后的实际包版本仍可缓存');
+
+    for (const [tag, name, assets, expected] of [
+      ['date', 'UCB-ZedFix', ['Example-DoL-v0.5.12.13-v2.1.zip'], '2.1'],
+      ['v1.0', 'v2.0', ['Example.zip'], '2.0'],
+      ['v1.0', '支持游戏 0.5.12，更新说明', ['Example.zip'], 'v1.0'],
+      ['latest-version', 'v3.0 更新说明', ['Example.zip'], '3.0'],
+      ['ambiguous', 'v4.0', ['First-v1.0.zip', 'Second-v2.0.zip'], '4.0'],
+    ]) {
+      responses.set(`${apiUrl}/tags/${tag}`, { tag_name: tag, name, assets: assets.map(assetName => ({ name: assetName, browser_download_url: `https://example.test/${assetName}` })) });
+      const release = await fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/${tag}` }, { useCache: false });
+      assert.equal(release.version, expected, '唯一主包版号优先，缺失时沿用明确标题与语义标签');
+      if (tag === 'ambiguous') assert.equal(release.assetName, null, '多个主包不能猜选其中一个的版号');
+    }
     console.log('GitHub Release 标签与缓存测试通过');
   } finally {
     global.fetch = originalFetch;
