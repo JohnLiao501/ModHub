@@ -400,7 +400,13 @@ button.modhub-btn-primary:active,
 }
 
 .modhub-header-actions button {
-    flex-shrink: 0;
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: 0;
+    max-width: 100%;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+    box-sizing: border-box;
 }
 
 /* ========== 拖拽排序与指示线 ========== */

@@ -2,7 +2,7 @@
 
 Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 TweeReplacer 补丁架构。
 
-v1.2.2 的适配基线为 [DoL 0.5.12.13 中文发行版](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases/tag/v0.5.12.13-chs-1.0.1a)，该发行版使用 ModLoader 2.101.1。ModHub 的三个界面补丁按该版真实段落建立回归；市场读取实际 `StartConfig.version`，不使用汉化发布标签代替游戏版本。第三方模组与美化仍须按作者声明和实际包体分别核对适配。
+v1.2.3 的适配基线为 [DoL 0.5.12.13 中文发行版](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases/tag/v0.5.12.13-chs-1.0.1a)，该发行版使用 ModLoader 2.101.1。ModHub 的三个界面补丁按该版真实段落建立回归；市场读取实际 `StartConfig.version`，不使用汉化发布标签代替游戏版本。第三方模组与美化仍须按作者声明和实际包体分别核对适配。
 
 ## 下载与安装
 

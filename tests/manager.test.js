@@ -82,7 +82,7 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.2.2', 'boot.json 版本号必须为 1.2.2');
+    assert.equal(bootJson.version, '1.2.3', 'boot.json 版本号必须为 1.2.3');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
