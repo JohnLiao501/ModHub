@@ -460,7 +460,21 @@ export async function modHubFetchModReleases(mod, { page = 1, signal } = {}) {
   const params = new URLSearchParams({ id, page: String(page) });
   const response = await fetch(`${MODHUB_RELEASE_API_BASE}/mod-releases?${params}`, { cache: 'no-cache', signal });
   const payload = await response.json();
-  if (!response.ok) throw Object.assign(new Error(payload.error || '历史发布暂时无法读取'), { code: payload.code, status: response.status });
+  if (!response.ok) {
+    const messages = {
+      RELEASE_UPSTREAM_TIMEOUT: 'GitHub 历史发布服务响应超时，请稍后重试',
+      RELEASE_RATE_LIMITED: 'GitHub 发布查询触发访问限制，请稍后重试',
+      RELEASE_REQUEST_LIMITED: '历史版本查询过于频繁，请在一分钟后重试',
+      RELEASE_UPSTREAM_DENIED: 'GitHub 拒绝访问该发布来源，请通过作者主页核对发布状态',
+    };
+    const message = messages[payload.code] || (/[\u3400-\u9fff]/.test(payload.error || '') ? payload.error : '历史发布暂时无法读取，请稍后重试');
+    const details = payload.details && typeof payload.details === 'object' ? { ...payload.details } : {};
+    if (payload.error && payload.error !== message && !details.message) details.message = String(payload.error).slice(0, 600);
+    for (const [name, header] of [['retryAfter', 'Retry-After'], ['rateLimitRemaining', 'X-RateLimit-Remaining'], ['rateLimitReset', 'X-RateLimit-Reset']]) {
+      if (details[name] == null && response.headers.get(header) != null) details[name] = response.headers.get(header);
+    }
+    throw Object.assign(new Error(message), { code: payload.code, status: response.status, details });
+  }
   const normalizeSource = value => {
     const url = new URL(value);
     url.hash = '';

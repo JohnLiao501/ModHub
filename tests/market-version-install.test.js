@@ -3,38 +3,88 @@ const { assert, createBaseSandbox, createStubElement, loadScripts, loadManager }
 
 const reviewedPlan = fixture => [...fixture.prompts].reverse().find(options => ['请确认安装计划', '请再次核对安装计划'].includes(options.title));
 
-function groupedChoiceDialog(sb, dialog = createStubElement()) {
-    const area = dialog.querySelector('#modHubVersionChoices');
+/** 显式模拟玩家第一次选择历史版本，后续重选仍使用真实默认策略。 */
+function chooseInitialVersion(f, name, candidateKey) {
+    const confirm = f.sb.modHubConfirm;
+    let chosen = false;
+    f.sb.modHubConfirm = async options => {
+        if (!chosen && options.title === `选择【${name}】版本`) {
+            chosen = true; f.prompts.push(options); await f.renderDialog(options);
+            return { selectedKey: candidateKey, manual: true };
+        }
+        return confirm(options);
+    };
+}
+
+/** 保留真实祖先边界，避免将外层分类容器误当作卡片内的交互控件。 */
+function choiceElement(tag, className = '') {
+    const element = createStubElement(tag);
+    element.className = className;
+    element.closest = selector => {
+        const selectors = selector.split(',').map(item => item.trim());
+        for (let node = element; node; node = node.parentNode) {
+            if (selectors.some(item => item.startsWith('.') ? String(node.className || '').split(/\s+/).includes(item.slice(1))
+                : node.tagName === item.toUpperCase())) return node;
+        }
+        return null;
+    };
+    element.contains = target => {
+        for (let node = target; node; node = node.parentNode) if (node === element) return true;
+        return false;
+    };
+    return element;
+}
+
+function groupedChoiceDialog(sb, dialog = createStubElement(), areaSelector = '#modHubVersionChoices') {
+    const area = dialog.querySelector(areaSelector);
     const query = area.querySelector.bind(area);
     const decode = value => value.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
-    let html = '', groups = [], radios = [], labels = [], list = createStubElement();
+    const attribute = (text, name) => decode(text.match(new RegExp(`\\b${name}="([^"]*)"`))?.[1] || '');
+    let html = '', groups = [], radios = [], labels = [], checkboxes = [], selects = [], list = createStubElement();
     Object.defineProperty(area, 'innerHTML', { get: () => html, set(value) {
-        [...groups, ...radios].forEach(node => { node.isConnected = false; });
-        html = value; groups = []; radios = []; labels = []; list = createStubElement();
+        [...groups, ...radios, ...labels, ...checkboxes, ...selects].forEach(node => { node.isConnected = false; });
+        html = value; groups = []; radios = []; labels = []; checkboxes = []; selects = []; list = createStubElement();
         const headers = [...html.matchAll(/<details class="modhub-version-group" data-group-key="([^"]+)"([^>]*)>/g)];
         headers.forEach((match, index) => {
-            const group = createStubElement('details');
+            const group = choiceElement('details', 'modhub-version-group');
             group.dataset.groupKey = decode(match[1]); group.open = /\bopen\b/.test(match[2]); group.isConnected = true;
             const inputs = [];
-            for (const radio of html.slice(match.index + match[0].length, headers[index + 1]?.index).matchAll(/<input type="radio" name="modHubMarketVersion" value="([^"]+)"([^>]*)>/g)) {
-                const input = createStubElement('input'), label = createStubElement('label');
-                input.name = 'modHubMarketVersion'; input.value = decode(radio[1]); input.checked = /\bchecked\b/.test(radio[2]); input.isConnected = true;
+            for (const radio of html.slice(match.index + match[0].length, headers[index + 1]?.index).matchAll(/<input\b[^>]*type="radio"[^>]*>/g)) {
+                const input = choiceElement('input'), label = choiceElement('div', 'modhub-version-option');
+                input.name = 'modHubMarketVersion'; input.value = attribute(radio[0], 'value'); input.checked = /\bchecked\b/.test(radio[0]); input.isConnected = true;
                 input.focus = () => { sb.document.activeElement = input; };
-                label.querySelector = () => input;
+                label.querySelector = selector => ['input', 'input[name="modHubMarketVersion"]', 'input[type="radio"]'].includes(selector) ? input : null;
+                group.appendChild(label); label.appendChild(input); label.isConnected = true;
                 inputs.push(input); radios.push(input); labels.push(label);
             }
-            group.querySelectorAll = () => inputs;
+            group.querySelectorAll = selector => selector === 'input[name="modHubMarketVersion"]' ? inputs : [];
             groups.push(group);
         });
+        for (const match of html.matchAll(/<input\b[^>]*class="modhub-version-optional-input"[^>]*>/g)) {
+            const input = choiceElement('input');
+            input.type = 'checkbox'; input.dataset.key = attribute(match[0], 'data-key'); input.dataset.url = attribute(match[0], 'data-url');
+            input.checked = /\bchecked\b/.test(match[0]); input.disabled = /\bdisabled\b/.test(match[0]); input.isConnected = true;
+            const card = labels.find(label => label.querySelector('input').value === input.dataset.key);
+            if (card) { const wrapper = choiceElement('label', 'modhub-version-optional'); card.appendChild(wrapper); wrapper.appendChild(input); }
+            checkboxes.push(input);
+        }
+        for (const match of html.matchAll(/<select\b([^>]*class="modhub-version-batch-select"[^>]*)>([\s\S]*?)<\/select>/g)) {
+            const select = createStubElement('select');
+            select.dataset.key = attribute(match[1], 'data-key'); select.disabled = /\bdisabled\b/.test(match[1]); select.isConnected = true;
+            select.value = attribute(match[2].match(/<option\b[^>]*\bselected[^>]*>/)?.[0] || '', 'value');
+            selects.push(select);
+        }
     } });
     area.querySelector = selector => selector === '.modhub-version-list' ? list : query(selector);
-    area.querySelectorAll = selector => selector === '.modhub-version-group' ? groups : selector === '.modhub-version-option' ? labels : radios;
-    return { dialog, area, get groups() { return groups; }, get radios() { return radios; }, get list() { return list; } };
+    area.querySelectorAll = selector => selector === '.modhub-version-group' ? groups : selector === '.modhub-version-option' ? labels
+        : selector === 'input[name="modHubMarketVersion"]' ? radios : selector === '.modhub-version-optional-input' ? checkboxes
+            : selector === '.modhub-version-batch-select' ? selects : [];
+    return { dialog, area, get groups() { return groups; }, get cards() { return labels; }, get radios() { return radios; }, get checkboxes() { return checkboxes; }, get selects() { return selects; }, get list() { return list; } };
 }
 
 function fixture(definitions, installed = []) {
     const profiles = new Map(installed.map(boot => [boot.name, { ...boot, bootJson: boot }]));
-    const events = [], prompts = [], alerts = [], preparedCalls = [], progress = new Map();
+    const events = [], prompts = [], alerts = [], preparedCalls = [], importedComponents = [], progress = new Map();
     const mods = definitions.map(definition => ({ id: definition.id, identityId: definition.id, name: definition.id,
         bootNames: [definition.boot?.name || definition.id], dependencies: definition.directoryDependencies || [],
         githubUrl: `https://github.com/ModHubTests/${definition.id}`, version: definition.version || definition.boot?.version || '1.0.0' }));
@@ -57,6 +107,7 @@ function fixture(definitions, installed = []) {
         return compare(version, base) === 0;
     };
     const sb = createBaseSandbox({ AbortController });
+    sb.StartConfig = { version: '0.5.0.0' };
     loadScripts(sb, ['javascript/modhub-dialog.js', 'javascript/modhub-restore.js', 'javascript/modhub-manager.js', 'javascript/modhub-market.js']);
     const runtimeMarket = sb.modHubMarket, offerReload = sb.modHubOfferReload;
     sb.modHubEscapeHtml = value => String(value).replace(/[<>&"]/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[character]));
@@ -94,18 +145,24 @@ function fixture(definitions, installed = []) {
             const definition = byId.get(mod.id);
             if (options.prepareOnly) {
                 events.push(`prepare:${mod.id}`);
-                preparedCalls.push({ id: mod.id, key: options.releaseInfo.candidateKey, remaining: options.maxPreparedBytes });
+                preparedCalls.push({ id: mod.id, key: options.releaseInfo.candidateKey, remaining: options.maxPreparedBytes,
+                    assets: options.releaseInfo.assets.map(asset => asset.name) });
                 if (definition.prepareFailure) { options.onFailure(definition.prepareFailure); return false; }
                 const selected = definition.packages?.[options.releaseInfo.candidateKey] || definition;
-                const boots = selected.boots || [selected.boot || { name: mod.id, version: selected.version || '1.0.0' }];
+                const boots = selected.assetBoots ? options.releaseInfo.assets.map(asset => selected.assetBoots[asset.name])
+                    : selected.boots || [selected.boot || { name: mod.id, version: selected.version || '1.0.0' }];
                 progress.set(mod.name, 'prepared');
-                return { files: [{}], boots, bytes: selected.bytes || 1, releaseInfo: options.releaseInfo };
+                return { files: selected.assetBoots ? options.releaseInfo.assets.map(asset => ({ name: asset.name })) : [{}],
+                    boots, bytes: selected.bytes || 1, releaseInfo: options.releaseInfo };
             }
             assert.ok(options.preparedPackage, '执行必须复用已核验包体');
             events.push(`install:${mod.id}`);
             if (definition.installFailure) return false;
             progress.set(mod.name, 'success');
-            for (const boot of options.preparedPackage.boots) profiles.set(boot.name, { ...boot, bootJson: boot });
+            for (const boot of options.preparedPackage.boots) {
+                if (definition.assetBoots && runtimeMarket.isSameVersion(boot.version, profiles.get(boot.name)?.version)) continue;
+                importedComponents.push(boot.name); profiles.set(boot.name, { ...boot, bootJson: boot });
+            }
             return true;
         }
     };
@@ -121,15 +178,18 @@ function fixture(definitions, installed = []) {
     loadScripts(sb, ['javascript/modhub-market-versions.js']);
     const actualVersions = sb.modHubMarketVersions;
     sb.modHubMarketVersions = {
-        getGameVersion: () => '0.5.0.0', getCandidateStatus: actualVersions.getCandidateStatus,
+        getGameVersion: actualVersions.getGameVersion, getCandidateStatus: actualVersions.getCandidateStatus,
+        getHistoryErrorInfo: actualVersions.getHistoryErrorInfo,
         formatVersionRange: actualVersions.formatVersionRange,
         assessCompatibility: actualVersions.assessCompatibility,
+        getDefaultSelection: actualVersions.getDefaultSelection,
+        getLatestGameCandidate: actualVersions.getLatestGameCandidate,
         fetchReleases: async mod => ({ releases: candidates(mod), page: 1, hasMore: false, stale: Boolean(byId.get(mod.id).stale), fetchedAt: '2026-09-29T00:00:00Z' }),
         buildCandidates: (mod, history) => history.releases,
-        rankCandidates: (mod, releases) => ({ candidates: releases, recommendedKey: releases[0]?.compatibility.status === 'compatible' || releases[0]?.compatibility.evidence === 'filename' ? releases[0].candidateKey : '', gameVersion: '0.5.0.0' })
+        rankCandidates: actualVersions.rankCandidates
     };
     loadScripts(sb, ['javascript/modhub-market-install.js']);
-    return { sb, mods, events, prompts, alerts, profiles, preparedCalls, progress, renderDialog, actualVersions, runtimeMarket, offerReload };
+    return { sb, mods, events, prompts, alerts, profiles, preparedCalls, importedComponents, progress, renderDialog, actualVersions, runtimeMarket, offerReload };
 }
 
 /** 复现当前 ModLoader 的包装缓存、规范名称接口与原生声明别名接口。 */
@@ -169,6 +229,61 @@ function useNativeDependencyRanges(f) {
 }
 
 module.exports = async function () {
+    {
+        const id = 'CardArea';
+        const candidate = version => ({ candidateKey: `${id}:${version}`, seriesKey: id, version,
+            assets: [{ name: `${id}-v${version}.zip`, downloadUrl: `https://example.com/${id}-v${version}.zip`, packageRole: 'main' }],
+            optionalAssets: [{ name: `${id}-audio-v${version}.zip`, downloadUrl: `https://example.com/${id}-audio-v${version}.zip`,
+                packageRole: 'audio', optional: true, bootName: `${id}-audio` }],
+            compatibility: { status: 'compatible', evidence: 'declaration' } });
+        const latest = candidate('1.1.0'), older = candidate('1.0.0');
+        const f = fixture([{ id, candidates: [latest, older] }]);
+        let cardCheckError;
+        f.sb.modHubConfirm = async options => {
+            try {
+                const ui = groupedChoiceDialog(f.sb);
+                await options.onRender(ui.dialog);
+                const cardFor = key => ui.cards.find(card => card.querySelector('input').value === key);
+                const checkboxFor = key => ui.checkboxes.find(input => input.dataset.key === key);
+                const appendTarget = (card, tag, className = '') => {
+                    const target = choiceElement(tag, className); card.appendChild(target); return target;
+                };
+                const clickArea = (key, tag, className = '') => {
+                    const card = cardFor(key), target = tag ? appendTarget(card, tag, className) : card;
+                    assert.equal(target.closest('details'), card.parentNode, '文本与空白点击仍处于真实外层分类容器内');
+                    assert.equal(card.contains(target.closest('details')), false, '外层分类不是卡片内部的交互控件');
+                    card.onclick({ target });
+                    assert.equal(options.customResult().selectedKey, key, '点击版本卡片的非交互区域必须选中对应版本');
+                    assert.equal(options.customResult().manual, true, '点击卡片视为玩家明确选择');
+                    assert.equal(options.canConfirm(), true);
+                };
+                assert.equal(options.customResult().selectedKey, latest.candidateKey);
+                for (const [tag, className] of [['strong', 'modhub-version-number'], ['span', 'modhub-version-meta'], ['span', 'modhub-version-asset-name'], [null, '']]) {
+                    checkboxFor(latest.candidateKey).checked = true; checkboxFor(latest.candidateKey).onchange();
+                    clickArea(older.candidateKey, tag, className);
+                    assert.ok(ui.checkboxes.every(input => !input.checked), '点击卡片换版也必须清除原版本的扩展选择');
+                    assert.equal(checkboxFor(older.candidateKey).disabled, false);
+                    assert.equal(checkboxFor(latest.candidateKey).disabled, true);
+                    clickArea(latest.candidateKey, 'strong', 'modhub-version-number');
+                }
+                checkboxFor(latest.candidateKey).checked = true; checkboxFor(latest.candidateKey).onchange();
+                const other = cardFor(older.candidateKey);
+                const link = appendTarget(other, 'a'), linkText = appendTarget(link, 'span');
+                for (const target of [link, linkText, appendTarget(other, 'button'), checkboxFor(older.candidateKey), checkboxFor(older.candidateKey).parentNode]) {
+                    other.onclick({ target });
+                    assert.equal(options.customResult().selectedKey, latest.candidateKey, '发布说明、按钮与其他版本的扩展控件不能代替主包选版');
+                    assert.equal(checkboxFor(latest.candidateKey).checked, true, '独立交互不能清除已选主包的扩展');
+                }
+                const current = cardFor(latest.candidateKey), extensionText = appendTarget(checkboxFor(latest.candidateKey).parentNode, 'span');
+                current.onclick({ target: extensionText });
+                assert.equal(checkboxFor(latest.candidateKey).checked, true, '当前版本的扩展标签点击不能重选主包并清除扩展');
+                return false;
+            } catch (error) { cardCheckError = error; throw error; }
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false);
+        if (cardCheckError) throw cardCheckError;
+        assert.deepEqual(f.events, [], '取消卡片选版不得下载、写入或重载');
+    }
     for (const targetPage of [2, 3]) {
         const candidates = Array.from({ length: targetPage }, (_, index) => ({ candidateKey: `DetectedPage:${index + 1}`,
             seriesKey: 'DetectedPage', version: index + 1 === targetPage ? '2.0.0' : `1.${index + 1}.0`,
@@ -183,13 +298,13 @@ module.exports = async function () {
         const pages = [];
         f.sb.modHubMarketVersions.fetchReleases = async (mod, options) => {
             pages.push(options.page);
-            assert.ok(options.page <= targetPage, '找到已检测的更新后应停止自动读取，剩余历史由用户选择加载');
-            return { page: options.page, hasMore: true, releases: [candidates[options.page - 1]] };
+            assert.ok(options.page <= targetPage, '读取到最后一页后必须停止分页');
+            return { page: options.page, hasMore: options.page < targetPage, releases: [candidates[options.page - 1]] };
         };
         f.sb.modHubConfirm = async options => {
             const ui = groupedChoiceDialog(f.sb);
             await options.onRender(ui.dialog);
-            assert.deepEqual(pages, Array.from({ length: targetPage }, (_, index) => index + 1), '单次更新必须自动读取到已检测候选所在页');
+            assert.deepEqual(pages, Array.from({ length: targetPage }, (_, index) => index + 1), '单次选版必须自动读完历史，核对全列表中的最新候选');
             assert.equal(ui.groups.length, 1, '同一游戏分支的历史候选继续显示为一个分类');
             assert.equal(ui.groups[0].open, true);
             assert.equal(options.customResult().selectedKey, candidates.at(-1).candidateKey, '第 2 或 3 页的最新版必须成为默认选择');
@@ -212,7 +327,7 @@ module.exports = async function () {
         f.sb.StartConfig = { version: '0.5.0.0' };
         f.sb.modHubMarketVersions.rankCandidates = f.actualVersions.rankCandidates;
         f.sb.modHubMarketVersions.getLatestGameCandidate = f.actualVersions.getLatestGameCandidate;
-        assert.equal(f.actualVersions.rankCandidates(f.mods[0], candidates).recommendedKey, 'EvidenceUpdate:old', '普通排序仍将作者声明证据排在文件名之前');
+        assert.equal(f.actualVersions.rankCandidates(f.mods[0], candidates).recommendedKey, 'EvidenceUpdate:new', '当前游戏匹配候选必须以数值最高版本优先，不因声明证据预选旧版');
         f.sb.modHubConfirm = async options => {
             const ui = groupedChoiceDialog(f.sb);
             await options.onRender(ui.dialog);
@@ -229,19 +344,24 @@ module.exports = async function () {
         const candidate = (key, compatibility, version = '1.0.0') => ({ candidateKey: key, seriesKey: 'Grouped', version,
             assets: [{ name: `${key}.zip`, downloadUrl: `https://example.com/${key}.zip` }], compatibility });
         const choices = [candidate('old', { status: 'unknown', evidence: 'filename', targetGameVersion: '0.4.0.0', referenceMismatch: true }),
-            candidate('range', { status: 'compatible', evidence: 'declaration', gameVersionRange: '>=0.5.0.0 && <0.6.0.0' }),
+            candidate('range', { status: 'compatible', evidence: 'declaration', gameVersionRange: '>=0.5.0.0 && <0.6.0.0' }, '0.9.0'),
             candidate('current', { status: 'unknown', evidence: 'filename', targetGameVersion: '0.5.0.0' }),
             candidate('unknown', { status: 'unknown' }, '')];
         const f = fixture([{ id: 'Grouped', candidates: choices }], [{ name: 'Grouped', version: '1.0.0' }]);
         f.mods[0].name = '<img src=x onerror=bad()> & "模组"';
-        f.sb.modHubMarketVersions.rankCandidates = (mod, releases) => ({ candidates: releases, recommendedKey: 'current', gameVersion: '0.5.0.0' });
-        let completePage;
+        let completePage, completeFinalPage, pageStartedResolve, finalPageStartedResolve;
+        const pageStarted = new Promise(resolve => { pageStartedResolve = resolve; });
+        const finalPageStarted = new Promise(resolve => { finalPageStartedResolve = resolve; });
         f.sb.modHubMarketVersions.fetchReleases = async (mod, options) => options.page >= 2
-            ? new Promise(resolve => { completePage = () => resolve({ releases: [candidate('later', { status: 'unknown', targetGameVersion: '0.6.0.0' }, '<script>版本</script>')], page: options.page, hasMore: options.page === 2 }); })
+            ? new Promise(resolve => {
+                if (options.page === 2) { completePage = () => resolve({ releases: [candidate('later', { status: 'compatible', evidence: 'declaration' }, '2.0.0')], page: 2, hasMore: true }); pageStartedResolve(); }
+                else { completeFinalPage = () => resolve({ releases: [candidate('unsafe-name', { status: 'unknown', targetGameVersion: '0.6.0.0' }, '<script>版本</script>')], page: 3, hasMore: false }); finalPageStartedResolve(); }
+            })
             : { releases: choices, page: 1, hasMore: true };
         f.sb.modHubConfirm = async options => {
             const ui = groupedChoiceDialog(f.sb);
-            await options.onRender(ui.dialog);
+            const ready = options.onRender(ui.dialog);
+            await pageStarted;
             assert.deepEqual(ui.groups.map(group => group.dataset.groupKey).sort(), ['range:>=0.5.0.0 && <0.6.0.0', 'target:0.4.0.0', 'target:0.5.0.0', 'unknown'].sort());
             const findGroup = key => ui.groups.find(group => group.dataset.groupKey === key);
             const selectCurrent = () => { ui.radios.forEach(input => { input.checked = input.value === 'current'; }); ui.radios.find(input => input.value === 'current').onchange(); };
@@ -262,20 +382,19 @@ module.exports = async function () {
             findGroup('target:0.4.0.0').open = true; findGroup('target:0.4.0.0').ontoggle();
             ui.list.scrollTop = 129; ui.dialog.querySelector('.modhub-modal-body').scrollTop = 73;
             ui.radios.find(input => input.value === 'current').focus();
-            const page = ui.area.querySelector('.modhub-version-load-more').onclick();
             assert.equal(options.canConfirm(), false, '读取更早版本期间保持原禁止确认规则');
-            completePage(); await page;
+            completePage(); await finalPageStarted;
             assert.equal(findGroup('target:0.4.0.0').open, true, '分页保留玩家展开的旧游戏分类');
             assert.equal(findGroup('target:0.5.0.0').open, true);
             assert.equal(options.customResult().selectedKey, 'current');
             assert.equal(ui.radios.find(input => input.value === 'current').checked, true);
             assert.equal(ui.list.scrollTop, 129); assert.equal(ui.dialog.querySelector('.modhub-modal-body').scrollTop, 73);
             assert.equal(f.sb.document.activeElement.value, 'current');
-            assert.ok(ui.area.innerHTML.includes('&lt;script&gt;版本&lt;/script&gt;') && !ui.area.innerHTML.includes('<script>'));
+            assert.equal(options.customResult().manual, true, '自动分页完成不能覆盖已明确手选的版本');
             findGroup('target:0.5.0.0').open = false;
-            const delayedTogglePage = ui.area.querySelector('.modhub-version-load-more').onclick();
+            completeFinalPage(); await ready;
             assert.equal(options.customResult().selectedKey, '', '原生折叠事件尚未派发时，重绘也必须清除不可见选择');
-            completePage(); await delayedTogglePage;
+            assert.ok(ui.area.innerHTML.includes('&lt;script&gt;版本&lt;/script&gt;') && !ui.area.innerHTML.includes('<script>'));
             assert.equal(options.canConfirm(), false);
             assert.ok(ui.radios.every(input => !input.checked));
             return false;
@@ -286,7 +405,7 @@ module.exports = async function () {
     {
         const candidates = ['1.0.0', '2.0.0', '0.9.0', '1.0.0-beta.1', '1.0.0-cn', '1.0.0-en'].map(version => ({ candidateKey: `SameVersion:${version}`, version, seriesKey: 'SameVersion',
             assets: [{ name: `SameVersion-${version}.zip` }], compatibility: { status: 'compatible', evidence: 'declaration' } }));
-        const f = fixture([{ id: 'SameVersion', candidates }], [{ name: 'SameVersion', version: '1.0.0' }]);
+        const f = fixture([{ id: 'SameVersion', candidates }], [{ name: 'SameVersion', version: '2.0.0' }]);
         loadScripts(f.sb, ['javascript/modhub-dialog.js']);
         const confirm = f.sb.modHubConfirm, keyHandlers = new Map();
         f.sb.document.addEventListener = (type, handler) => keyHandlers.set(type, handler);
@@ -308,12 +427,12 @@ module.exports = async function () {
             ui.radios.forEach(input => { input.checked = input.value === key; });
             ui.radios.find(input => input.value === key).onchange();
         };
-        for (const version of ['2.0.0', '0.9.0', '1.0.0-beta.1', '1.0.0-cn', '1.0.0-en']) {
+        for (const version of ['1.0.0', '0.9.0', '1.0.0-beta.1', '1.0.0-cn', '1.0.0-en']) {
             choose(version);
             assert.equal(button.textContent, '查看安装计划', '主动选择其他版本后应恢复正常确认文案');
             assert.equal(button.disabled, false, '同版保护不得阻止用户主动选择升级或降级版本');
         }
-        choose('1.0.0');
+        choose('2.0.0');
         assert.equal(button.textContent, '已安装');
         assert.equal(button.disabled, true, '从其他版本切回同版本须立即禁止确认');
         keyHandlers.get('keydown')({ key: 'Enter', target: ui.dialog, preventDefault() {} });
@@ -378,6 +497,110 @@ module.exports = async function () {
         assert.equal(await f.sb.modHubMarketInstaller.installBatch(f.mods), false);
         assert.deepEqual(f.events, [], '取消不同后缀换版时不得下载或写入');
     }
+    for (const batch of [false, true]) {
+        const id = batch ? 'AudioDefaultBatch' : 'AudioDefaultSingle';
+        const main = { name: `${id}-v1.0.0.zip`, downloadUrl: `https://example.com/${id}.zip`, packageRole: 'main' };
+        const audio = { name: `${id}-audio-v1.0.0.zip`, downloadUrl: `https://example.com/${id}-audio.zip`, packageRole: 'audio', optional: true, bootName: `${id}-audio` };
+        const f = fixture([{ id, candidates: [{ candidateKey: `${id}:1`, seriesKey: id, version: '1.0.0', assets: [main], optionalAssets: [audio],
+            compatibility: { status: 'compatible', evidence: 'declaration' } }], assetBoots: {
+            [main.name]: { name: id, version: '1.0.0' }, [audio.name]: { name: `${id}-audio`, version: '1.0.0' }
+        } }]);
+        const result = batch ? await f.sb.modHubMarketInstaller.installBatch(f.mods) : await f.sb.modHubMarketInstaller.install(f.mods[0]);
+        assert.equal(batch ? result.results.get(id).status : result, batch ? 'success' : true);
+        assert.deepEqual(Array.from(f.preparedCalls[0].assets), [main.name], '默认安装不得下载未明确选择的音频扩展');
+        assert.deepEqual(f.importedComponents, [id]);
+        assert.equal(f.profiles.has(`${id}-audio`), false);
+    }
+    for (const batch of [false, true]) {
+        const id = batch ? 'AudioBatch' : 'AudioSingle';
+        const candidate = version => ({ candidateKey: `${id}:${version}`, seriesKey: id, version,
+            assets: [{ name: `${id}-v${version}.zip`, downloadUrl: `https://example.com/${id}-v${version}.zip`, packageRole: 'main' }],
+            optionalAssets: [{ name: `${id}-audio-v${version}.zip`, downloadUrl: `https://example.com/${id}-audio-v${version}.zip`,
+                packageRole: 'audio', optional: true, bootName: `${id}-audio` }],
+            compatibility: { status: 'compatible', evidence: 'declaration' } });
+        const latest = candidate('1.0.0'), older = candidate('0.9.0');
+        const f = fixture([{ id, candidates: [latest, older] }], [{ name: id, version: '1.0.0' }]);
+        f.sb.modHubConfirm = async options => {
+            const ui = groupedChoiceDialog(f.sb, undefined, batch ? '#modHubBatchVersionChoices' : '#modHubVersionChoices');
+            await options.onRender(ui.dialog);
+            const currentCheckbox = () => ui.checkboxes.find(input => input.dataset.url === latest.optionalAssets[0].downloadUrl);
+            assert.equal(currentCheckbox().checked, false, '音频扩展默认不安装');
+            assert.equal(currentCheckbox().disabled, false, '同版主包仍应允许选择缺少的音频扩展');
+            assert.equal(options.canConfirm(), false, '同版主包未选择扩展时不能准备或安装');
+            currentCheckbox().checked = true; currentCheckbox().onchange();
+            assert.equal(options.canConfirm(), true, '明确选择缺少的扩展后允许补装');
+            const select = key => {
+                if (batch) { ui.selects[0].value = key; ui.selects[0].onchange(); }
+                else { ui.radios.forEach(input => { input.checked = input.value === key; }); ui.radios.find(input => input.value === key).onchange(); }
+            };
+            if (!batch) {
+                const group = ui.groups.find(item => item.querySelectorAll('input[name="modHubMarketVersion"]').some(input => input.value === latest.candidateKey));
+                group.open = false; group.ontoggle();
+                assert.ok(ui.checkboxes.every(input => !input.checked && input.disabled), '收起已选版本分类必须清除并禁用所有音频扩展控件');
+                assert.equal(options.customResult().selectedKey, '');
+                group.open = true; group.ontoggle();
+                assert.ok(ui.checkboxes.every(input => !input.checked && input.disabled), '重新展开但未选版本时不能残留可操作的音频扩展');
+                assert.equal(options.canConfirm(), false);
+                select(latest.candidateKey);
+                assert.equal(currentCheckbox().disabled, false, '再次明确选择版本后才允许选择该版本的音频扩展');
+                currentCheckbox().checked = true; currentCheckbox().onchange();
+                assert.equal(options.canConfirm(), true);
+            }
+            select(older.candidateKey);
+            assert.ok(ui.checkboxes.every(input => !input.checked), '换版必须清除原版本的扩展选择');
+            select(latest.candidateKey);
+            assert.equal(currentCheckbox().checked, false, '换回同版不能恢复已清除的扩展选择');
+            assert.equal(options.canConfirm(), false);
+            return false;
+        };
+        const result = batch ? await f.sb.modHubMarketInstaller.installBatch(f.mods) : await f.sb.modHubMarketInstaller.install(f.mods[0]);
+        assert.equal(result, false); assert.deepEqual(f.events, []);
+    }
+    for (const batch of [false, true]) {
+        for (const audioState of ['未安装', '已安装', '已禁用']) {
+            const id = `${batch ? 'AudioBatchAdd' : 'AudioSingleAdd'}${audioState}`, audioName = `${id}-audio`;
+            const main = { name: `${id}-v1.0.0.zip`, downloadUrl: `https://example.com/${id}.zip`, packageRole: 'main' };
+            const audio = { name: `${id}-audio-v1.0.0.zip`, downloadUrl: `https://example.com/${id}-audio.zip`,
+                packageRole: 'audio', optional: true, bootName: audioName };
+            const localMain = { name: id, version: '1.0.0', dependenceInfo: [{ modName: 'GameVersion', version: '>=0.5.0.0' }] };
+            const localAudio = { name: audioName, version: '1.0.0', dependenceInfo: [{ modName: id, version: '1.0.0' }] };
+            const choice = { candidateKey: `${id}:1`, seriesKey: id, version: '1.0.0', assets: [main], optionalAssets: [audio],
+                compatibility: { status: 'compatible', evidence: 'declaration' } };
+            const f = fixture([{ id, candidates: [choice], assetBoots: {
+                [main.name]: { name: id, version: '1.0.0', dependenceInfo: [{ modName: '不应继承的新包前置', version: '9.0.0' }] },
+                [audio.name]: localAudio
+            } }], [localMain, ...(audioState === '未安装' ? [] : [localAudio])]);
+            if (audioState === '已禁用') f.sb._modHubModState.sideDisabled = [audioName];
+            const confirm = f.sb.modHubConfirm;
+            f.sb.modHubConfirm = async options => {
+                if (!options.title.startsWith('选择【') && options.title !== '选择批量安装版本') return confirm(options);
+                f.prompts.push(options);
+                const ui = groupedChoiceDialog(f.sb, undefined, batch ? '#modHubBatchVersionChoices' : '#modHubVersionChoices');
+                await options.onRender(ui.dialog);
+                const checkbox = ui.checkboxes[0];
+                assert.equal(checkbox.checked, false);
+                if (audioState === '已安装') {
+                    assert.equal(checkbox.disabled, true, '全部同版且已启用时必须禁止重复补装');
+                    assert.equal(options.canConfirm(), false);
+                    assert.ok(ui.area.innerHTML.includes('音频扩展包 · 已安装'));
+                    return false;
+                }
+                assert.equal(checkbox.disabled, false);
+                checkbox.checked = true; checkbox.onchange();
+                assert.equal(options.canConfirm(), true);
+                return options.customResult();
+            };
+            const result = batch ? await f.sb.modHubMarketInstaller.installBatch(f.mods) : await f.sb.modHubMarketInstaller.install(f.mods[0]);
+            if (audioState === '已安装') { assert.equal(result, false); assert.deepEqual(f.events, []); continue; }
+            assert.equal(batch ? result.results.get(id).status : result, batch ? 'success' : true, '同版主包应允许补装或启用音频扩展');
+            assert.deepEqual(Array.from(f.preparedCalls[0].assets), [main.name, audio.name], '补装须核对主包及明确选择的扩展包');
+            assert.equal(f.profiles.get(id).bootJson, localMain, '保留同版主包的真实本地清单，不能继承同号发布包的新前置');
+            assert.ok(!f.prompts.some(prompt => prompt.title === '前置需要手动处理'), '同版主包的本地清单不得被新包额外依赖污染');
+            assert.ok(reviewedPlan(f).trustedMessageHtml.includes(audioState === '已禁用' ? '保留同版，启用' : '音频扩展包'));
+            assert.deepEqual(f.importedComponents, audioState === '未安装' ? [audioName] : []);
+            if (audioState === '已禁用') assert.ok(f.events.includes(`enable:${audioName}`));
+        }
+    }
     for (const installed of [[], [{ name: 'UnknownContext', version: '' }]]) {
         const f = fixture([{ id: 'UnknownContext', candidates: [{ candidateKey: 'unknown', seriesKey: 'unknown', version: '', assets: [], compatibility: { status: 'unknown' } }] }], installed);
         f.sb.modHubMarketVersions.getGameVersion = () => '';
@@ -392,6 +615,86 @@ module.exports = async function () {
         };
         assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false);
         assert.deepEqual(f.events, []);
+    }
+    {
+        const mainName = 'ReuseAlias', alias = 'ReusableMainAlias', audioName = 'ReuseAliasAudio';
+        const main = { name: 'ReuseAlias-v1.0.0.zip', downloadUrl: 'https://example.com/ReuseAlias.zip', packageRole: 'main' };
+        const audio = { name: 'ReuseAlias-audio-v1.0.0.zip', downloadUrl: 'https://example.com/ReuseAliasAudio.zip',
+            packageRole: 'audio', optional: true, bootName: audioName };
+        const localMain = { name: mainName, version: '1.0.0', alias: [alias] };
+        const f = fixture([
+            { id: mainName, candidates: [{ candidateKey: 'ReuseAlias:1', seriesKey: mainName, version: '1.0.0', assets: [main], optionalAssets: [audio],
+                compatibility: { status: 'compatible', evidence: 'declaration' } }], assetBoots: {
+                [main.name]: { name: mainName, version: '1.0.0' },
+                [audio.name]: { name: audioName, version: '1.0.0', dependenceInfo: [{ modName: mainName, version: '>=1.0.0' }] }
+            } },
+            { id: 'ReuseAliasConsumer', boot: { name: 'ReuseAliasConsumer', version: '1.0.0',
+                dependenceInfo: [{ modName: alias, version: '>=1.0.0' }] } }
+        ], [localMain]);
+        const confirm = f.sb.modHubConfirm;
+        f.sb.modHubConfirm = async options => {
+            if (options.title !== '选择批量安装版本') return confirm(options);
+            f.prompts.push(options);
+            const ui = groupedChoiceDialog(f.sb, undefined, '#modHubBatchVersionChoices');
+            await options.onRender(ui.dialog);
+            const checkbox = ui.checkboxes.find(input => input.dataset.key === mainName);
+            assert.equal(checkbox.disabled, false);
+            checkbox.checked = true; checkbox.onchange();
+            assert.equal(options.customResult().length, 2);
+            return options.customResult();
+        };
+        const result = await f.sb.modHubMarketInstaller.installBatch(f.mods);
+        assert.equal(result.results.get(mainName).status, 'success', '同版主包缺失下载清单别名时仍应复用本地主包完成补装');
+        assert.equal(result.results.get('ReuseAliasConsumer').status, 'success', '批量另一目标迟到的别名要求必须由有效本地清单满足');
+        assert.equal(f.profiles.get(mainName).bootJson, localMain, '补音频后须保留提供兼容别名的本地主包对象');
+        assert.deepEqual(f.importedComponents, [audioName, 'ReuseAliasConsumer']);
+        assert.equal(f.preparedCalls.filter(call => call.id === mainName).length, 1, '有效别名依赖不得导致已确认同版主包重复准备');
+        assert.ok(!f.prompts.some(options => options.title === `选择【${mainName}】版本`), '下载同号包缺少别名不能触发主包重选');
+    }
+    for (const batch of [false, true]) {
+        for (const compatibility of [
+            { status: 'unknown', evidence: 'unknown' },
+            { status: 'incompatible', evidence: 'declaration' },
+            { status: 'unknown', evidence: 'filename', targetGameVersion: '0.4.0.0', referenceMismatch: true },
+            { status: 'unknown', evidence: 'declaration', gameVersionRange: '>=0.5.0.0', unknownGame: true }
+        ]) {
+            const id = `Fallback${batch ? 'Batch' : 'Single'}`;
+            const f = fixture([{ id, candidates: [{ candidateKey: `${id}:2`, seriesKey: id, version: '2.0.0', compatibility,
+                assets: [{ name: `${id}.zip`, downloadUrl: `https://example.com/${id}.zip` }] }] }]);
+            if (compatibility.unknownGame) f.sb.StartConfig.version = '';
+            const confirm = f.sb.modHubConfirm;
+            let risk;
+            f.sb.modHubConfirm = async options => {
+                if (options.title === '确认版本风险') { risk = options; return false; }
+                return confirm(options);
+            };
+            const result = batch ? await f.sb.modHubMarketInstaller.installBatch(f.mods) : await f.sb.modHubMarketInstaller.install(f.mods[0]);
+            assert.equal(result, false);
+            assert.ok(risk && risk.message.includes('已默认选择最新版本'), '回退默认选择必须在安装前解释原因并确认风险');
+            const choicePrompt = f.prompts.find(prompt => prompt.title.startsWith('选择【') || prompt.title === '选择批量安装版本');
+            assert.ok(choicePrompt.renderedHtml.includes('已默认选择最新版本'));
+            assert.ok(!choicePrompt.renderedHtml.includes('推荐，作者声明适配'), '回退默认选择不能伪装成作者声明匹配');
+            assert.deepEqual(f.events, [], '拒绝回退风险时不得下载、导入或重载');
+        }
+    }
+    {
+        const f = fixture([{ id: 'ActualBootMismatch', boot: { name: 'ActualBootMismatch', version: '1.0.0',
+            dependenceInfo: [{ modName: 'GameVersion', version: '>=0.6.0.0' }] } }]);
+        f.sb.modSC2DataManager = { getDependenceChecker: () => ({ getInfiniteSemVerApi: () => ({
+            parseVersion: value => ({ version: { version: value.split('.').map(Number) } }),
+            parseRange: range => [{ range }],
+            satisfies: (version, ranges) => f.sb.modHubMarket.satisfiesVersion(version.version.join('.'), ranges[0].range)
+        }) }) };
+        f.sb.modHubMarket.getPreparedCompatibilityRisks = f.runtimeMarket.getPreparedCompatibilityRisks;
+        const confirm = f.sb.modHubConfirm;
+        let risk;
+        f.sb.modHubConfirm = async options => {
+            if (options.title === '确认版本风险') { risk = options; return false; }
+            return confirm(options);
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false);
+        assert.ok(risk.message.includes('0.6.0.0'), '默认匹配发布元数据也必须再次确认真实包内的不匹配声明');
+        assert.deepEqual(f.events, ['prepare:ActualBootMismatch'], '拒绝真实包内风险只能完成核对，不能导入或重载');
     }
     {
         const name = '<img src=x onerror=bad()> & "风险模组"';
@@ -469,6 +772,7 @@ module.exports = async function () {
                 mods: f.mods.map(mod => ({ ...mod, versionSource: 'github' })) }) });
             if (route === '全部更新入口') f.sb._modHubModState.sideMods = [{ name: 'ReloadTarget', enabled: true }];
             await f.runtimeMarket.loadMarketData(true);
+            await Promise.all(f.runtimeMarket.getMarketMods().map(mod => mod._updateCheck?.promise));
             if (route === '全部更新入口') assert.equal(f.runtimeMarket.getUpdatableMods().length, 1,
                 `测试更新目标应可识别：${JSON.stringify(f.runtimeMarket.getMarketMods())}`);
             if (route === '市场批量入口') {
@@ -729,22 +1033,69 @@ module.exports = async function () {
         assert.equal(dialogs, 1, '重试只能刷新当前弹窗'); assert.equal(calls, 2);
     }
     {
-        const f = fixture([{ id: 'BatchLoading1' }, { id: 'BatchLoading2' }]);
+        const f = fixture([{ id: 'BatchLoading1' }, { id: 'BatchLoading2' }, { id: 'BatchLoading3' }]);
         const fetch = f.sb.modHubMarketVersions.fetchReleases;
-        let finish, signal, ready, area, calls = 0;
-        f.sb.modHubMarketVersions.fetchReleases = (mod, options) => { calls++; signal = options.signal; return new Promise(resolve => { finish = () => resolve(fetch(mod)); }); };
+        let ready, area, calls = 0;
+        const finishes = [], signals = [];
+        f.sb.modHubMarketVersions.fetchReleases = (mod, options) => { calls++; signals.push(options.signal); return new Promise(resolve => { finishes.push(() => resolve(fetch(mod))); }); };
         f.sb.modHubConfirm = async options => {
-            assert.ok(options.trustedMessageHtml.includes('已读取 0 / 2 项'), '批量必须先展示所有占位行');
+            assert.ok(options.trustedMessageHtml.includes('已读取 0 / 3 项'), '批量必须先展示所有占位行');
             assert.equal(options.canConfirm(), false);
             const dialog = createStubElement(); area = dialog.querySelector('#modHubBatchVersionChoices'); ready = options.onRender(dialog);
             return false;
         };
         assert.equal(await f.sb.modHubMarketInstaller.installBatch(f.mods), false);
-        assert.equal(signal.aborted, true);
-        const closedHtml = area.innerHTML; finish(); await ready;
-        assert.equal(calls, 1, '取消批量后不能继续读取后续项目');
+        assert.equal(signals.length, 2, '批量初次读取最多同时启动两项');
+        assert.ok(signals.every(signal => signal.aborted), '取消批量必须中止全部已启动请求');
+        const closedHtml = area.innerHTML; finishes.forEach(finish => finish()); await ready;
+        assert.equal(calls, 2, '取消批量后不能继续读取队列中的后续项目');
         assert.equal(area.innerHTML, closedHtml); assert.deepEqual(f.events, []);
         assert.equal(f.sb.modHubMarket.batchInstallState.running, false, '取消后必须解除批量锁');
+    }
+    {
+        const f = fixture([{ id: 'QueueRetry' }, { id: 'QueueSlow' }, { id: 'QueueReady' }]);
+        const original = f.sb.modHubMarketVersions.fetchReleases;
+        const calls = [], pending = new Map();
+        let active = 0, peak = 0, ready;
+        const flush = async () => { for (let index = 0; index < 20; index++) await Promise.resolve(); };
+        f.sb.modHubMarketVersions.fetchReleases = (mod, options) => {
+            calls.push([mod.id, options.page]); active++; peak = Math.max(peak, active);
+            return new Promise((resolve, reject) => pending.set(mod.id, { signal: options.signal,
+                finish: async failure => { active--; pending.delete(mod.id); if (failure) reject(failure); else resolve(await original(mod, options)); } }));
+        };
+        f.sb.modHubConfirm = async options => {
+            const dialog = createStubElement(), area = dialog.querySelector('#modHubBatchVersionChoices');
+            const buttons = f.mods.map(mod => ({ ...createStubElement('button'), dataset: { key: mod.id } }));
+            const selects = f.mods.map(mod => ({ ...createStubElement('select'), dataset: { key: mod.id } }));
+            area.querySelectorAll = selector => selector === '.modhub-version-batch-select' ? selects
+                : selector === '.modhub-version-batch-more' ? buttons.filter(button => area.innerHTML.includes(`modhub-version-batch-more" data-key="${button.dataset.key}"`)) : [];
+            ready = options.onRender(dialog);
+            assert.deepEqual(calls, [['QueueRetry', 1], ['QueueSlow', 1]], '初次读取只能启动两项');
+            await pending.get('QueueRetry').finish(Object.assign(new Error('The user aborted a request.'), { code: 'RELEASE_UPSTREAM_TIMEOUT', status: 504,
+                details: { name: 'TimeoutError', message: '<script>原始超时</script>', retryAfter: '60' } }));
+            await flush();
+            assert.deepEqual(calls, [['QueueRetry', 1], ['QueueSlow', 1], ['QueueReady', 1]], '完成一项后才启动下一项');
+            assert.ok(area.innerHTML.includes('历史发布服务响应超时，请稍后重试版本列表'));
+            assert.ok(area.innerHTML.includes('<summary>错误详情</summary>') && area.innerHTML.includes('&lt;script&gt;原始超时&lt;/script&gt;') && !area.innerHTML.includes('<script>'));
+            assert.ok(!area.innerHTML.includes('The user aborted a request.'), '英文异常不得作批量主状态');
+            assert.ok(/modhub-version-batch-more" data-key="QueueRetry" >/.test(area.innerHTML), '其他行正在读取时，失败行仍能重试');
+            const retry = buttons[0].onclick();
+            assert.equal(calls.length, 3, '逐行重试须等待同一两路队列空位');
+            assert.equal(options.canConfirm(), false, '存在读取或排队时不得提前提交安装');
+            await pending.get('QueueReady').finish(); await flush();
+            assert.deepEqual(calls.at(-1), ['QueueRetry', 1], '重试不能重新读取其他成功行');
+            selects[2].value = ''; selects[2].onchange();
+            await pending.get('QueueRetry').finish(); await retry;
+            assert.deepEqual(Array.from(options.customResult(), item => item.mod.id), ['QueueRetry'], '其他行完成不得覆盖人工跳过的成功行');
+            assert.equal(options.canConfirm(), false, '仍有慢请求时继续等待读取完成');
+            await pending.get('QueueSlow').finish(); await ready;
+            assert.equal(options.canConfirm(), true);
+            assert.equal(peak, 2, '初次读取与重试总并发严格不超过两项');
+            assert.deepEqual(calls, [['QueueRetry', 1], ['QueueSlow', 1], ['QueueReady', 1], ['QueueRetry', 1]]);
+            return false;
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.installBatch(f.mods), false);
+        assert.deepEqual(f.events, [], '版本选择未确认时不得下载或写入');
     }
     {
         const f = fixture([{ id: 'BatchReady1' }, { id: 'BatchReady2' }]);
@@ -761,6 +1112,7 @@ module.exports = async function () {
             area.querySelectorAll = selector => selector === '.modhub-version-batch-select' ? [select] : [];
             ready = options.onRender(dialog);
             await started;
+            for (let index = 0; index < 10; index++) await Promise.resolve();
             assert.ok(area.innerHTML.includes('已读取 1 / 2 项'), '已完成行应及时显示');
             select.value = ''; select.onchange();
             finish(); await ready;
@@ -777,12 +1129,12 @@ module.exports = async function () {
         const cases = [
             { id: 'LatestUnknown', candidates: [candidate('LatestUnknown', '1.0'), candidate('LatestUnknown', '2.0')], expected: '2.0' },
             { id: 'PreferSupported', candidates: [candidate('PreferSupported', '9.0'), candidate('PreferSupported', '1.0', { status: 'compatible', evidence: 'declaration' })], expected: '1.0' },
-            { id: 'OnlyMismatch', candidates: [candidate('OnlyMismatch', '2.0', { status: 'incompatible', evidence: 'declaration' })] },
-            { id: 'FilenameMismatch', candidates: [candidate('FilenameMismatch', '2.0', { status: 'unknown', evidence: 'filename', referenceMismatch: true })] },
+            { id: 'OnlyMismatch', candidates: [candidate('OnlyMismatch', '2.0', { status: 'incompatible', evidence: 'declaration' })], expected: '2.0' },
+            { id: 'FilenameMismatch', candidates: [candidate('FilenameMismatch', '2.0', { status: 'unknown', evidence: 'filename', referenceMismatch: true })], expected: '2.0' },
             { id: 'Languages', candidates: [candidate('Languages', '1.0', undefined, 'CN'), candidate('Languages', '2.0', undefined, 'EN')] },
             { id: 'Models', candidates: [candidate('Models', '1.0', undefined, 'female'), candidate('Models', '2.0', undefined, 'male')] },
             { id: 'UnknownSeries', candidates: [candidate('UnknownSeries', '1.0', undefined, '')] },
-            { id: 'TiedPackages', candidates: [candidate('TiedPackages', '2.0'), { ...candidate('TiedPackages', '2.0'), candidateKey: 'other-format' }] },
+            { id: 'TiedPackages', candidates: [candidate('TiedPackages', '2.0'), { ...candidate('TiedPackages', '2.0'), candidateKey: 'other-format', assets: [{ name: 'TiedPackages-2.0.modpack' }] }] },
             { id: 'PreventDowngrade', candidates: [candidate('PreventDowngrade', '1.0')], installed: [{ name: 'PreventDowngrade', version: '2.0' }] },
         ];
         for (const entry of cases) {
@@ -859,27 +1211,27 @@ module.exports = async function () {
             return false;
         };
         assert.equal(await f.sb.modHubMarketInstaller.installBatch(f.mods), false);
-        assert.deepEqual(requests, [['PagedChoice', 1], ['PagedSkip', 1], ['PagedChoice', 1], ['PagedChoice', 2], ['PagedChoice', 2], ['PagedSkip', 2]], '失败必须在原行重试同一页');
+        assert.deepEqual(requests, [['PagedChoice', 1], ['PagedSkip', 1], ['PagedSkip', 2], ['PagedChoice', 1], ['PagedChoice', 2], ['PagedChoice', 2]], '批量自动读完完整历史，失败行仍在原页重试');
         assert.equal(dialogs, 1); assert.deepEqual(f.events, []);
     }
     for (const lateFailure of [false, true]) {
         const f = fixture([{ id: 'CancelBatchPage' }]);
         const fetch = f.sb.modHubMarketVersions.fetchReleases;
-        let finish, signal, pending, area;
+        let finish, signal, pending, area, secondPageStartedResolve;
+        const secondPageStarted = new Promise(resolve => { secondPageStartedResolve = resolve; });
         f.sb.modHubMarketVersions.fetchReleases = (mod, options) => options.page === 1
             ? fetch(mod, options).then(history => ({ ...history, hasMore: true }))
             : new Promise((resolve, reject) => { signal = options.signal; finish = () => lateFailure
-                ? reject(new Error('迟到分页失败')) : resolve({ page: 2, hasMore: false, releases: [] }); });
+                ? reject(new Error('迟到分页失败')) : resolve({ page: 2, hasMore: false, releases: [] }); secondPageStartedResolve(); });
         f.sb.modHubConfirm = async options => {
-            const dialog = createStubElement(), button = createStubElement('button'); button.dataset.key = f.mods[0].id;
+            const dialog = createStubElement();
             area = dialog.querySelector('#modHubBatchVersionChoices');
-            area.querySelectorAll = selector => selector === '.modhub-version-batch-more' ? [button] : [];
-            await options.onRender(dialog);
-            pending = button.onclick();
+            pending = options.onRender(dialog);
+            await secondPageStarted;
             return false;
         };
         assert.equal(await f.sb.modHubMarketInstaller.installBatch(f.mods), false);
-        assert.equal(signal.aborted, true, '批量分页与初次读取必须随取消中止');
+        assert.equal(signal.aborted, true, '批量自动读取后续历史页必须随取消中止');
         const closedHtml = area.innerHTML; finish(); await pending;
         assert.equal(area.innerHTML, closedHtml, '迟到分页结果不得改写已关闭的批量弹窗');
         assert.deepEqual(f.events, []); assert.deepEqual(f.alerts, []);
@@ -945,8 +1297,9 @@ module.exports = async function () {
     }
     {
         const f = fixture([{ id: 'Unknown', compatibility: 'unknown' }]);
-        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false);
-        assert.deepEqual(f.events, [], '兼容性未知且未选择版本时，点击与Enter均不能开始预检');
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), true, '兼容性未知时应默认最新并在确认风险后继续核对安装包');
+        assert.ok(f.prompts.some(options => options.title === '确认版本风险' && options.message.includes('默认选择最新版本')));
+        assert.deepEqual(f.events, ['prepare:Unknown', 'install:Unknown', 'reload']);
     }
     {
         const f = fixture([
@@ -1075,6 +1428,7 @@ module.exports = async function () {
             { id: 'C', bytes: 10 * mb, boot: { name: 'C', version: '1.0', dependenceInfo: [{ modName: 'D', version: '>=2.0' }] } },
             { id: 'Obsolete', bytes: 100 * mb }, { id: 'Replacement', bytes: 100 * mb }
         ]);
+        chooseInitialVersion(f, 'D', 'D-1.0');
         const result = await f.sb.modHubMarketInstaller.installBatch(f.mods.slice(0, 2));
         assert.equal(result.results.get('A').status, 'success'); assert.equal(result.results.get('B').status, 'success');
         assert.deepEqual(f.preparedCalls.filter(call => call.id === 'D').map(call => call.key), ['D-1.0', 'D-2.0'], '较深前置发现迟到约束时必须重新选版并核验');
@@ -1222,6 +1576,7 @@ module.exports = async function () {
             { id: 'C', boot: { name: 'C', version: '1.0', dependenceInfo: [{ modName: 'D', version: '>=2.0' }] } },
             { id: 'OldChild', boot: { name: 'OldChild', version: '1.0', dependenceInfo: [{ modName: 'Missing' }] } }
         ]);
+        chooseInitialVersion(f, 'D', 'D-1.0');
         const result = await f.sb.modHubMarketInstaller.installBatch(f.mods.slice(0, 2));
         assert.equal(result.results.get('A').status, 'success'); assert.equal(result.results.get('B').status, 'success');
         assert.deepEqual(f.preparedCalls.filter(call => call.id === 'D').map(call => call.key), ['D-1.0', 'D-2.0'], '旧候选自身或旧闭包缺前置不能永久阻断迟到约束触发换版');
@@ -1402,6 +1757,7 @@ module.exports = async function () {
                 'MetadataShared:2.0.0': { boot: { name: 'MetadataShared', version: '2.0.0' } }
             } }
         ]);
+        chooseInitialVersion(f, 'MetadataShared', 'MetadataShared:1.0.0');
         const confirm = f.sb.modHubConfirm;
         f.sb.modHubConfirm = async options => {
             if (options.title === '请确认安装计划') {

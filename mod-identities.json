@@ -126,6 +126,28 @@
       "tags": ["农场"]
     },
     {
+      "id": "midsummer-night-dream",
+      "name": "多恋人淫啪",
+      "bootNames": ["MidsummerNightDream"],
+      "aliases": ["仲夏夜之梦", "Midsummer Night Dream"],
+      "repositories": ["MND-Hotel"],
+      "repositoryKeys": ["youmu1818/MND-Hotel"],
+      "category": "玩法与内容",
+      "tags": ["恋爱"],
+      "dependencies": [{"id": "maplebirch"}]
+    },
+    {
+      "id": "deadwood-reblooms",
+      "name": "枯木逢春",
+      "bootNames": ["deadwood-reblooms"],
+      "aliases": ["Deadwood Reblooms"],
+      "repositories": ["Deadwood-Reblooms"],
+      "repositoryKeys": ["MaplebirchLeaf/Deadwood-Reblooms"],
+      "category": "玩法与内容",
+      "tags": ["农场", "剧情"],
+      "dependencies": [{"id": "maplebirch"}]
+    },
+    {
       "id": "smartphone",
       "name": "万能的智能手机",
       "bootNames": ["SmartPhone Alpha", "SmartPhone"],

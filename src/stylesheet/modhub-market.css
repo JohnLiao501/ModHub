@@ -1129,6 +1129,38 @@
     box-sizing: border-box;
 }
 
+.modhub-version-optional {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    min-height: 40px;
+    padding: 8px;
+    margin: 6px 0;
+    border: 1px solid var(--600, #444);
+    background: var(--900, #111);
+    box-sizing: border-box;
+    cursor: pointer;
+}
+
+.modhub-version-optional > input {
+    flex-shrink: 0;
+    width: 16px;
+    min-width: 16px;
+    margin: 4px 0 0;
+    accent-color: var(--gold, #d4af37);
+}
+
+.modhub-version-optional > span {
+    min-width: 0;
+    flex: 1 1 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-version-optional:focus-within {
+    outline: 1px solid var(--gold, #d4af37);
+    outline-offset: 1px;
+}
+
 .modhub-version-loading,
 .modhub-version-status {
     display: flex;

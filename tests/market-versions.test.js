@@ -18,6 +18,16 @@ function loadVersions() {
     return { sb, versions: sb.modHubMarketVersions, calls };
 }
 
+function useEnumerableStorage(sb) {
+    const values = new Map();
+    sb.localStorage = {
+        get length() { return values.size; }, key: index => [...values.keys()][index] ?? null,
+        getItem: key => values.get(key) ?? null,
+        setItem: (key, value) => values.set(key, String(value)), removeItem: key => values.delete(key)
+    };
+    return values;
+}
+
 const asset = (name, extra = {}) => ({ name, downloadUrl: `https://github.com/Owner/Example/releases/download/v1/${name}`, size: 100, ...extra });
 const release = (version, assets, compatibility) => ({ tagName: `v${version}`, name: version,
     htmlUrl: `https://github.com/Owner/Example/releases/tag/v${version}`, publishedAt: '2026-09-30T00:00:00Z',
@@ -75,6 +85,21 @@ module.exports = async function() {
         assert.deepEqual(Array.from(model.assets, item => item.name), ['female.model-v1.0.modpack'], '格式不同的配对手动覆盖图包也不得参与自动导入');
     }
     {
+        const { versions } = loadVersions();
+        const declaration = { gameVersionRange: '^0.5.10.12' };
+        const history = [release('1.0', [asset('Example-v1.0.modpack'), asset('Example-audio-v1.0.modpack'), asset('Example.PhotoPack-v1.0.zip')], declaration)];
+        const snapshot = JSON.stringify(history);
+        const candidates = versions.buildCandidates(baseMod, history);
+        assert.equal(candidates.length, 1, '可靠配对的音频扩展不得成为第二个主包版本');
+        assert.deepEqual(Array.from(candidates[0].assets, item => item.name), ['Example-v1.0.modpack', 'Example.PhotoPack-v1.0.zip'], '默认安装仍包含主包及既有资源伴包');
+        assert.deepEqual(Array.from(candidates[0].assets, item => item.packageRole), ['main', 'resource']);
+        assert.deepEqual(Array.from(candidates[0].optionalAssets, item => item.name), ['Example-audio-v1.0.modpack']);
+        assert.equal(candidates[0].optionalAssets[0].packageRole, 'audio');
+        assert.equal(candidates[0].optionalAssets[0].optional, true);
+        assert.equal(versions.rankCandidates(baseMod, candidates).defaultKey, candidates[0].candidateKey, '附带可选扩展不能阻止主包默认选择');
+        assert.equal(JSON.stringify(history), snapshot, '候选角色与可选状态不得污染原始发布资产');
+    }
+    {
         const { sb } = loadVersions();
         let requests = 0;
         sb.fetch = async () => { requests++; return { ok: true, json: async () => ({ tag_name: 'v1.0',
@@ -102,7 +127,9 @@ module.exports = async function() {
         assert.equal(versions.getLatestGameCandidate(mod, candidates), null, '没有游戏适配证据不能冒充当前游戏的兼容候选');
         const ranked = versions.rankCandidates(mod, candidates);
         assert.equal(ranked.candidates[0].version, '1.0.3');
-        assert.equal(ranked.recommendedKey, '', '普通选版仍需用户核对未声明适配的安装包');
+        assert.equal(ranked.recommendedKey, '', '未声明适配不能显示适配推荐');
+        assert.equal(ranked.defaultKey, candidates[0].candidateKey, '未声明适配时仍应默认最新主包');
+        assert.equal(ranked.defaultRisk, true, '默认最新不能代替安装前的风险确认');
     }
     {
         const { sb, versions, calls } = loadVersions();
@@ -164,7 +191,11 @@ module.exports = async function() {
         assert.ok(old.assetUrl && old.assetName && old.tagName, '候选必须能直接交给已有下载器');
         sb.StartConfig.version = '';
         const unknown = versions.buildCandidates(baseMod, history);
-        assert.equal(versions.rankCandidates(baseMod, unknown).recommendedKey, '', '无法识别本体版本不能默认推荐最新版');
+        const unknownSelection = versions.rankCandidates(baseMod, unknown);
+        assert.equal(unknownSelection.recommendedKey, '', '无法识别本体版本不能显示适配推荐');
+        assert.equal(unknown.find(candidate => candidate.candidateKey === unknownSelection.defaultKey).version, '4.0', '未识别游戏时仍应默认数值最新版本');
+        assert.equal(unknownSelection.defaultRisk, true);
+        assert.match(unknownSelection.defaultReason, /当前游戏版本未能识别/);
     }
 
     {
@@ -175,7 +206,11 @@ module.exports = async function() {
         assert.equal(variants.length, 2);
         assert.equal(versions.rankCandidates(neutralMod, variants).recommendedKey, '', '不同语言或型号不得跨系列预选');
         const noDeclaration = versions.buildCandidates(baseMod, [release('4.0', [asset('Example-v4.0.zip')])]);
-        assert.equal(versions.rankCandidates(baseMod, noDeclaration).recommendedKey, '', '没有匹配证据不能默认最新');
+        const undeclaredSelection = versions.rankCandidates(baseMod, noDeclaration);
+        assert.equal(undeclaredSelection.recommendedKey, '', '没有匹配证据不能显示适配推荐');
+        assert.equal(undeclaredSelection.defaultKey, noDeclaration[0].candidateKey, '没有适配声明时默认最新主包');
+        assert.equal(undeclaredSelection.defaultRisk, true);
+        assert.match(undeclaredSelection.defaultReason, /作者未声明/);
         const reference = versions.buildCandidates(baseMod, [release('1.0', [asset('Example-v1.0-DoL-0.5.10.12.zip')])]);
         assert.equal(reference[0].compatibility.status, 'unknown');
         assert.equal(reference[0].compatibility.evidence, 'filename');
@@ -194,10 +229,16 @@ module.exports = async function() {
         const conflicts = versions.buildCandidates(baseMod, [release('1.0', [asset('Example-v1.0-DoL-0.5.10.12.zip')], { gameVersionRange: '>=0.5.11.0' })]);
         assert.equal(conflicts[0].compatibility.status, 'incompatible', '声明不匹配必须优先于文件名提示');
         assert.equal(versions.rankCandidates(baseMod, conflicts).recommendedKey, '');
+        assert.equal(versions.rankCandidates(baseMod, conflicts).defaultKey, conflicts[0].candidateKey, '无匹配版本也应默认最新并保留具体不兼容状态');
+        assert.equal(versions.rankCandidates(baseMod, conflicts).defaultRisk, true);
         assert.equal(versions.getCandidateStatus(conflicts[0]).tone, 'red', '红色风险只用于明确的作者支持范围不符');
         const mixedEvidence = versions.buildCandidates(baseMod, [release('1.0', [asset('Example-v1.0.zip')], declaration),
             release('2.0', [asset('Example-v2.0-DoL-0.5.10.12.zip')]), release('3.0', [asset('Example-v3.0-DoL-0.5.11.0.zip')])]);
         assert.equal(versions.getLatestGameCandidate(baseMod, mixedEvidence).version, '2.0', '更新检测先排除其他游戏分支，再比较最高模组版本，不因证据等级推荐旧版');
+        const mixedSelection = versions.rankCandidates(baseMod, mixedEvidence);
+        assert.equal(mixedSelection.candidates[0].version, '2.0', '文件名匹配的新版必须排在作者声明匹配的旧版之前');
+        assert.equal(mixedSelection.defaultKey, mixedEvidence.find(candidate => candidate.version === '2.0').candidateKey);
+        assert.equal(mixedSelection.defaultRisk, false);
         assert.equal(versions.rankCandidates(baseMod, mixedEvidence, { updateOnly: true, localVersion: '1.0' }).recommendedKey,
             mixedEvidence.find(candidate => candidate.version === '2.0').candidateKey);
         assert.equal(versions.getLatestGameCandidate(neutralMod, variants), null, '多个语言或型号仍应留给用户选择');
@@ -236,6 +277,41 @@ module.exports = async function() {
         assert.equal(versions.getCandidateStatus(unknownGame[0]).label, '适配待核对', '未识别当前游戏不能声称名称对应当前版本');
         assert.match(versions.getCandidateStatus(unknownGame[0]).reason, /当前游戏版本未能识别/);
         assert.equal(versions.rankCandidates(baseMod, unknownGame).recommendedKey, '');
+        assert.equal(versions.rankCandidates(baseMod, unknownGame).defaultKey, unknownGame[0].candidateKey);
+        assert.equal(versions.rankCandidates(baseMod, unknownGame).defaultRisk, true);
+    }
+
+    {
+        const { sb, versions } = loadVersions();
+        const candidate = (version, name = `Example-v${version}.zip`, compatibility = { status: 'unknown', evidence: 'unknown' }, seriesKey = 'Example') => ({
+            candidateKey: `${name}:${version}`, version, assetName: name, seriesKey, compatibility, updateDate: '2026-10-01' });
+        const latest = candidate('2.10'), previous = candidate('2.9');
+        const snapshot = JSON.stringify([latest, previous]);
+        const selected = versions.getDefaultSelection(baseMod, [previous, latest], { localVersion: '2.10' });
+        assert.equal(selected.defaultKey, latest.candidateKey, '本地同版应保持最新选择，不能为了可安装而默认旧版');
+        assert.equal(JSON.stringify([latest, previous]), snapshot, '默认选择不得改变兼容性状态或原始候选');
+        assert.equal(versions.getDefaultSelection(baseMod, [previous, latest], { localVersion: '3.0' }).defaultKey, '', '不能自动默认低于本地版本的包');
+        assert.equal(versions.getDefaultSelection(baseMod, [previous, latest], { updateOnly: true, localVersion: '1.0' }).defaultKey, '', '全部更新仍不默认无适配证据的版本');
+        const unknownVersion = candidate('', 'Example.zip');
+        assert.equal(versions.getDefaultSelection(baseMod, [unknownVersion]).defaultKey, '', '缺少可比较模组版本时不能猜测最新');
+        assert.equal(versions.getDefaultSelection(baseMod, [latest, candidate('3.0', 'Example-EN-v3.0.zip', undefined, 'Example-EN')]).defaultKey, '', '不同主包语言或型号不得默认跨系列');
+        const otherFormat = candidate('2.10', 'Example-v2.10.modpack');
+        assert.equal(versions.getDefaultSelection(baseMod, [latest, otherFormat]).defaultKey, '', '相同版本不同主资产格式不得擅自选择');
+        const compatible = { status: 'compatible', evidence: 'declaration' };
+        assert.equal(versions.getDefaultSelection(baseMod, [{ ...latest, compatibility: compatible }, { ...otherFormat, compatibility: compatible }, candidate('3.0')]).defaultKey,
+            '', '匹配版本的主资产存在歧义时，不得借未知适配的新版绕过人工选择');
+        const olderRelease = { ...latest, candidateKey: 'older-tag', updateDate: '2026-09-30' };
+        assert.equal(versions.getDefaultSelection(baseMod, [olderRelease, latest]).defaultKey, latest.candidateKey, '同名同版本主包重复发布按实际日期消歧');
+        const unsupported = candidate('3.0', undefined, { status: 'incompatible', evidence: 'declaration', gameVersionRange: '>=0.5.11.0' });
+        assert.equal(versions.getDefaultSelection(baseMod, [unsupported]).defaultKey, unsupported.candidateKey);
+        assert.match(versions.getDefaultSelection(baseMod, [unsupported]).defaultReason, /没有找到匹配当前游戏/);
+        assert.equal(unsupported.compatibility.status, 'incompatible', '默认最新版不能抹掉明确不兼容状态');
+        const matched = candidate('2.10', undefined, { status: 'compatible', evidence: 'declaration' });
+        assert.equal(versions.getDefaultSelection(baseMod, [matched], { updateOnly: true, localVersion: '2.9' }).defaultKey, matched.candidateKey);
+        assert.equal(versions.getDefaultSelection(baseMod, [matched], { updateOnly: true, localVersion: '2.10' }).defaultKey, '', '全部更新仍排除等版本');
+        sb.StartConfig.version = '';
+        assert.equal(versions.getDefaultSelection(baseMod, [matched]).defaultRisk, true, '旧候选残留匹配状态不能在游戏未识别时宣称匹配');
+        assert.match(versions.getDefaultSelection(baseMod, [matched]).defaultReason, /当前游戏版本未能识别/);
     }
 
     {
@@ -422,6 +498,144 @@ module.exports = async function() {
     }
 
     {
+        const diagnostics = { name: 'TimeoutError', message: 'The user aborted a request. <script>bad()</script>', status: '403',
+            retryAfter: '60', rateLimitRemaining: '0', rateLimitReset: '1791000000' };
+        for (const failure of [
+            { status: 504, code: 'RELEASE_UPSTREAM_TIMEOUT', error: '作者发布服务响应超时，请稍后重试' },
+            { status: 429, code: 'RELEASE_REQUEST_LIMITED', error: '版本列表请求过于频繁，请稍后重试' },
+            { status: 429, code: 'RELEASE_RATE_LIMITED', error: '作者发布服务暂时限制请求，请稍后重试' },
+            { status: 502, code: 'FUTURE_RELEASE_ERROR', error: 'upstream connection failed' },
+            { status: 502, error: 'The user aborted a request.' }
+        ]) {
+            const { sb, versions } = loadVersions();
+            sb.modHubMarket.hasCommunityReleaseSource = () => true;
+            sb.fetch = async () => ({ ok: false, status: failure.status, json: async () => ({ ...failure, details: diagnostics }) });
+            await assert.rejects(versions.fetchReleases({ ...baseMod, catalogSource: 'community', autoInstall: true }), error => {
+                assert.ok(/[\u3400-\u9fff]/.test(error.message) && !/The user|connection failed/.test(error.message), '新旧服务端及未知代码的主状态必须使用中文');
+                assert.equal(error.code, failure.code || 'RELEASE_UPSTREAM_FAILED');
+                assert.equal(error.status, failure.status);
+                const info = versions.getHistoryErrorInfo(error);
+                assert.ok(info.details.includes(`原始错误：${diagnostics.message}`));
+                assert.ok(info.details.includes('上游响应：HTTP 403') && info.details.includes('上游剩余请求额度：0'));
+                assert.ok(info.details.includes('建议等待：60') && info.details.includes('上游额度重置时间：1791000000'));
+                return true;
+            });
+        }
+        const legacy = loadVersions();
+        legacy.sb.modHubMarket.hasCommunityReleaseSource = () => true;
+        legacy.sb.fetch = async () => ({ ok: false, status: 502, headers: { get: header => ({ 'Retry-After': '120', 'X-RateLimit-Remaining': '0' }[header] || null) },
+            json: async () => ({ error: 'The user aborted a request.' }) });
+        await assert.rejects(legacy.versions.fetchReleases({ ...baseMod, catalogSource: 'community', autoInstall: true }), error => {
+            assert.ok(error.details.message.includes('The user aborted a request.'));
+            assert.equal(error.details.retryAfter, '120'); assert.equal(error.details.rateLimitRemaining, '0');
+            return true;
+        });
+        const valid = () => ({ schemaVersion: 1, id: baseMod.id, sourceUrl: baseMod.githubUrl, page: 1,
+            hasMore: false, fetchedAt: new Date().toISOString(), communityRevision: 0, releases: [release('1.0', [asset('Example-v1.0.zip')])] });
+        for (const [status, code] of [[504, 'RELEASE_UPSTREAM_TIMEOUT'], [429, 'RELEASE_REQUEST_LIMITED'], [429, 'RELEASE_RATE_LIMITED']]) {
+            const { sb, versions } = loadVersions();
+            sb.modHubMarket.getCommunityRevision = () => 0;
+            sb.fetch = async () => ({ ok: true, json: async () => valid() });
+            await versions.fetchReleases(baseMod);
+            sb.fetch = async () => ({ ok: false, status, json: async () => ({ code, error: '模拟临时上游失败' }) });
+            const cached = await versions.fetchReleases(baseMod, { useCache: false });
+            assert.ok(cached.fromCache && cached.stale, '超时与临时限流继续允许同来源的过期缓存回退');
+        }
+        for (const [status, code] of [[400, 'INVALID_RELEASE_REQUEST'], [403, 'RELEASE_UPSTREAM_DENIED'], [404, 'RELEASE_NOT_FOUND'], [409, 'RELEASE_SOURCE_CHANGED'], [503, 'CATALOG_UNAVAILABLE'], [503, 'FUTURE_CATALOG_ERROR']]) {
+            const { sb, versions } = loadVersions();
+            sb.modHubMarket.getCommunityRevision = () => 0;
+            sb.fetch = async () => ({ ok: true, json: async () => valid() });
+            await versions.fetchReleases(baseMod);
+            let requests = 0;
+            sb.fetch = async () => { requests++; return { ok: false, status, json: async () => ({ code, error: '模拟核验拒绝' }) }; };
+            await assert.rejects(versions.fetchReleases(baseMod, { useCache: false }), error => error.code === code);
+            assert.equal(requests, 1, '拒绝与目录无法核验不能放宽为过期缓存或直连');
+            sb.fetch = async () => { requests++; throw new Error('旧缓存不得保留'); };
+            await assert.rejects(versions.fetchReleases(baseMod), /旧缓存不得保留/, '无法核验响应必须清除原有历史缓存');
+        }
+    }
+
+    {
+        const prefix = 'modhub_market_history_v1_';
+        const responseFor = (mod, page) => ({ schemaVersion: 1, id: mod.id, sourceUrl: mod.githubUrl, page,
+            hasMore: page === 1, fetchedAt: new Date().toISOString(), communityRevision: 0,
+            releases: [release(mod.githubUrl.endsWith('/v2.0') ? '2.0' : '1.0', [asset(`Example-v${mod.githubUrl.endsWith('/v2.0') ? '2.0' : '1.0'}.zip`)])] });
+        for (const failure of ['worker-404', 'state-503', 'direct-404']) {
+            const { sb, versions } = loadVersions();
+            sb.modHubMarket.getCommunityRevision = () => 0;
+            const storage = useEnumerableStorage(sb), base = sb.modHubMarket.RELEASE_WORKER_API_BASE;
+            const target = { ...baseMod, githubUrl: `${baseMod.githubUrl}/releases/tag/v1.0` };
+            const otherMod = { ...target, id: 'other-example' }, otherSource = { ...target, githubUrl: `${baseMod.githubUrl}/releases/tag/v2.0` };
+            sb.fetch = async url => ({ ok: true, json: async () => responseFor(new URL(url).searchParams.get('id') === otherMod.id ? otherMod : target,
+                Number(new URL(url).searchParams.get('page'))) });
+            await versions.fetchReleases(target); await versions.fetchReleases(target, { page: 2 });
+            const targetKeys = [...storage.keys()];
+            const oldSignature = JSON.parse(decodeURIComponent(targetKeys[0].slice(prefix.length)));
+            oldSignature.pop(); oldSignature[2] += '/#旧签名';
+            const oldKey = prefix + encodeURIComponent(JSON.stringify(oldSignature));
+            storage.set(oldKey, storage.get(targetKeys[0]));
+            await versions.fetchReleases(otherMod);
+            const otherModKey = [...storage.keys()].at(-1);
+            sb.fetch = async () => ({ ok: true, json: async () => responseFor(otherSource, 1) });
+            await versions.fetchReleases(otherSource);
+            const otherSourceKey = [...storage.keys()].at(-1);
+            sb.modHubMarket.RELEASE_WORKER_API_BASE = 'https://other-worker.test';
+            sb.fetch = async () => ({ ok: true, json: async () => responseFor(target, 1) });
+            await versions.fetchReleases(target);
+            const otherWorkerKey = [...storage.keys()].at(-1);
+            sb.modHubMarket.RELEASE_WORKER_API_BASE = base;
+            storage.set('dol_opt_mod_order', '保留旧管理设置'); storage.set(prefix + '无法解析的旧键', '保留无法核验归属的旧存储');
+            sb.fetch = async url => failure === 'direct-404' && !String(url).startsWith('https://api.github.com/')
+                ? { ok: false, status: 502, json: async () => ({ code: 'RELEASE_UPSTREAM_FAILED', error: '模拟临时 Worker 故障' }) }
+                : { ok: false, status: failure === 'state-503' ? 503 : 404, json: async () => ({
+                    code: failure === 'state-503' ? 'RELEASE_SOURCE_STATE_UNAVAILABLE' : 'RELEASE_NOT_FOUND', error: '模拟来源核验失败' }) };
+            await assert.rejects(versions.fetchReleases(target, { page: failure === 'direct-404' ? 3 : 1, useCache: false }),
+                error => error.status === (failure === 'state-503' ? 503 : 404));
+            assert.ok([...targetKeys, oldKey].every(key => !storage.has(key)), '不可安全回退错误必须使同来源全部分页及旧签名缓存失效');
+            assert.ok([otherModKey, otherSourceKey, otherWorkerKey].every(key => storage.has(key)), '缓存清理必须保留其他条目、来源和 Worker');
+            assert.equal(storage.get('dol_opt_mod_order'), '保留旧管理设置');
+            assert.ok(storage.has(prefix + '无法解析的旧键'), '无法核验缓存归属时不得扩大清理范围');
+            sb.fetch = async () => { throw new Error('模拟离线，旧页不得回退'); };
+            await assert.rejects(versions.fetchReleases(target, { page: 2 }), /旧页不得回退/, '当前页失效后另一页不得通过热缓存或过期缓存复活');
+            assert.equal((await versions.fetchReleases(otherMod)).fromCache, true);
+            assert.equal((await versions.fetchReleases(otherSource)).fromCache, true);
+            sb.modHubMarket.RELEASE_WORKER_API_BASE = 'https://other-worker.test';
+            assert.equal((await versions.fetchReleases(target)).fromCache, true);
+        }
+        for (const stage of ['worker-success', 'worker-failure', 'direct-success']) {
+            const { sb, versions } = loadVersions();
+            sb.modHubMarket.getCommunityRevision = () => 0;
+            const storage = useEnumerableStorage(sb);
+            sb.fetch = async url => ({ ok: true, json: async () => responseFor(baseMod, Number(new URL(url).searchParams.get('page'))) });
+            await versions.fetchReleases(baseMod); await versions.fetchReleases(baseMod, { page: 2 });
+            let finish;
+            const delayed = new Promise(resolve => { finish = resolve; });
+            sb.fetch = async url => {
+                if (String(url).startsWith('https://api.github.com/')) return { ok: true, json: () => delayed };
+                if (new URL(url).searchParams.get('page') === '1') return { ok: false, status: 404,
+                    json: async () => ({ code: 'RELEASE_NOT_FOUND', error: '模拟来源已失效' }) };
+                if (stage === 'direct-success') throw new Error('模拟 Worker 故障，开始直连');
+                return { ok: stage === 'worker-success', status: stage === 'worker-success' ? 200 : 502, json: () => delayed };
+            };
+            const page = stage === 'direct-success' ? 3 : 2;
+            const pending = versions.fetchReleases(baseMod, { page, useCache: false });
+            for (let index = 0; index < 20; index++) await Promise.resolve();
+            await assert.rejects(versions.fetchReleases(baseMod, { useCache: false }), error => error.code === 'RELEASE_NOT_FOUND');
+            assert.equal([...storage.keys()].filter(key => key.startsWith(prefix)).length, 0);
+            sb.fetch = async () => ({ ok: true, json: async () => responseFor(baseMod, 1) });
+            await versions.fetchReleases(baseMod);
+            const recoveredKey = [...storage.keys()][0], recovered = storage.get(recoveredKey);
+            finish(stage === 'direct-success' ? [{ tag_name: 'v1.0', assets: [{ name: 'Example-v1.0.zip', size: 100,
+                browser_download_url: `${baseMod.githubUrl}/releases/download/v1.0/Example-v1.0.zip` }] }]
+                : stage === 'worker-success' ? responseFor(baseMod, page) : { code: 'RELEASE_UPSTREAM_FAILED', error: '迟到临时错误' });
+            await assert.rejects(pending, error => error.code === 'RELEASE_SOURCE_CHANGED', '失效前启动的网络请求不得用迟到结果更新界面或回退旧快照');
+            assert.deepEqual([...storage.keys()], [recoveredKey], '迟到 Worker 或直连成功不能重新写回其他旧页');
+            assert.equal(storage.get(recoveredKey), recovered, '迟到错误不能再次清空失效后取得的新成功缓存');
+            assert.equal((await versions.fetchReleases(baseMod)).fromCache, true, '失效后启动的新请求仍可正常恢复缓存');
+        }
+    }
+
+    {
         const rawRelease = (version, assets, tag = `v${version}`) => ({ tag_name: tag, name: version,
             published_at: '2026-09-30T00:00:00Z', assets: assets.map(item => ({ name: item.name, size: item.size,
                 browser_download_url: item.downloadUrl.replace(/\/download\/[^/]+\//, `/download/${tag}/`) })) });
@@ -478,13 +692,13 @@ module.exports = async function() {
             await assert.rejects(loaded.versions.fetchReleases(baseMod), /模拟来源核验失败/);
             assert.equal(requests, 1, '来源或审核错误禁止用 GitHub 绕过');
         }
-        for (const status of [500, 502, 503]) {
+        for (const status of [500, 502, 503, 504]) {
             const loaded = loadVersions();
             loaded.sb.modHubMarket.getCommunityRevision = () => 0;
             let requests = 0;
             loaded.sb.fetch = async url => { requests++; return String(url).startsWith('https://api.github.com/')
                 ? { ok: true, json: async () => [current] }
-                : { ok: false, status, json: async () => ({ code: 'RELEASE_UPSTREAM_FAILED', error: '模拟上游服务失败' }) }; };
+                : { ok: false, status, json: async () => ({ code: status === 504 ? 'RELEASE_UPSTREAM_TIMEOUT' : 'RELEASE_UPSTREAM_FAILED', error: '模拟上游服务失败' }) }; };
             assert.equal((await loaded.versions.fetchReleases(baseMod)).fromGithub, true);
             assert.equal(requests, 2, '已明确的临时上游服务错误允许历史直连回退');
         }

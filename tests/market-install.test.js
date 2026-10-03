@@ -532,9 +532,15 @@ module.exports = async function() {
             assert.equal(f.state.waits, 1, '最后的同版检查必须在管理器等待完成后读取本地状态');
             assert.equal(f.state.imports, 0);
             assert.equal(f.state.reloads, 0);
-            assert.deepEqual(f.state.failure, { reason: '当前所选版本已安装，无需重复安装', code: 'ALREADY_INSTALLED' });
+            if (preparedFirst) {
+                assert.equal(f.state.failure.code, 'INSTALL_PACKAGE_INVALID', '等待期间本地状态改变须重新生成计划，不能沿用旧预检');
+                assert.match(f.state.failure.reason, /本地组件状态已变化/);
+            } else {
+                assert.deepEqual(f.state.failure, { reason: '当前所选版本已安装，无需重复安装', code: 'ALREADY_INSTALLED' });
+            }
             assert.equal(f.sb.localStorage.getItem('modhub_market_confirmed_updates_v1'), null, '阻止重复安装不得登记版本确权');
-            assert.equal(f.card.querySelector('.modhub-download-progress').hidden, true, '阻止重复后清理下载进度');
+            assert.equal(f.card.querySelector('.modhub-download-progress').hidden, !preparedFirst,
+                '直接阻止重复须清理进度，等待期间状态变化则保留失败原因');
         }
         {
             const f = fixture();

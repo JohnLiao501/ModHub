@@ -31,6 +31,65 @@ module.exports = async function() {
         assert.equal(updated.version, '2.102.0', '同名新缓存必须覆盖旧运行时声明');
         assert.deepEqual([...updated.bootJson.alias], ['CurrentAlias']);
     }
+    // 作者展示名与包内技术名不同时，旧索引和离线目录也须使用精确身份。
+    {
+        const catalog = JSON.parse(fs.readFileSync(path.join(srcRoot, '..', 'mod-identities.json'), 'utf8'));
+        const fixtures = [
+            { id: 'midsummer-night-dream', legacyId: '多恋人淫啪-mnd-hotel', name: '多恋人淫啪',
+                repo: 'youmu1818/MND-Hotel', bootName: 'MidsummerNightDream', nickName: '仲夏夜之梦', version: '1.1' },
+            { id: 'deadwood-reblooms', legacyId: '枯木逢春-deadwood-reblooms', name: '枯木逢春',
+                repo: 'MaplebirchLeaf/Deadwood-Reblooms', bootName: 'deadwood-reblooms', nickName: '枯木逢春', version: '1.3.1' }
+        ];
+        for (const fixture of fixtures) {
+            const sb = loadMarket(), market = sb.modHubMarket;
+            const cache = [];
+            sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getModCacheArray: () => cache }) } });
+            const source = `https://github.com/${fixture.repo}`;
+            const raw = { id: fixture.legacyId, identityId: null, name: fixture.name, githubUrl: source,
+                bootNames: [], aliases: [], repositoryKeys: [], version: fixture.version, versionSource: 'github',
+                releaseUrl: `${source}/releases/tag/v${fixture.version}` };
+            const [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, identities: [], mods: [raw] });
+            const identity = catalog.mods.find(item => item.id === fixture.id);
+            assert.ok(identity, '共享身份表须包含已核验包体的技术名');
+            assert.equal(mod.id, fixture.legacyId, '旧索引条目 ID 须保留，不能破坏服务端历史查询');
+            assert.equal(mod.identityId, identity.id);
+            for (const field of ['bootNames', 'aliases', 'repositories', 'repositoryKeys', 'tags']) {
+                assert.deepEqual(Array.from(mod[field]), identity[field], `内置与共享身份的 ${field} 须一致`);
+            }
+            assert.equal(mod.category, identity.category);
+            assert.equal(market.checkModInstallStatus(mod), 'not_installed');
+            const boot = { name: fixture.bootName, version: fixture.version, nickName: { cn: fixture.nickName } };
+            cache.push({ mod: { name: boot.name, bootJson: boot } });
+            assert.equal(market.checkModInstallStatus(mod), 'up_to_date', '新安装包重读后须立即识别为已安装');
+            assert.equal(mod._matchedLocal?.name, fixture.bootName);
+            assert.equal(mod._matchedLocal?.version, fixture.version);
+
+            cache.length = 0;
+            sb._modHubModState = { sideEnabled: [], sideDisabled: [boot.name], sideMods: [{ name: boot.name, enabled: false }], builtInMods: [] };
+            sb._modHubDisabledModInfo.set(boot.name.toLowerCase(), { name: boot.name, bootJson: boot });
+            assert.equal(market.checkModInstallStatus(mod), 'up_to_date', '已禁用的真实安装包仍须识别为已安装');
+            sb._modHubModState = null;
+            sb._modHubDisabledModInfo.clear();
+
+            for (const falseBoot of [
+                { name: 'UnrelatedNativeMod', version: fixture.version, nickName: fixture.name, alias: [fixture.bootName], repository: source },
+                { name: fixture.bootName, version: fixture.version, repository: `https://github.com/Another/${fixture.repo.split('/')[1]}` },
+                { name: `${fixture.bootName}-audio`, version: fixture.version, nickName: fixture.name, repository: source }
+            ]) {
+                cache.splice(0, cache.length, { mod: { name: falseBoot.name, bootJson: falseBoot } });
+                assert.equal(market.checkModInstallStatus(mod), 'not_installed', '昵称、依赖别名、错误作者或音频扩展均不能冒充主包');
+                assert.equal(mod._matchedLocal, null);
+            }
+            const [wrongSource] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ ...raw,
+                githubUrl: `https://github.com/Another/${fixture.repo.split('/')[1]}` }] });
+            assert.equal(wrongSource.identityId, null, '同名不同仓库的旧索引不能补用内置身份');
+            const [otherProduct] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ ...raw, name: `${fixture.name}音频包` }] });
+            assert.equal(otherProduct.identityId, null, '同仓库其他产品不能补用主包身份');
+            const [community] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ ...raw, catalogSource: 'community',
+                sourceUrl: `${source}/releases/latest`, sourcePlatform: 'github', autoInstall: false }] });
+            assert.equal(community.identityId, null, '未核验社区条目不能由内置映射替代审核关联');
+        }
+    }
     /* =========================================================================
      * 10. 统一索引契约（网站 release-index / 身份目录 <-> Mod 端消费）
      * ========================================================================= */

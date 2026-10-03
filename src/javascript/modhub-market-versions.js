@@ -4,6 +4,7 @@
 
     const MODHUB_HISTORY_CACHE_PREFIX = 'modhub_market_history_v1_';
     const MODHUB_HISTORY_CACHE_TTL = 6 * 60 * 60 * 1000;
+    const MODHUB_HISTORY_GENERATIONS = new Map();
     // Worker 的上游查询最多等待 15 秒，为往返与目录核验保留时间。
     const MODHUB_HISTORY_TIMEOUT = 20000;
 
@@ -100,6 +101,86 @@
         return error;
     }
 
+    function unsafeHistoryError(error) {
+        return ['INVALID_RELEASE_REQUEST', 'RELEASE_PAGE_UNAVAILABLE', 'MOD_RELEASES_UNAVAILABLE', 'MANUAL_SOURCE', 'RELEASE_NOT_FOUND', 'RELEASE_SOURCE_CHANGED', 'RELEASE_RESPONSE_INVALID', 'CATALOG_UNAVAILABLE'].includes(error?.code)
+            || [400, 401, 403, 404, 409].includes(error?.status)
+            || error?.status === 503 && error?.code !== 'RELEASE_UPSTREAM_FAILED';
+    }
+
+    /** 同一服务、条目和发布来源的全部历史页失效，兼容旧签名字段。 */
+    function invalidateHistoryFamily(family, cacheKey) {
+        const familyKey = JSON.stringify(family);
+        MODHUB_HISTORY_GENERATIONS.set(familyKey, (MODHUB_HISTORY_GENERATIONS.get(familyKey) || 0) + 1);
+        const keys = new Set([cacheKey]);
+        try {
+            for (let index = 0; index < localStorage.length; index++) {
+                const key = localStorage.key(index);
+                if (!key?.startsWith(MODHUB_HISTORY_CACHE_PREFIX)) continue;
+                try {
+                    const signature = JSON.parse(decodeURIComponent(key.slice(MODHUB_HISTORY_CACHE_PREFIX.length)));
+                    if (Array.isArray(signature) && signature[0] === family[0] && signature[1] === family[1]
+                        && normalizeSource(signature[2]) === family[2]) keys.add(key);
+                } catch (_) {}
+            }
+        } catch (_) {}
+        for (const key of keys) { try { localStorage.removeItem(key); } catch (_) {} }
+    }
+
+    /** 中文主状态与原始诊断分开，兼容旧服务端和未知错误代码。 */
+    function getHistoryErrorInfo(error) {
+        const raw = typeof error?.message === 'string' ? error.message.trim() : '';
+        const messages = {
+            ABORT_ERR: '已取消获取历史版本',
+            RELEASE_TIMEOUT: '版本列表读取超时，请重试版本列表',
+            RELEASE_UPSTREAM_TIMEOUT: '历史发布服务响应超时，请稍后重试版本列表',
+            RELEASE_REQUEST_LIMITED: '版本列表请求过于频繁，请稍后重试',
+            RELEASE_RATE_LIMITED: '作者发布服务暂时限制请求，请稍后重试',
+            RELEASE_UPSTREAM_DENIED: '作者发布服务拒绝了请求，请稍后重试或查看作者主页',
+            RELEASE_UPSTREAM_FAILED: '历史发布服务暂不可用，请稍后重试',
+            CATALOG_UNAVAILABLE: '暂时无法核验模组目录，请稍后重试',
+            INVALID_RELEASE_REQUEST: '无法识别模组历史发布请求',
+            RELEASE_PAGE_UNAVAILABLE: '暂时无法核验所请求的历史页，请刷新版本列表',
+            MOD_RELEASES_UNAVAILABLE: '该模组来源已撤回，请刷新市场',
+            MANUAL_SOURCE: '该模组未获准自动安装，请前往作者主页',
+            RELEASE_NOT_FOUND: '指定发布已失效，请查看作者主页',
+            RELEASE_SOURCE_CHANGED: '历史发布来源已变化，请刷新市场后重试',
+            RELEASE_RESPONSE_INVALID: '历史发布数据格式异常，请稍后重试'
+        };
+        const message = /[\u3400-\u9fff]/.test(raw) ? raw : messages[error?.code]
+            || (error?.status === 429 ? '版本列表请求暂时受限，请稍后重试' : '版本列表读取失败，请稍后重试或查看作者主页');
+        const details = [];
+        if (typeof error?.code === 'string' && error.code) details.push(`错误代码：${error.code}`);
+        const diagnostic = error?.details && typeof error.details === 'object' ? error.details : {};
+        if (diagnostic.name) details.push(`异常类型：${diagnostic.name}`);
+        if (diagnostic.message) details.push(`原始错误：${diagnostic.message}`);
+        else if (raw && raw !== message) details.push(`原始错误：${raw}`);
+        if (error?.status) details.push(`服务响应：HTTP ${error.status}`);
+        if (diagnostic.status) details.push(`上游响应：HTTP ${diagnostic.status}`);
+        if (diagnostic.retryAfter) details.push(`建议等待：${diagnostic.retryAfter}`);
+        if (diagnostic.rateLimitRemaining !== undefined) details.push(`上游剩余请求额度：${diagnostic.rateLimitRemaining}`);
+        if (diagnostic.rateLimitReset) details.push(`上游额度重置时间：${diagnostic.rateLimitReset}`);
+        return { message, details };
+    }
+
+    function responseHistoryError(failure, response, service) {
+        const raw = typeof failure?.error === 'string' ? failure.error : typeof failure?.message === 'string' ? failure.message : '';
+        const error = historyError(raw || `${service}暂不可用（HTTP ${response.status}）`,
+            typeof failure?.code === 'string' ? failure.code : 'RELEASE_UPSTREAM_FAILED', response.status);
+        const details = {};
+        for (const key of ['name', 'message', 'status', 'retryAfter', 'rateLimitRemaining', 'rateLimitReset']) {
+            const value = failure?.details?.[key];
+            if (typeof value === 'string' || typeof value === 'number' && Number.isFinite(value)) details[key] = String(value).slice(0, 1000);
+        }
+        for (const [key, header] of [['retryAfter', 'Retry-After'], ['rateLimitRemaining', 'X-RateLimit-Remaining'], ['rateLimitReset', 'X-RateLimit-Reset']]) {
+            const value = response.headers?.get?.(header);
+            if (details[key] === undefined && value) details[key] = String(value).slice(0, 1000);
+        }
+        if (raw && !/[\u3400-\u9fff]/.test(raw) && !details.message) details.message = raw;
+        error.details = details;
+        error.message = getHistoryErrorInfo(error).message;
+        return error;
+    }
+
     function getReleaseSource(value) {
         try {
             const url = new URL(value);
@@ -163,7 +244,7 @@
                 if (!response.ok) {
                     let failure = null;
                     try { failure = await response.json(); } catch (_) {}
-                    throw historyError(failure?.error || failure?.message || `${service}暂不可用（HTTP ${response.status}）`, failure?.code || 'RELEASE_UPSTREAM_FAILED', response.status);
+                    throw responseHistoryError(failure, response, service);
                 }
                 try { return { data: await response.json(), response }; } catch (error) {
                     if (error?.name === 'SyntaxError') throw historyError('历史发布数据格式异常，请稍后重试', 'RELEASE_RESPONSE_INVALID');
@@ -235,8 +316,6 @@
     async function fetchReleases(mod, { page = 1, signal, useCache = true } = {}) {
         const market = window.modHubMarket;
         if (!mod?.id || !Number.isSafeInteger(page) || page < 1) throw historyError('无法识别模组历史发布请求', 'INVALID_RELEASE_REQUEST');
-        if (market?.isWithdrawn?.(mod)) throw historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE');
-        if (mod.autoInstall === false || mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) throw historyError('该模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE');
         const sourceUrl = normalizeSource(mod.githubUrl);
         const source = getReleaseSource(sourceUrl);
         if (!sourceUrl || !source) throw historyError('该模组没有可用的发布来源', 'MANUAL_SOURCE');
@@ -248,6 +327,19 @@
             mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
             mod.bootNames || [], mod.aliases || [], mod.sharedRepository, page, 'modpack-v1']);
         const cacheKey = MODHUB_HISTORY_CACHE_PREFIX + encodeURIComponent(signature);
+        const family = [base.origin, mod.id, sourceUrl], familyKey = JSON.stringify(family);
+        const generation = MODHUB_HISTORY_GENERATIONS.get(familyKey) || 0;
+        const checkCurrent = () => {
+            if ((MODHUB_HISTORY_GENERATIONS.get(familyKey) || 0) !== generation) {
+                throw historyError('历史发布来源的状态已更新，请重新读取版本列表', 'RELEASE_SOURCE_CHANGED', 409);
+            }
+        };
+        const rejectUnsafe = error => {
+            if (unsafeHistoryError(error)) invalidateHistoryFamily(family, cacheKey);
+            throw error;
+        };
+        if (market?.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
+        if (mod.autoInstall === false || mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) rejectUnsafe(historyError('该模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE'));
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch (_) {}
         const validResponse = data => data?.schemaVersion === 1 && data.id === mod.id
@@ -264,23 +356,27 @@
         let data;
         try {
             ({ data } = await requestHistoryJson(url, { signal }));
+            checkCurrent();
             if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
         } catch (error) {
             if (signal?.aborted || error?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
-            const unsafe = ['INVALID_RELEASE_REQUEST', 'MOD_RELEASES_UNAVAILABLE', 'MANUAL_SOURCE', 'RELEASE_NOT_FOUND', 'RELEASE_SOURCE_CHANGED', 'RELEASE_RESPONSE_INVALID', 'CATALOG_UNAVAILABLE'].includes(error?.code)
-                || [400, 401, 403, 404, 409].includes(error?.status)
-                || error?.status === 503 && error?.code !== 'RELEASE_UPSTREAM_FAILED';
-            if (unsafe) {
-                try { localStorage.removeItem(cacheKey); } catch (_) {}
-                throw error;
-            }
+            checkCurrent();
+            if (unsafeHistoryError(error)) rejectUnsafe(error);
             if (cached) return { ...cached.data, fromCache: true, stale: true };
             if (mod.catalogSource === 'community') throw error;
-            data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
-            if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
+            try {
+                data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
+                checkCurrent();
+                if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
+            } catch (directError) {
+                if (signal?.aborted || directError?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+                checkCurrent();
+                rejectUnsafe(directError);
+            }
         }
         if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
-        if (market.isWithdrawn?.(mod)) throw historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE');
+        checkCurrent();
+        if (market.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
         const fetchedAt = Math.min(Date.now(), Date.parse(data.fetchedAt));
         data = { ...data, stale: Boolean(data.stale || Date.now() - fetchedAt >= MODHUB_HISTORY_CACHE_TTL) };
         try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
@@ -345,11 +441,13 @@
                 const version = market.getAssetVersionParts(asset.name).join('.') || release.version
                     || String(release.name || '').trim().match(/^v?(\d+(?:\.\d+)+)$/i)?.[1]
                     || (String(tagName).match(/(?:^|[^a-z0-9])v?(\d+(?:\.\d+)*)(?=$|[^a-z0-9.])/i)?.[1] || '');
-                const selectedAssets = [asset, ...market.getMatchingCompanionAssets(asset, plan.availableAssets || assets)];
+                const selectedAssets = [{ ...asset, packageRole: market.getAssetRole?.(asset.name) || 'main' },
+                    ...market.getMatchingCompanionAssets(asset, plan.availableAssets || assets).map(companion => ({ ...companion, packageRole: 'resource' }))];
                 candidates.push({ candidateKey, selectedKey: candidateKey, seriesKey: market.getAssetSeries(asset.name),
                     tagName, releaseName: release.name || '', htmlUrl: release.htmlUrl || '', version,
                     assetName: asset.name, assetUrl: asset.downloadUrl, assetSize: Number(asset.size) || 0, assetDigest: asset.digest || '',
-                    assets: selectedAssets, availableAssets: plan.availableAssets || assets, candidateAssets: [asset],
+                    assets: selectedAssets, optionalAssets: market.getMatchingOptionalAssets?.(asset, plan.availableAssets || assets) || [],
+                    availableAssets: plan.availableAssets || assets, candidateAssets: [asset],
                     requiresManualSelection: false, selectionReason: '', updateDate: String(release.publishedAt || '').slice(0, 10),
                     compatibility: candidateCompatibility(asset, release, gameVersion),
                     ...(Array.isArray(asset.dependencies) ? { dependencies: asset.dependencies }
@@ -360,17 +458,49 @@
         return candidates;
     }
 
-    function getLatestGameCandidate(mod, candidates) {
+    function matchesCurrentGame(candidate, gameVersion) {
+        const info = candidate.compatibility || {};
+        return Boolean(gameVersion && !info.referenceMismatch && info.status !== 'incompatible'
+            && (info.evidence === 'declaration' && info.status === 'compatible'
+                || info.evidence === 'filename' && info.targetGameVersion
+                    && window.modHubMarket.compareVersions(info.targetGameVersion, gameVersion) === 0));
+    }
+
+    function latestUnambiguousCandidate(candidates) {
         const market = window.modHubMarket;
+        const sorted = candidates.filter(candidate => normalizeGameVersion(candidate.version)).sort((a, b) =>
+            market.compareVersions(b.version, a.version) || String(b.updateDate).localeCompare(String(a.updateDate)));
+        if (!sorted.length) return null;
+        const latest = sorted.filter(candidate => market.compareVersions(candidate.version, sorted[0].version) === 0);
+        const assetNames = new Set(latest.map(candidate => String(candidate.assetName || candidate.assets?.[0]?.name || candidate.candidateKey).toLowerCase()));
+        return assetNames.size === 1 ? sorted[0] : null;
+    }
+
+    function getLatestGameCandidate(mod, candidates) {
         const gameVersion = getGameVersion();
-        if (!gameVersion || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
-        return [...candidates].filter(candidate => {
-            const info = candidate.compatibility || {};
-            return normalizeGameVersion(candidate.version) && !info.referenceMismatch && info.status !== 'incompatible'
-                && (info.evidence === 'declaration' && info.status === 'compatible'
-                    || info.evidence === 'filename' && info.targetGameVersion && market.compareVersions(info.targetGameVersion, gameVersion) === 0);
-        }).sort((a, b) => market.compareVersions(b.version, a.version)
-            || String(b.updateDate).localeCompare(String(a.updateDate)))[0] || null;
+        if (!gameVersion || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
+        return latestUnambiguousCandidate(candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion)));
+    }
+
+    /** 默认选择仅减少操作步骤，不能替代安装包的实际适配核对。 */
+    function getDefaultSelection(mod, candidates, { updateOnly = false, localVersion = mod?._matchedLocal?.version || '' } = {}) {
+        const empty = { defaultKey: '', defaultReason: '', defaultRisk: false };
+        if (!candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return empty;
+        const market = window.modHubMarket, gameVersion = getGameVersion();
+        const matching = candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion));
+        const matched = getLatestGameCandidate(mod, candidates);
+        const latest = matching.length ? matched : !updateOnly && latestUnambiguousCandidate(candidates);
+        if (!latest || localVersion && market.compareVersions(latest.version, localVersion) < 0
+            || updateOnly && (!localVersion || market.compareVersions(latest.version, localVersion) <= 0)) return empty;
+        let defaultReason;
+        if (matched) defaultReason = latest.compatibility?.evidence === 'declaration'
+            ? '已默认选择作者声明支持当前游戏的最新版本，下一步将核对安装包中的说明。'
+            : '已根据安装包名称默认选择匹配当前游戏的最新版本，下一步将核对安装包中的说明。';
+        else if (!gameVersion) defaultReason = '当前游戏版本未能识别，已默认选择最新版本；安装前需确认适配风险。';
+        else if (latest.compatibility?.evidence === 'unknown' || !latest.compatibility?.evidence)
+            defaultReason = '作者未声明支持的游戏版本，已默认选择最新版本；安装前需确认适配风险。';
+        else defaultReason = '没有找到匹配当前游戏的版本，已默认选择最新版本；安装前需确认适配风险。';
+        return { defaultKey: latest.candidateKey, defaultReason, defaultRisk: !matched };
     }
 
     function rankCandidates(mod, candidates, { updateOnly = false, localVersion = mod?._matchedLocal?.version || '' } = {}) {
@@ -378,18 +508,16 @@
         const gameVersion = getGameVersion();
         const rank = candidate => {
             const info = candidate.compatibility || {};
-            if (info.status === 'compatible' && info.evidence === 'declaration') return 0;
+            if (matchesCurrentGame(candidate, gameVersion)) return 0;
             if (info.status === 'incompatible' || info.referenceMismatch) return 3;
-            if (info.evidence === 'filename' && info.targetGameVersion && gameVersion
-                && market.compareVersions(info.targetGameVersion, gameVersion) === 0) return 1;
             return 2;
         };
         const sorted = [...candidates].sort((a, b) => rank(a) - rank(b)
             || market.compareVersions(b.version, a.version) || String(b.updateDate).localeCompare(String(a.updateDate)));
-        const series = new Set(sorted.map(candidate => candidate.seriesKey));
-        const recommended = updateOnly ? getLatestGameCandidate(mod, sorted) : series.size === 1 ? sorted.find(candidate => rank(candidate) < 2) : null;
+        const recommended = getLatestGameCandidate(mod, sorted);
         return { candidates: sorted, recommendedKey: recommended
-            && (!updateOnly || localVersion && market.compareVersions(recommended.version, localVersion) > 0) ? recommended.candidateKey : '', gameVersion };
+            && (!updateOnly || localVersion && market.compareVersions(recommended.version, localVersion) > 0) ? recommended.candidateKey : '',
+            ...getDefaultSelection(mod, sorted, { updateOnly, localVersion }), gameVersion };
     }
 
     function renderCandidateOptions(candidates, recommendedKey = '') {
@@ -402,5 +530,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, buildCandidates, getLatestGameCandidate, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

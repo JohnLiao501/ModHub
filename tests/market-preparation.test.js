@@ -50,6 +50,171 @@ module.exports = async function () {
         sb.modHubConfirm = async () => { state.confirms++; return false; };
         return { sb, mod, releaseInfo, state, view, addCard, market: sb.modHubMarket };
     };
+    const optionalAudioFixture = () => {
+        const base = fixture(), { sb, state } = base;
+        const mod = { id: 'deadwood-reblooms', identityId: 'deadwood-reblooms', name: '枯木逢春',
+            bootNames: ['deadwood-reblooms'], version: '1.3.1', githubUrl: 'https://github.com/MaplebirchLeaf/Deadwood-Reblooms' };
+        const mainName = 'deadwood-reblooms-0.5.12.13-v1.3.1.modpack';
+        const audioName = 'deadwood-reblooms-audio-0.5.12.13-v1.3.1.modpack';
+        const releaseInfo = { tagName: 'v1.3.1', version: '1.3.1', assets: [
+            { name: mainName, downloadUrl: `${mod.githubUrl}/releases/download/v1.3.1/${mainName}`, packageRole: 'main' },
+            { name: audioName, downloadUrl: `${mod.githubUrl}/releases/download/v1.3.1/${audioName}`,
+                packageRole: 'audio', optional: true, bootName: 'deadwood-reblooms-audio' }
+        ] };
+        const mainBoot = { name: 'deadwood-reblooms', version: '1.3.1', dependenceInfo: [] };
+        const audioBoot = { name: 'deadwood-reblooms-audio', version: '1.3.1',
+            dependenceInfo: [{ modName: mainBoot.name, version: '>=1.3.1' }] };
+        state.packBoots = new Map([[1, mainBoot], [2, audioBoot]]);
+        state.localBoots = new Map([[mainBoot.name, mainBoot]]);
+        state.disabledNames = new Set();
+        state.importedFiles = [];
+        const syncState = () => sb._modHubModState = {
+            sideEnabled: [...state.localBoots.keys()].filter(name => !state.disabledNames.has(name)),
+            sideDisabled: [...state.localBoots.keys()].filter(name => state.disabledNames.has(name)),
+            sideMods: [...state.localBoots.keys()].map(name => ({ name, enabled: !state.disabledNames.has(name) })), builtInMods: [] };
+        syncState();
+        sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getModCacheArray: () =>
+            [...state.localBoots.values()].map(bootJson => ({ mod: { name: bootJson.name, bootJson } })) }) } });
+        sb.modHubLoadModManageState = async () => syncState();
+        sb.fetch = async url => {
+            state.downloads++;
+            return { ok: true, headers: { get: () => null }, blob: async () =>
+                new Blob([new Uint8Array([String(url).includes('-audio-') ? 2 : 1])]) };
+        };
+        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async bytes => {
+            state.reads++;
+            return state.packBoots.get(bytes[0]);
+        } });
+        sb.modHubHandleAddMod = async (input, options) => {
+            assert.equal(options.keepCurrentTab, true, '只新增扩展也须保持市场页签');
+            state.imports++;
+            const files = Array.isArray(input) ? input : Array.from(input.files);
+            state.importedFiles.push(files.map(file => file.name));
+            for (const file of files) {
+                const boot = state.packBoots.get(new Uint8Array(await file.arrayBuffer())[0]);
+                state.localBoots.set(boot.name, boot);
+            }
+            syncState();
+            return true;
+        };
+        return { ...base, mod, releaseInfo, mainBoot, audioBoot, mainName, audioName, syncState };
+    };
+    {
+        const { market, mod, releaseInfo, state, mainName, audioName, syncState } = optionalAudioFixture();
+        state.localBoots.clear();
+        syncState();
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, batchMode: true, askRestart: false }), true);
+        assert.deepEqual(state.importedFiles, [[mainName, audioName]], '首次安装须在整组核验后一次性导入所选主包与扩展');
+        assert.equal(state.imports, 1);
+        assert.equal(state.reads, 2);
+    }
+    {
+        const { market, mod, releaseInfo, state, mainBoot, audioBoot, audioName } = optionalAudioFixture();
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        assert.deepEqual(Array.from(prepared.boots, boot => boot.name), [mainBoot.name, audioBoot.name],
+            '预检须核验全部所选组件，不能因主包同版跳过扩展清单');
+        assert.equal(state.reads, 2);
+        assert.equal(state.imports, 0);
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared,
+            batchMode: true, askRestart: false }), true, '主包同版时仍须安装新增音频组件');
+        assert.deepEqual(state.importedFiles, [[audioName]], '最终导入仅包含缺少的音频，不重复写入同版主包');
+        assert.equal(state.localBoots.get(mainBoot.name), mainBoot, '复用主包须保留真实原生清单');
+        assert.equal(state.localBoots.get(audioBoot.name), audioBoot);
+        assert.equal(state.downloads, 2, '最终执行须复用预检包体');
+        assert.equal(state.reads, 4, '最终写入前仍须重新核验两个组件');
+    }
+    {
+        const { market, mod, releaseInfo, state, audioBoot, syncState } = optionalAudioFixture();
+        state.localBoots.set(audioBoot.name, audioBoot);
+        syncState();
+        let failure;
+        const options = { releaseInfo, batchMode: true, askRestart: false,
+            onFailure: (reason, code) => { failure = { reason, code }; } };
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { ...options, prepareOnly: true });
+        assert.ok(prepared, '全部同版时预检仍应返回所选组件清单');
+        assert.equal(prepared.boots.length, 2);
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { ...options, preparedPackage: prepared }), false);
+        assert.equal(failure.code, 'ALREADY_INSTALLED', '只有全部组件均同版且启用时才报告无需重复安装');
+        assert.equal(state.imports, 0);
+        assert.equal(state.reads, 4);
+    }
+    {
+        const { market, mod, releaseInfo, state, audioBoot, syncState } = optionalAudioFixture();
+        state.localBoots.set(audioBoot.name, audioBoot);
+        state.disabledNames.add(audioBoot.name);
+        syncState();
+        let failure;
+        const options = { releaseInfo, batchMode: true, askRestart: false,
+            onFailure: (reason, code) => { failure = { reason, code }; } };
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { ...options, prepareOnly: true });
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { ...options, preparedPackage: prepared }), true,
+            '同版扩展已禁用时须允许后续确认计划处理启用，不能报告全部已经启用');
+        assert.equal(failure, undefined);
+        assert.equal(state.imports, 0, '启用同版组件不应再次写入安装包');
+    }
+    for (const invalidBoot of [false, { name: 'UnrelatedAudio', version: '1.3.1' }]) {
+        const { market, mod, releaseInfo, state, syncState } = optionalAudioFixture();
+        state.localBoots.clear();
+        syncState();
+        state.packBoots.set(2, invalidBoot);
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, batchMode: true, askRestart: false,
+            onFailure: (reason, code) => { failure = { reason, code }; } }), false);
+        assert.equal(failure.code, 'INSTALL_PACKAGE_INVALID');
+        assert.equal(state.imports, 0, '扩展清单无效或身份不符必须阻止整组导入，不能先写入主包');
+        assert.equal(state.localBoots.size, 0);
+        assert.equal(state.reads, 2, '主包核验成功后还须核验扩展');
+    }
+    for (const changedField of ['version', 'dependenceInfo']) {
+        const { market, mod, releaseInfo, state, audioBoot } = optionalAudioFixture();
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        state.packBoots.set(2, { ...audioBoot, ...(changedField === 'version' ? { version: '1.3.2' }
+            : { dependenceInfo: [{ modName: 'NewFramework', version: '>=2.0' }] }) });
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared,
+            batchMode: true, askRestart: false, onFailure: (reason, code) => { failure = { reason, code }; } }), false,
+            `扩展清单 ${changedField} 改变后必须停止旧计划`);
+        assert.equal(failure.code, 'INSTALL_PACKAGE_INVALID');
+        assert.equal(state.imports, 0, '预检后扩展版本或前置改变必须停止旧计划');
+        assert.equal(state.downloads, 2);
+    }
+    for (const changedState of ['mainVersion', 'mainDependencies', 'mainEnabled', 'audioInstalled']) {
+        const { market, mod, releaseInfo, state, mainBoot, audioBoot, syncState } = optionalAudioFixture();
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        if (changedState === 'mainVersion') state.localBoots.set(mainBoot.name, { ...mainBoot, version: '1.3.2' });
+        if (changedState === 'mainDependencies') state.localBoots.set(mainBoot.name, { ...mainBoot,
+            dependenceInfo: [{ modName: 'ExistingFramework', version: '>=2.0' }] });
+        if (changedState === 'mainEnabled') state.disabledNames.add(mainBoot.name);
+        if (changedState === 'audioInstalled') state.localBoots.set(audioBoot.name, audioBoot);
+        syncState();
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared,
+            batchMode: true, askRestart: false, onFailure: (reason, code) => { failure = { reason, code }; } }), false,
+            `本地组件状态 ${changedState} 改变后必须停止旧计划`);
+        assert.equal(failure.code, 'INSTALL_PACKAGE_INVALID');
+        assert.equal(state.imports, 0, '准备后本地组件版本、依赖、启用或安装状态改变必须重新确认计划');
+        assert.equal(state.downloads, 2);
+    }
+    {
+        const { sb, market, mod, releaseInfo, state, mainBoot, audioBoot, audioName, syncState } = optionalAudioFixture();
+        const actualMain = { ...mainBoot, dependenceInfo: [{ modName: 'GameVersion', version: '=0.5.7.9' }] };
+        state.localBoots.set(actualMain.name, actualMain);
+        syncState();
+        sb.modHubMarketVersions = { getGameVersion: () => '0.5.12.13', assessCompatibility: () => ({
+            status: 'incompatible', reason: '复用主包声明适配其他游戏版本'
+        }) };
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        assert.equal(prepared.boots[0], mainBoot, '预检原始下载清单须保留，不能改写为本地复用清单');
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared,
+            batchMode: true, askRestart: false }), false, '复用主包的真实游戏版本要求也须参与最终风险确认');
+        assert.equal(state.confirms, 1);
+        assert.equal(state.imports, 0);
+        const approvedCompatibilityRisks = market.getPreparedCompatibilityRisks([actualMain, audioBoot]).map(risk => risk.key);
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared,
+            batchMode: true, askRestart: false, approvedCompatibilityRisks }), true);
+        assert.deepEqual(state.importedFiles, [[audioName]]);
+        assert.equal(state.localBoots.get(mainBoot.name), actualMain, '确认风险后仍保留真实本地主包与原有依赖');
+    }
     {
         const { sb, market, mod, releaseInfo, state } = fixture();
         const restore = sb.modHubRestore, finish = restore.finish;

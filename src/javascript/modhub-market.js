@@ -45,6 +45,7 @@
     const preparedMarketPackages = new WeakMap();
     const modUpdateChecks = new Map();
     const COMPANION_ASSET_PATTERN = /(?:photo|image|resource|asset)[\s._-]*pack|图包|图片包|资源包|素材包/i;
+    const MODHUB_OPTIONAL_AUDIO_PATTERN = /(?:^|[\s._-])(?:audio(?:[\s._-]*pack)?|(?:sound|music|bgm)[\s._-]*pack)(?=[\s._-]|$)|音频包|音乐包|音效包/i;
 
     // 针对社区个别模组作者打包失误（如 Release 为新版但内部 boot.json 未递增）或 Wiki 录入虚高版本的容错规则库
     const MOD_MARKET_VERSION_RULES = [
@@ -1403,6 +1404,32 @@
     ].map(identity => ({ ...identity, repositoryKeys: ['AOKIUTAGE/UTAGEsDOL3.0'], category: '外观与资源' }));
     applyIdentityCatalog(AU_MARKET_IDENTITIES);
 
+    // 已核对作者包内技术名；用于旧索引及身份服务不可用时的精确识别。
+    const MODHUB_VERIFIED_MARKET_IDENTITIES = [
+        { id: 'midsummer-night-dream', name: '多恋人淫啪', bootNames: ['MidsummerNightDream'],
+            aliases: ['仲夏夜之梦', 'Midsummer Night Dream'], repositories: ['MND-Hotel'],
+            repositoryKeys: ['youmu1818/MND-Hotel'], category: '玩法与内容', tags: ['恋爱'], dependencies: [{ id: 'maplebirch' }] },
+        { id: 'deadwood-reblooms', name: '枯木逢春', bootNames: ['deadwood-reblooms'],
+            aliases: ['Deadwood Reblooms'], repositories: ['Deadwood-Reblooms'],
+            repositoryKeys: ['MaplebirchLeaf/Deadwood-Reblooms'], category: '玩法与内容', tags: ['农场', '剧情'], dependencies: [{ id: 'maplebirch' }] }
+    ];
+    applyIdentityCatalog(MODHUB_VERIFIED_MARKET_IDENTITIES);
+
+    function applyVerifiedMarketIdentity(mod) {
+        // 社区目录的身份须由审核明确关联，不能由客户端替代审核决定。
+        if (mod.catalogSource === 'community') return mod;
+        const repoKey = extractRepoKey(mod.githubUrl);
+        const nameKey = normalizeKey(cleanModTitle(mod.name || mod.wikiName));
+        const identity = MODHUB_VERIFIED_MARKET_IDENTITIES.find(item => item.repositoryKeys.some(key => key.toLowerCase() === repoKey)
+            && [item.name, ...item.bootNames, ...item.aliases, ...item.repositories].some(name => normalizeKey(name) === nameKey));
+        if (!identity || (mod.identityId && mod.identityId !== identity.id)) return mod;
+        // 保留索引条目 ID，历史查询仍须使用服务端实际存在的目录标识。
+        return { ...mod, identityId: identity.id, bootNames: [...identity.bootNames], aliases: [...identity.aliases],
+            repositories: [...identity.repositories], repositoryKeys: [...identity.repositoryKeys],
+            category: identity.category, tags: [...identity.tags],
+            dependencies: normalizeDependencyList([...(identity.dependencies || []), ...(mod.dependencies || [])]) };
+    }
+
     function normalizeDependencyList(value) {
         if (!Array.isArray(value)) return [];
         const seen = new Set();
@@ -1667,6 +1694,7 @@
 
     function markSharedRepositories(mods) {
         mods = mods.map(mod => {
+            mod = applyVerifiedMarketIdentity(mod);
             if (extractRepoKey(mod.githubUrl) !== 'aokiutage/utagesdol3.0') return mod;
             const identity = AU_MARKET_IDENTITIES.find(item => normalizeKey(item.name) === normalizeKey(cleanModTitle(mod.name || mod.wikiName)));
             return identity ? { ...mod, identityId: identity.id, bootNames: identity.bootNames, dependencies: getModDependencies(mod) } : mod;
@@ -1850,6 +1878,28 @@
             && (!getAssetVersionParts(asset.name).length || getAssetVersionParts(asset.name).join('.') === mainVersion));
     }
 
+    function getAssetRole(asset) {
+        const name = typeof asset === 'string' ? asset : asset?.name || '';
+        if (MODHUB_OPTIONAL_AUDIO_PATTERN.test(name)) return 'audio';
+        return COMPANION_ASSET_PATTERN.test(name) ? 'resource' : 'main';
+    }
+
+    /** 音频扩展须与主包在同一发布中精确配对，独立音频模组仍保留为安装候选。 */
+    function getMatchingOptionalAssets(main, assets) {
+        if (!main || getAssetRole(main) === 'audio') return [];
+        const version = getAssetVersionParts(main.name).join('.');
+        if (!version) return [];
+        const releasePath = value => { try { const url = new URL(value); return url.origin + url.pathname.slice(0, url.pathname.lastIndexOf('/')); } catch (_) { return ''; } };
+        const source = releasePath(main.downloadUrl);
+        return (assets || []).filter(asset => asset.downloadUrl !== main.downloadUrl && getAssetRole(asset) === 'audio'
+            && source && releasePath(asset.downloadUrl) === source
+            && getAssetSeries(asset.name.replace(MODHUB_OPTIONAL_AUDIO_PATTERN, '')) === getAssetSeries(main.name)
+            && getAssetVersionParts(asset.name).join('.') === version
+            && getAssetGameVersion(asset.name) === getAssetGameVersion(main.name))
+            .map(asset => ({ ...asset, packageRole: 'audio', optional: true,
+                ...(getAssetSeries(asset.name) === 'deadwoodrebloomsaudio' ? { bootName: 'deadwood-reblooms-audio' } : {}) }));
+    }
+
     function buildReleaseAssetPlan(assets, gameVersion = window.StartConfig?.version || '', mod = null, options = {}) {
         let downloadable = (assets || []).filter(asset => asset?.downloadUrl
             && /\.(?:zip|mod|modpack(?:\.crypt)?)$/i.test(asset.name || '')
@@ -1862,8 +1912,10 @@
             || !modelNames.has(packageStem(asset.name.replace(/\.imgpack(?=[._-])/i, '.model'))));
         if (!downloadable.length) return { assets: [], candidates: [], availableAssets: [], needsChoice: false, reason: '没有可自动导入的模组安装包' };
 
-        const identified = mod ? downloadable.filter(asset => matchesAssetIdentity(asset, mod)) : [];
-        let mainCandidates = identified.length ? identified : downloadable.filter(asset => !COMPANION_ASSET_PATTERN.test(asset.name || ''));
+        const optionalUrls = new Set(downloadable.flatMap(asset => getMatchingOptionalAssets(asset, downloadable)).map(asset => asset.downloadUrl));
+        const mainAssets = downloadable.filter(asset => !optionalUrls.has(asset.downloadUrl));
+        const identified = mod ? mainAssets.filter(asset => matchesAssetIdentity(asset, mod)) : [];
+        let mainCandidates = identified.length ? identified : mainAssets.filter(asset => !COMPANION_ASSET_PATTERN.test(asset.name || ''));
         if (!mainCandidates.length) mainCandidates = downloadable;
         if ((mod?.identityId || mod?.id) === 'au-beautification' && mod._matchedLocal?.name) {
             // 更新已装模型时保留其类型，避免更新女体却另外装入男体或中性模型。
@@ -4488,12 +4540,25 @@
 
     function getPreparedPackageSource(mod, releaseInfo) {
         return JSON.stringify([getMarketModKey(mod), mod.githubUrl, releaseInfo?.tagName || '',
-            getReleaseInstallAssets(releaseInfo).map(asset => [asset.name, asset.downloadUrl, asset.size || 0, asset.digest || ''])]);
+            getReleaseInstallAssets(releaseInfo).map(asset => [asset.name, asset.downloadUrl, asset.size || 0, asset.digest || '', Boolean(asset.optional), asset.bootName || '', asset.packageRole || ''])]);
     }
 
     function getPreparedDependencySnapshot(boots) {
         return JSON.stringify(boots.map(boot => [boot.name, boot.version, Array.isArray(boot.alias) ? boot.alias : [],
             (Array.isArray(boot.dependenceInfo) ? boot.dependenceInfo : []).filter(dependency => dependency.modName !== 'GameVersion')]));
+    }
+
+    const modHubComponentDisabled = name => (window._modHubModState?.sideDisabled || []).some(item => String(item).toLowerCase() === String(name).toLowerCase())
+        || (window._modHubModState?.sideMods || []).some(item => String(item.name).toLowerCase() === String(name).toLowerCase() && item.enabled === false);
+
+    function getPreparedLocalComponentSnapshot(boots) {
+        const profiles = getLocalInstalledProfiles();
+        return JSON.stringify(boots.map(boot => {
+            const local = profiles.find(profile => String(profile.name).trim().toLowerCase() === String(boot.name).trim().toLowerCase());
+            const actual = local?.bootJson || local;
+            return [boot.name, actual ? [actual.name, actual.version, actual.alias || [], actual.dependenceInfo || []] : null,
+                local ? !modHubComponentDisabled(local.name) : false];
+        }));
     }
 
     function formatVersionRiskMessage(message) {
@@ -4853,8 +4918,18 @@
                         if ((index === 0 || communityInstall) && expectedNames.length && !expectedNames.includes(actualName.toLowerCase())) {
                             throw new Error(`所选【${mod.name}】的安装包实际为【${actualName}】，与已确认的模组身份不符，已停止安装。`);
                         }
+                        const asset = installAssets[index];
+                        if (asset?.optional && (asset.bootName ? actualName.toLowerCase() !== asset.bootName.toLowerCase()
+                            : getAssetSeries(actualName) !== getAssetSeries(asset.name))) {
+                            throw new Error(`所选扩展【${file.name}】实际为【${actualName}】，与扩展身份不符，已停止安装。`);
+                        }
+                        if (boots.some(item => item.name.toLowerCase() === actualName.toLowerCase())) {
+                            throw new Error(`所选安装文件重复提供【${actualName}】，请重新选择安装包。`);
+                        }
                         if (index === 0) {
-                            const unmet = options.dependencyRequirements?.filter(dependency => !satisfiesDependency(boot, dependency)) || [];
+                            const profile = getLocalInstalledProfiles().find(local => String(local.name).trim().toLowerCase() === actualName.toLowerCase());
+                            const effectiveBoot = isSameVersion(boot.version, profile?.version) ? profile.bootJson || profile : boot;
+                            const unmet = options.dependencyRequirements?.filter(dependency => !satisfiesDependency(effectiveBoot, dependency)) || [];
                             if (unmet.length) {
                                 const requirements = unmet.map(dependency => {
                                     const range = getDependencyVersion(dependency, boot);
@@ -4875,18 +4950,25 @@
             if (preparedSnapshot && preparedSnapshot.dependencies !== getPreparedDependencySnapshot(boots)) {
                 throw Object.assign(new Error('安装包的身份、版本或前置声明已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
             }
+            if (preparedSnapshot && preparedSnapshot.localComponents !== getPreparedLocalComponentSnapshot(boots)) {
+                throw Object.assign(new Error('本地组件版本、依赖或启用状态已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
+            }
             if (options.prepareOnly) {
                 const prepared = { files: fileObjects, boots, releaseInfo,
                     bytes: fileObjects.reduce((sum, file) => sum + file.size, 0),
                     modKey: getMarketModKey(mod), sourceFingerprint: getPreparedPackageSource(mod, releaseInfo) };
                 preparedMarketPackages.set(prepared, { source: prepared.sourceFingerprint, files: fileObjects.slice(),
-                    dependencies: getPreparedDependencySnapshot(boots) });
+                    dependencies: getPreparedDependencySnapshot(boots), localComponents: getPreparedLocalComponentSnapshot(boots) });
                 clearActiveDownload();
                 reportProgress(100, '包体已核验，等待确认安装计划', 'prepared');
                 return prepared;
             }
+            const componentProfiles = getLocalInstalledProfiles();
+            const sameComponent = boot => boot && componentProfiles.find(profile =>
+                String(profile.name).trim().toLowerCase() === String(boot.name).trim().toLowerCase() && isSameVersion(boot.version, profile.version));
+            const effectiveBoots = boots.map(boot => { const profile = sameComponent(boot); return profile?.bootJson || profile || boot; });
             const approvedRisks = new Set(options.approvedCompatibilityRisks || []);
-            const newRisks = getPreparedCompatibilityRisks(boots).filter(risk => !approvedRisks.has(risk.key));
+            const newRisks = getPreparedCompatibilityRisks(effectiveBoots).filter(risk => !approvedRisks.has(risk.key));
             if (newRisks.length) {
                 const gameVersion = window.modHubMarketVersions?.getGameVersion();
                 const localProfiles = getLocalInstalledProfiles();
@@ -4910,6 +4992,8 @@
             }
             reportProgress(100, installAssets.length === 1 ? '下载完成，正在安装...' : `${installAssets.length} 个安装包下载完成，正在安装...`, 'installing');
 
+            const filesToImport = fileObjects.filter((file, index) => !sameComponent(boots[index]));
+
             // 3. 构造虚拟文件列表并一次性交给 ModLoader 批量导入。
             let dummyInput = document.createElement('input');
             dummyInput.type = 'file';
@@ -4918,13 +5002,13 @@
             if (typeof DataTransfer !== 'undefined') {
                 try {
                     const dt = new DataTransfer();
-                    fileObjects.forEach(fileObj => dt.items.add(fileObj));
+                    filesToImport.forEach(fileObj => dt.items.add(fileObj));
                     dummyInput.files = dt.files;
                 } catch (_) {
-                    dummyInput.files = fileObjects;
+                    dummyInput.files = filesToImport;
                 }
             } else {
-                dummyInput.files = fileObjects;
+                dummyInput.files = filesToImport;
             }
 
             // 4. 调用已有的智能模组导入器
@@ -4938,25 +5022,28 @@
             }
             if (controller?.signal.aborted) throw Object.assign(new Error('已取消安装'), { name: 'AbortError' });
             const primaryBoot = boots[0];
-            const installedProfile = primaryBoot && getLocalInstalledProfiles().find(profile =>
-                String(profile.name).trim().toLowerCase() === String(primaryBoot.name).trim().toLowerCase());
-            if (isSameVersion(primaryBoot?.version, installedProfile?.version)) {
+            if (preparedSnapshot && preparedSnapshot.localComponents !== getPreparedLocalComponentSnapshot(boots)) {
+                throw Object.assign(new Error('等待写入时本地组件状态已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
+            }
+            if (!filesToImport.length && !boots.some(boot => sameComponent(boot) && modHubComponentDisabled(boot.name))) {
                 clearActiveDownload();
                 resetDownloadProgress(mod.name);
                 if (progressTargetName !== mod.name) resetDownloadProgress(progressTargetName);
                 window.modHubShowToast('当前所选版本已安装，无需重复安装', 'info');
                 return failBatch('当前所选版本已安装，无需重复安装', 'ALREADY_INSTALLED');
             }
-            if (typeof window.modHubHandleAddMod !== 'function' && options.restoreContext && window.modHubRestore?.prepare &&
+            if (filesToImport.length && typeof window.modHubHandleAddMod !== 'function' && options.restoreContext && window.modHubRestore?.prepare &&
                 !await window.modHubRestore.prepare(options.restoreContext)) return failBatch('已取消没有还原点的安装');
-            if (typeof window.modHubHandleAddMod === 'function') {
-                const installed = await window.modHubHandleAddMod(dummyInput.files && dummyInput.files.length > 0 ? dummyInput : fileObjects, {
+            if (!filesToImport.length) {
+                // 同版且已禁用的组件由确认计划后的管理器操作启用，不重新写入包体。
+            } else if (typeof window.modHubHandleAddMod === 'function') {
+                const installed = await window.modHubHandleAddMod(dummyInput.files && dummyInput.files.length > 0 ? dummyInput : filesToImport, {
                     askRestart,
                     skipReloadOffer: options.skipReloadOffer,
                     // 市场内安装：「稍后重载」后停留市场页签，方便玩家连续安装多个模组
                     keepCurrentTab: true,
                     restoreContext: options.restoreContext,
-                    targetModName: mod._matchedLocal?.name || '',
+                    targetModName: filesToImport[0] === fileObjects[0] ? mod._matchedLocal?.name || '' : '',
                     displayName: mod.name || ''
                 });
                 if (installed === false || (options.batchMode && installed !== true)) {
@@ -4966,7 +5053,7 @@
                     return failBatch(reason || '安装未完成');
                 }
             } else if (typeof window.modHubInstallFilesViaIndexDB === 'function') {
-                await window.modHubInstallFilesViaIndexDB(fileObjects);
+                await window.modHubInstallFilesViaIndexDB(filesToImport);
             } else if (typeof gui.loadAndAddMod === 'function') {
                 await gui.loadAndAddMod(dummyInput);
             } else {
@@ -5017,7 +5104,7 @@
             if (err?.code === 'INSTALL_PACKAGE_INVALID') {
                 reportProgress(null, err.message, 'error');
                 if (!options.batchMode) await window.modHubAlert(err.message, '安装包校验失败');
-                return failBatch(err.message);
+                return failBatch(err.message, err.code);
             }
             console.warn('[ModHub] 页面内自动安装失败:', err);
             reportProgress(null, isDigestFailure ? '完整性校验失败，已阻止安装' : (isTooLarge ? '安装包较大，可改用浏览器下载' : '自动安装失败，请重试或改用浏览器下载'), 'error');
@@ -6293,6 +6380,8 @@
         getAssetSeries,
         getAssetVersionParts,
         getMatchingCompanionAssets,
+        getMatchingOptionalAssets,
+        getAssetRole,
         getPreparedCompatibilityRisks,
         formatVersionRiskMessage,
         getReleaseInstallAssets,

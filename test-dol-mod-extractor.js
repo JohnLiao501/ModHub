@@ -32,6 +32,22 @@ async function main() {
   const [locket] = mergeModIdentities([{ name: '同心吊坠文本拓展', githubUrl: 'https://github.com/koooooiCarp/DOL-Love-Locket-Text-Expansion-Mod' }], catalog);
   assert.equal(locket.releaseCompatibility.length, 2, 'Wiki 回退身份合并必须保留历史适配规则');
   assert.equal(locket.releaseCompatibility[1].dependencies[0].id, 'simple-framework', '旧版不能套用新版框架前置');
+  const knownPackages = mergeModIdentities([
+    { name: '多恋人淫啪', githubUrl: 'https://github.com/youmu1818/MND-Hotel' },
+    { name: '仲夏夜之梦', githubUrl: 'https://github.com/youmu1818/MND-Hotel' },
+    { name: '枯木逢春', githubUrl: 'https://github.com/MaplebirchLeaf/Deadwood-Reblooms' },
+    { name: '枯木逢春音频包', githubUrl: 'https://github.com/MaplebirchLeaf/Deadwood-Reblooms' },
+    { name: 'deadwood-reblooms-audio', githubUrl: 'https://github.com/MaplebirchLeaf/Deadwood-Reblooms' },
+    { name: '多恋人淫啪', githubUrl: 'https://github.com/Another/MND-Hotel' },
+    { name: '枯木逢春', githubUrl: 'https://github.com/Another/Deadwood-Reblooms' },
+  ], catalog);
+  assert.deepEqual(knownPackages.map(mod => mod.identityId),
+    ['midsummer-night-dream', 'midsummer-night-dream', 'deadwood-reblooms', null, null, null, null],
+    '作者昵称须关联真实主包，音频扩展与其他作者仓库不能继承主包身份');
+  assert.deepEqual(knownPackages[0].bootNames, ['MidsummerNightDream']);
+  assert.deepEqual(knownPackages[2].bootNames, ['deadwood-reblooms'], '主包技术名必须排除音频扩展');
+  assert.deepEqual(knownPackages[0].dependencies, [{ id: 'maplebirch', version: '' }]);
+  assert.deepEqual(knownPackages[2].dependencies, [{ id: 'maplebirch', version: '' }]);
   const originalHistoryFetch = globalThis.fetch;
   try {
     const sourceUrl = 'https://github.com/Owner/Repo';
@@ -41,6 +57,26 @@ async function main() {
     };
     assert.equal((await modHubFetchModReleases({ id: 'sample', githubUrl: `${sourceUrl}/#tab` }, { page: 2 })).page, 2);
     await assert.rejects(modHubFetchModReleases({ id: 'sample', githubUrl: 'https://github.com/Other/Repo' }, { page: 2 }), /发布来源/);
+    globalThis.fetch = async () => Response.json({ code: 'RELEASE_UPSTREAM_TIMEOUT',
+      error: 'The user aborted a request.', details: { name: 'AbortError', message: 'The user aborted a request.' } }, { status: 504 });
+    await assert.rejects(modHubFetchModReleases({ id: 'sample', githubUrl: sourceUrl }), error => {
+      assert.match(error.message, /响应超时/);
+      assert.equal(error.status, 504);
+      assert.equal(error.details.name, 'AbortError');
+      assert.equal(error.details.message, 'The user aborted a request.');
+      return true;
+    });
+    globalThis.fetch = async () => Response.json({ code: 'RELEASE_RATE_LIMITED', error: 'API rate limit exceeded' }, {
+      status: 429, headers: { 'Retry-After': '90', 'X-RateLimit-Remaining': '0', 'X-RateLimit-Reset': '1791021600' },
+    });
+    await assert.rejects(modHubFetchModReleases({ id: 'sample', githubUrl: sourceUrl }), error => {
+      assert.match(error.message, /访问限制/);
+      assert.equal(error.details.retryAfter, '90');
+      assert.equal(error.details.rateLimitRemaining, '0');
+      assert.equal(error.details.rateLimitReset, '1791021600');
+      assert.equal(error.details.message, 'API rate limit exceeded');
+      return true;
+    });
   } finally { globalThis.fetch = originalHistoryFetch; }
   assert.ok(catalog.mods.every((mod) => !mod.repositories.length
     || (Array.isArray(mod.repositoryKeys) && mod.repositoryKeys.every((key) => /^[^/]+\/[^/]+$/.test(key)))),
