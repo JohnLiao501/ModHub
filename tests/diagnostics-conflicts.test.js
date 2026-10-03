@@ -528,22 +528,30 @@ module.exports = async function() {
         manager.document.getElementById = id => id === 'modHubLogContent' ? { querySelectorAll: () => rows } : null;
         manager.document.createElement = () => ({ getContext: () => context });
         manager._modHubLastLogAnalysis = { errorCount: 2, warnCount: 0 };
+        manager.StartConfig = { version: '0.5.12.13' };
+        manager.modLoaderGui = { gModUtils: { version: '2.101.1' } };
 
         await manager.modHubCaptureLogScreenshot();
+        assert.ok(drawnText.some(text => text.startsWith('游戏版本: DoL 0.5.12.13  |  ModLoader: 2.101.1  |')), '新游戏截图必须显示实际游戏和加载器版本');
         assert.ok(drawnText.includes('当前截取: 100 / 125 条 (筛选：全部日志)'), '截断截图必须标明截取数和筛选后总数');
         assert.ok(drawnText.includes('(仅截取前 100 条，已省略 25 条；请筛选「仅错误」或复制日志查看其余项)'), '截断截图必须明确省略条数与查看方式');
         assert.ok(drawnText.includes('测试日志 100') && !drawnText.includes('测试日志 125'), '截图仍只保留前一百行');
 
         drawnText.length = 0;
         rows = allRows.slice(0, 100);
+        delete manager.StartConfig;
+        delete manager.modLoaderGui;
         await manager.modHubCaptureLogScreenshot();
+        assert.ok(drawnText.some(text => text.startsWith('游戏版本: DoL 未识别  |  ModLoader: 未识别  |')), '没有运行时版本时截图必须明确未识别，不能编造历史游戏或加载器版本');
         assert.ok(drawnText.includes('当前截取: 100 / 100 条 (筛选：全部日志)'), '恰好一百行时必须显示完整截取范围');
         assert.ok(!drawnText.some(text => text.includes('已省略')), '未截断截图不得显示省略提示');
 
         drawnText.length = 0;
         rows = allRows;
         manager._modHubCurrentLogLevelFilter = 'error';
+        manager.modUtils = { version: '2.101.1' };
         await manager.modHubCaptureLogScreenshot();
+        assert.ok(drawnText.some(text => text.startsWith('游戏版本: DoL 未识别  |  ModLoader: 2.101.1  |')), '仅有兼容 GUI 代理时截图必须读取实际加载器版本');
         assert.ok(drawnText.includes('当前截取: 2 / 2 条 (筛选：仅错误)'), '仅错误截图的总数必须使用筛选后的条数');
         assert.ok(drawnText.includes('测试日志 1') && drawnText.includes('测试日志 125') && !drawnText.includes('测试日志 2'), '仅错误筛选必须保留末尾错误并排除普通日志');
         assert.ok(!drawnText.some(text => text.includes('已省略')), '筛选结果未截断时不得沿用全量日志的省略提示');

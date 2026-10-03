@@ -82,7 +82,7 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.2.1', 'boot.json 版本号必须为 1.2.1');
+    assert.equal(bootJson.version, '1.2.2', 'boot.json 版本号必须为 1.2.2');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
@@ -122,6 +122,29 @@ module.exports = async function() {
     for (const patch of managerPatches) {
         assert.ok(patch.tip.startsWith('【ModHub】'), `补丁 tip 必须以【ModHub】标识: ${patch.tip}`);
         assert.ok(fs.existsSync(path.join(srcRoot, patch.replaceFile)), `补丁文件必须存在: ${patch.replaceFile}`);
+    }
+
+    // 新游戏入口原文须唯一匹配，替换后保留原有入口并只插入一次 ModHub 入口。
+    {
+        const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures', 'game-0.5.12.13-patches.json'), 'utf8'));
+        assert.equal(fixture.gameVersion, '0.5.12.13');
+        assert.equal(fixture.patches.length, managerPatches.length, '新版夹具必须覆盖全部入口补丁');
+        for (const original of fixture.patches) {
+            const patch = managerPatches.find(item => item.passage === original.passage);
+            assert.ok(patch, `${original.passage} 必须保留对应补丁`);
+            const replacement = fs.readFileSync(path.join(srcRoot, patch.replaceFile), 'utf8').replace(/\r\n/g, '\n');
+            const variants = patch.findRegex ? [original.content, original.content.replace(/\n/g, '\r\n')] : [original.content];
+            for (const content of variants) {
+                const matcher = patch.findString || new RegExp(patch.findRegex, patch.regexFlag);
+                const count = typeof matcher === 'string' ? content.split(matcher).length - 1 : [...content.matchAll(matcher)].length;
+                assert.equal(count, 1, `${original.passage} 的游戏原文必须唯一匹配`);
+                const result = content.replace(matcher, replacement);
+                assert.equal(result.split(original.inserted).length - 1, 1, `${original.passage} 必须只插入一次 ModHub 入口`);
+                for (const retained of original.preserved) {
+                    assert.equal(result.split(retained).length - 1, 1, `${original.passage} 必须完整保留原有 ${retained}`);
+                }
+            }
+        }
     }
 
     // 1.4 彻底解耦契约：杜绝占用 BeautySelectorAddon 图包槽位，移除无用依赖

@@ -1310,8 +1310,8 @@ window.modHubCaptureLogScreenshot = async function() {
     ctx.fillStyle = '#aaa';
     ctx.font = '12px sans-serif';
     const nowStr = new Date().toLocaleString();
-    const dolVer = window.StartConfig?.version || '0.5.11.9';
-    const mlVer = window.modLoaderGui?.gModUtils?.version || '2.x';
+    const dolVer = window.StartConfig?.version || '未识别';
+    const mlVer = window.modHubGetGui?.()?.gModUtils?.version || '未识别';
     ctx.fillText(`游戏版本: DoL ${dolVer}  |  ModLoader: ${mlVer}  |  生成时间: ${nowStr}`, padding + 16, padding + 54);
 
     ctx.font = 'bold 13px sans-serif';

@@ -126,13 +126,13 @@ if (typeof window !== 'undefined' && !window._modHubGlobalErrorHooked) {
 }
 
 // 工具函数：获取 ModLoader Gui 实例
-// ModLoader v2.101.1 起移除了 window.modLoaderGui，改用 window.modModLoadController + window.modUtils 直接暴露底层接口。
-// 此处返回兼容层，将旧版 GUI 方法自动映射到新版 API，保证上层代码零感知平滑降级。
+// 不同发行包可能保留 GUI 实例，也可能仅通过 modModLoadController 与 modUtils 暴露底层接口。
+// 优先复用 GUI；缺少 GUI 时提供最小兼容代理，统一上层调用。
 window.modHubGetGui = function() {
     const legacyGui = window.modLoaderGui || window.modLoaderGuiInstance || null;
     if (legacyGui) return legacyGui;
 
-    // ModLoader v2.101.1+ 兼容：构造最小化 GUI 代理对象
+    // 仅有底层接口时构造最小化 GUI 代理对象
     const controller = window.modModLoadController ||
         (window.modSC2DataManager && typeof window.modSC2DataManager.getModLoadController === 'function'
             ? window.modSC2DataManager.getModLoadController() : null);
@@ -142,22 +142,22 @@ window.modHubGetGui = function() {
     if (!controller && !modUtils) return null;
 
     return {
-        // listSideLoad* 已移除，映射到 ModLoadController IndexedDB 直读接口
+        // 旁加载列表映射到 ModLoadController IndexedDB 直读接口
         listSideLoadModNameOnly: controller
             ? () => controller.listModIndexDB()
             : () => Promise.resolve([]),
         listSideLoadHiddenModNameOnly: controller
             ? () => controller.loadHiddenModList()
             : () => Promise.resolve([]),
-        // gModUtils 直接映射到新版全局 modUtils
+        // gModUtils 直接映射到全局 modUtils
         gModUtils: modUtils,
         // modModLoadController 保留引用
         modModLoadController: controller,
         // modLoadSwitch 安全模式开关（兼容旧版操作逻辑）
         modLoadSwitch: modUtils?.getModLoadSwitch ? modUtils.getModLoadSwitch() : null,
-        // getModTReadMe 在 v2.101.1 中已移除，置为 null 让调用处的 typeof 守卫正确跳过
+        // 代理不提供 GUI 说明接口，由调用方的守卫选择包体读取路径
         getModTReadMe: null,
-        // loadAndAddMod 在 v2.101.1 中已移除，modHubHandleAddMod 内部已单独处理
+        // 模组导入由 modHubHandleAddMod 统一使用原生控制器处理
         loadAndAddMod: null,
     };
 };

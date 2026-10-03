@@ -389,11 +389,18 @@ button.modhub-btn-primary:active,
     color: var(--500) !important;
 }
 
-/* ========== 顶部操作按钮组 ========== */
+/* ========== 顶部操作按钮组（按容器可用宽度换行） ========== */
 .modhub-header-actions {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 8px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.modhub-header-actions button {
+    flex-shrink: 0;
 }
 
 /* ========== 拖拽排序与指示线 ========== */
@@ -2589,6 +2596,10 @@ button.modhub-btn-primary:active,
         line-height: 1.35;
         white-space: normal !important;
         box-sizing: border-box;
+    }
+
+    #modHubModManageContainer .modhub-btn-group button {
+        min-height: 32px !important;
     }
 
     #modHubModManageContainer .modhub-stats-container {

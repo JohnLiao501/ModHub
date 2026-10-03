@@ -1,0 +1,37 @@
+{
+    "description": "从正式游戏 HTML 原文抽取的最小入口片段，仅验证 ModHub 补丁匹配与替换结果，不代表完整游戏运行验收。",
+    "gameVersion": "0.5.12.13",
+    "releaseUrl": "https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases/tag/v0.5.12.13-chs-1.0.1a",
+    "htmlSha256": "9ecc02d91e481054bed564a4fe1975dd5c2e38edc051e9fac350ae5bebe282a5",
+    "patches": [
+        {
+            "passage": "overlayReplace",
+            "content": "\t<<switch _key>>\n\t\t<<case \"characteristics\">>\n\t\t\t<<replace #customOverlayTitle>><<titleCharacteristics>><</replace>>\n\t\t\t<<replace #customOverlayContent>><<characteristics>><</replace>>\n\t\t<<case \"social\">>",
+            "preserved": [
+                "<<switch _key>>",
+                "<<case \"characteristics\">>",
+                "<<case \"social\">>"
+            ],
+            "inserted": "<<case \"modloader\">>"
+        },
+        {
+            "passage": "Widgets Clothing Caption",
+            "content": "\t<div class=\"sidebarButtonSplit\">\n\t\t<<button OPTIONS>>\n\t\t\t<<overlayReplace \"options\">>\n\t\t<</button>>\n\t\t<<button FEATS>>\n\t\t\t<<overlayReplace \"startFeats\">>\n\t\t<</button>>\n\t</div>\n<</widget>>",
+            "preserved": [
+                "<<overlayReplace \"options\">>",
+                "<<overlayReplace \"startFeats\">>",
+                "<</widget>>"
+            ],
+            "inserted": "<<overlayReplace \"modloader\">>"
+        },
+        {
+            "passage": "StoryCaption",
+            "content": "\t\t\t<div class=\"sidebarButtonSplit\">\n\t\t\t\t<<button OPTIONS>>\n\t\t\t\t\t<<overlayReplace \"options\">>\n\t\t\t\t<</button>>\n\t\t\t\t<<button SAVES>>\n\t\t\t\t\t<<overlayReplace \"saves\">>\n\t\t\t\t<</button>>\n\t\t\t</div>\n\t\t</div>",
+            "preserved": [
+                "<<overlayReplace \"options\">>",
+                "<<overlayReplace \"saves\">>"
+            ],
+            "inserted": "<<overlayReplace \"modloader\">>"
+        }
+    ]
+}

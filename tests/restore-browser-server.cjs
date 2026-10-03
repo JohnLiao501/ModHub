@@ -7,8 +7,10 @@ const crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const root = path.resolve(__dirname, '..');
 const src = path.join(root, 'src');
-const gamePath = path.resolve(root, '..', 'DoL-ModLoader-0.5.11.9-v2.101.1', 'Degrees of Lewdity.html');
 const args = process.argv.slice(2);
+const gameArg = args.indexOf('--game');
+if (gameArg >= 0 && (!args[gameArg + 1] || args[gameArg + 1].startsWith('--'))) throw new Error('--game 后须提供游戏 HTML 路径');
+const gamePath = gameArg < 0 ? path.resolve(root, '..', 'DoL-ModLoader-0.5.12.13-v2.101.1', 'Degrees of Lewdity.html') : path.resolve(args[gameArg + 1]);
 const portArg = args.indexOf('--port');
 const port = portArg < 0 ? 0 : Number(args[portArg + 1]);
 if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('端口应为 0 至 65535 的整数');
@@ -61,8 +63,36 @@ const readDriver = () => {
 };
 readDriver();
 const original = fs.readFileSync(gamePath, 'utf8');
+const gameVersion = original.match(/\b(?:const|let|var)\s+StartConfig\s*=\s*\{[^}]*\bversion\s*:\s*["']([^"']+)["']/)?.[1];
+if (!gameVersion) throw new Error('游戏 HTML 中未找到 StartConfig.version，无法核验验收基线');
 const embedded = /window\.modDataValueZipList\s*=\s*\[[\s\S]*?\];/;
 if (!embedded.test(original)) throw new Error('真实游戏中未找到内嵌模组入口，已停止加工');
+function gamePassage(name) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const match = original.match(new RegExp(`<tw-passagedata[^>]*name="${escaped}"[^>]*>([\\s\\S]*?)</tw-passagedata>`));
+    if (!match) throw new Error(`游戏中未找到补丁目标段落：${name}`);
+    const entities = { '&lt;': '<', '&gt;': '>', '&quot;': '"', '&#39;': "'", '&amp;': '&' };
+    return match[1].replace(/&(?:lt|gt|quot|#39|amp);/g, entity => entities[entity]);
+}
+function verifyGameCompatibility() {
+    const patches = boot.addonPlugin.find(plugin => plugin.modName === 'TweeReplacer').params;
+    for (const patch of patches) {
+        const content = gamePassage(patch.passage);
+        const count = patch.findString ? content.split(patch.findString).length - 1 : [...content.matchAll(new RegExp(patch.findRegex, patch.regexFlag))].length;
+        if (count !== 1) throw new Error(`DoL ${gameVersion} 的 ${patch.passage} 补丁匹配 ${count} 处，应唯一匹配`);
+    }
+    const overlay = gamePassage('overlayReplace');
+    for (const widget of ['setupTabs', 'toggleTab', 'closeButtonMobile', 'closeButton']) {
+        if (!overlay.includes(`<<widget "${widget}">>`)) throw new Error(`DoL ${gameVersion} 缺少原生界面组件：${widget}`);
+    }
+    for (const id of ['customOverlay', 'customOverlayTitle', 'customOverlayContent']) {
+        if (!original.includes(`id="${id}"`)) throw new Error(`DoL ${gameVersion} 缺少原生界面容器：${id}`);
+    }
+    for (const variable of ['--000', '--600', '--850', '--gold', '--red']) {
+        if (!new RegExp(`${variable}\\s*:`).test(original)) throw new Error(`DoL ${gameVersion} 缺少原生调色变量：${variable}`);
+    }
+    return patches.length;
+}
 function configuration(mode) {
     const prefix = `${namespace}_${mode}`;
     const keys = {
@@ -127,13 +157,17 @@ const server = http.createServer(async (req, res) => {
     } catch (error) { send(res, 500, 'text/plain; charset=utf-8', `验收服务错误：${error.message}`); }
 });
 if (args.includes('--self-test')) {
+    const patchCount = verifyGameCompatibility();
     const game = currentGame();
     if (!game.includes(packages.get('current').toString('base64')) || !game.includes(configuration('game').keys.ModLoader_IndexDBLoader)) throw new Error('内存注入校验失败');
-    console.log(`内存注入校验通过：真实游戏 ${Buffer.byteLength(original)} 字节，当前包 ${packages.get('current').length} 字节，当前包与 ${packages.size - 1} 个测试包均未落盘。`);
+    console.log(`DoL ${gameVersion} 静态兼容核验通过：${patchCount} 个入口补丁均唯一匹配，原生组件、容器及调色变量齐全。`);
+    console.log(`验收游戏：${gamePath}`);
+    console.log(`内存注入校验通过：真实游戏 ${Buffer.byteLength(original)} 字节，当前包 ${packages.get('current').length} 字节，当前包与 ${packages.size - 1} 个测试包均未落盘。此检查不代表完整游戏运行验收。`);
 } else {
     server.listen(port, '127.0.0.1', () => {
         const origin = `http://127.0.0.1:${server.address().port}`;
         console.log(`ModHub ${boot.version} 隔离验收服务已启动，仅监听本机。`);
+        console.log(`验收游戏：DoL ${gameVersion}，${gamePath}`);
         console.log(`原生存储验收：${origin}/harness`);
         console.log(`真实游戏验收：${origin}/game`);
         console.log(`测试库前缀：${namespace}_。停止服务请按 Ctrl+C。`);

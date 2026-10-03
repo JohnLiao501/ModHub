@@ -2,6 +2,14 @@
 
 Degrees of Lewdity (DoL) 模组管理套件，基于 ModLoader 2.x 运行时与 TweeReplacer 补丁架构。
 
+v1.2.2 的适配基线为 [DoL 0.5.12.13 中文发行版](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases/tag/v0.5.12.13-chs-1.0.1a)，该发行版使用 ModLoader 2.101.1。ModHub 的三个界面补丁按该版真实段落建立回归；市场读取实际 `StartConfig.version`，不使用汉化发布标签代替游戏版本。第三方模组与美化仍须按作者声明和实际包体分别核对适配。
+
+## 下载与安装
+
+从 [GitHub Releases](https://github.com/JohnLiao501/ModHub/releases) 的 Assets 下载正式附件 `ModHub-v<版本号>.zip`，在游戏原生模组管理器或 ModHub 的【导入模组】中直接选择该 ZIP。
+
+GitHub 自动提供的 `Source code (zip)` 用于源码开发，通常名为 `ModHub-<版本号>.zip`，其 `boot.json` 位于 `ModHub-<版本号>/src/` 内，不能直接作为模组安装包导入。若原生管理器提示 `bootJson文件 [boot.json] 无效`，请检查所选 ZIP 根目录是否包含 `boot.json`，并重新下载正式安装附件；只有重命名 ZIP 不会改变目录结构。
+
 ## 源码命名
 
 - `src/javascript/modhub-manager.js`：管理、持久化、导入、重排保存与公共入口。
@@ -72,7 +80,7 @@ ModHub 执行前的加载器故障、ModHub 已被禁用或卸载、主线程完
 
 若出现天气效果的 `randomInt called with invalid parameters`、`drawImage` 类型错误或 `img/misc/sky/` 资源加载失败，请先确认原版图片包已启用，再完整重新载入游戏。缺失纹理会令图片尺寸变成 `undefined` 或 `NaN`，随后产生多个云层、星空与月亮的连锁错误；只调整模组顺序不能补齐资源。
 
-DoL 0.5.11.9 的图片包为 [`GameOriginalImagePack-0.5.11.9.mod.zip`](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases/download/v0.5.11.9-chs-1.0.0a/GameOriginalImagePack-0.5.11.9.mod.zip)。在【模组管理】点击【导入模组】选择图片包，确认启用后点击【重新载入游戏】。其他游戏版本请从[官方发行版](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases)选择对应包。
+DoL 0.5.12.13 的图片包为 [`GameOriginalImagePack-0.5.12.13.mod.zip`](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases/download/v0.5.12.13-chs-1.0.1a/GameOriginalImagePack-0.5.12.13.mod.zip)。升级游戏后，请将旧版原版图片包替换为对应的新包。在【模组管理】点击【导入模组】选择图片包，确认启用后点击【重新载入游戏】。其他游戏版本请从[官方发行版](https://github.com/Eltirosto/Degrees-of-Lewdity-Chinese-Localization/releases)选择对应包。
 
 ## 社区模组收录（v1.1.1）
 
@@ -130,7 +138,7 @@ DoL 0.5.11.9 的图片包为 [`GameOriginalImagePack-0.5.11.9.mod.zip`](https://
 
 - 核心单元测试（含依赖拓扑排序与 ModLoader 契约）：`node src/test-smart-sort.js`
 - 模组身份字典测试：`node test-dol-mod-extractor.js`
-- 隔离浏览器验收：`node tests/restore-browser-server.cjs`，服务仅监听本机；分别使用显示的 `/harness` 原生存储页与 `/game` 真实游戏页。测试库使用独立端口及 `modhub_acceptance_` 前缀；游戏源在内存加工，测试包不落盘。
+- 隔离浏览器验收：`node tests/restore-browser-server.cjs`，默认读取相邻目录的 `DoL-ModLoader-0.5.12.13-v2.101.1/Degrees of Lewdity.html`，可用 `--game "游戏 HTML 路径"` 指定其他本地版本。服务仅监听本机；分别使用显示的 `/harness` 原生存储页与 `/game` 真实游戏页。测试库使用独立端口及 `modhub_acceptance_` 前缀；游戏源在内存加工，测试包不落盘。`--self-test` 会额外核验三个补丁的唯一匹配及界面入口契约。
 - 打包策略测试：`python tests/test_pack.py`
 - 自动化打包与单目录归档：`python pack.py`，仅输出至 `release/`，同版本重打包默认覆盖当前最新版本的正式包。
 
