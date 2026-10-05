@@ -295,6 +295,8 @@ module.exports = async function() {
         const variants = versions.buildCandidates(neutralMod, [release('2.0', [asset('Example-EN-v2.0.zip'), asset('Example-CN-v2.0.zip')], declaration)]);
         assert.equal(variants.length, 2);
         assert.equal(versions.rankCandidates(neutralMod, variants).recommendedKey, '', '不同语言或型号不得跨系列预选');
+        assert.equal(versions.rankCandidates(neutralMod, variants, { updateOnly: true, localVersion: '1.0' }).defaultKey, '', '全部更新也不能跨语言或型号默认选择');
+        assert.equal(versions.getLatestUpdateCandidate(neutralMod, variants), null, '多产品系列不得猜测更新候选');
         const noDeclaration = versions.buildCandidates(baseMod, [release('4.0', [asset('Example-v4.0.zip')])]);
         const undeclaredSelection = versions.rankCandidates(baseMod, noDeclaration);
         assert.equal(undeclaredSelection.recommendedKey, '', '没有匹配证据不能显示适配推荐');
@@ -302,6 +304,16 @@ module.exports = async function() {
         assert.equal(undeclaredSelection.defaultRisk, true);
         assert.match(undeclaredSelection.defaultReason, /作者未声明/);
         assert.equal(undeclaredSelection.candidates[0].candidateKey, noDeclaration[0].candidateKey, '未知兼容包仍须可见、可手动选择');
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, noDeclaration).candidateKey, noDeclaration[0].candidateKey, '无适配声明的单一正式主包仍须发现新版');
+        assert.equal(versions.getLatestGameCandidate(baseMod, noDeclaration), null, '发现新版不能将未知适配候选变成当前游戏推荐');
+        const undeclaredUpdate = versions.rankCandidates(baseMod, noDeclaration, { updateOnly: true, localVersion: '3.0' });
+        assert.equal(undeclaredUpdate.defaultKey, noDeclaration[0].candidateKey, '全部更新默认选择单一系列的无声明新版');
+        assert.equal(undeclaredUpdate.defaultRisk, true, '无声明新版默认选择仍保留安装前风险确认');
+        assert.equal(undeclaredUpdate.recommendedKey, '', '默认选择不能把未知适配标为当前游戏推荐');
+        for (const localVersion of ['4.0', '4.1', '']) {
+            assert.equal(versions.rankCandidates(baseMod, noDeclaration, { updateOnly: true, localVersion }).defaultKey, '',
+                '全部更新不默认选择等版、旧版，或无法比较本地版本的包');
+        }
         const reference = versions.buildCandidates(baseMod, [release('1.0', [asset('Example-v1.0-DoL-0.5.10.12.zip')])]);
         assert.equal(reference[0].compatibility.status, 'unknown');
         assert.equal(reference[0].compatibility.evidence, 'filename');
@@ -323,7 +335,9 @@ module.exports = async function() {
         assert.equal(conflicts[0].compatibility.status, 'incompatible', '声明不匹配必须优先于文件名提示');
         assert.equal(versions.rankCandidates(baseMod, conflicts).recommendedKey, '');
         assert.equal(versions.rankCandidates(baseMod, conflicts).defaultKey, '', '明确不兼容的包不能默认选中');
+        assert.equal(versions.rankCandidates(baseMod, conflicts, { updateOnly: true, localVersion: '0.9' }).defaultKey, '', '全部更新仍排除明确不兼容的包');
         assert.equal(versions.rankCandidates(baseMod, conflicts).defaultRisk, false);
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, conflicts), null, '作者声明不适配当前游戏的包不得成为更新候选');
         assert.equal(versions.getCandidateStatus(conflicts[0]).tone, 'red', '红色风险只用于明确的作者支持范围不符');
         const mixedEvidence = versions.buildCandidates(baseMod, [release('1.0', [asset('Example-v1.0.zip')], declaration),
             release('2.0', [asset('Example-v2.0-DoL-0.5.10.12.zip')]), release('3.0', [asset('Example-v3.0-DoL-0.5.11.0.zip')])]);
@@ -343,6 +357,7 @@ module.exports = async function() {
         const referenceMismatch = mismatched.find(candidate => candidate.version === '3.0');
         assert.equal(referenceMismatch.compatibility.status, 'unknown', '仅文件名不同不能宣称明确不兼容');
         assert.equal(referenceMismatch.compatibility.referenceMismatch, true);
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, [referenceMismatch]), null, '名称指向其他游戏版本的包不得成为更新候选');
         assert.equal(versions.getCandidateStatus(referenceMismatch).tone, 'grey', '名称标注其他版本仍是待核对线索，不应显示明确不适配的红色');
         assert.match(versions.getCandidateStatus(referenceMismatch).reason, /当前游戏为 DoL 0\.5\.10\.12/);
         assert.equal(versions.getCandidateStatus(noDeclaration[0]).label, '适配待核对');
@@ -383,6 +398,9 @@ module.exports = async function() {
             candidateKey: `${name}:${version}`, version, assetName: name, seriesKey, compatibility, updateDate: '2026-10-01' });
         const compatible = { status: 'compatible', evidence: 'declaration' };
         const latest = candidate('2.10', undefined, compatible), previous = candidate('2.9', undefined, compatible);
+        const unknownOlder = candidate('3.9'), unknownNewer = candidate('3.10');
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, [unknownOlder, unknownNewer]).candidateKey, unknownNewer.candidateKey, '未知适配的单一系列应按数值发现最高版本');
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, [unknownNewer, previous, latest]).candidateKey, latest.candidateKey, '当前游戏已有适配候选时仍优先该候选，不转向未知适配高版');
         const snapshot = JSON.stringify([latest, previous]);
         const selected = versions.getDefaultSelection(baseMod, [previous, latest], { localVersion: '2.10' });
         assert.equal(selected.defaultKey, latest.candidateKey, '本地同版应保持最新选择，不能为了可安装而默认旧版');
@@ -391,12 +409,16 @@ module.exports = async function() {
         assert.equal(versions.getDefaultSelection(baseMod, [previous, latest], { updateOnly: true, localVersion: '1.0' }).defaultKey, latest.candidateKey, '全部更新可以默认选中作者声明匹配的最新版本');
         assert.equal(versions.getDefaultSelection(baseMod, [candidate('3.0')]).defaultKey, candidate('3.0').candidateKey, '未知适配的无歧义最新候选恢复默认选择');
         assert.equal(versions.getDefaultSelection(baseMod, [candidate('3.0')]).defaultRisk, true, '默认最新不修改未知适配证据');
-        assert.equal(versions.getDefaultSelection(baseMod, [candidate('3.0')], { updateOnly: true, localVersion: '1.0' }).defaultKey, '', '全部更新不回退自动选择无匹配证据的版本');
+        assert.equal(versions.getDefaultSelection(baseMod, [candidate('3.0')], { updateOnly: true, localVersion: '1.0' }).defaultKey,
+            candidate('3.0').candidateKey, '全部更新与多选安装共用无歧义最新版默认选择');
         const unknownVersion = candidate('', 'Example.zip');
         assert.equal(versions.getDefaultSelection(baseMod, [unknownVersion]).defaultKey, '', '缺少可比较模组版本时不能猜测最新');
         assert.equal(versions.getDefaultSelection(baseMod, [latest, candidate('3.0', 'Example-EN-v3.0.zip', undefined, 'Example-EN')]).defaultKey, '', '不同主包语言或型号不得默认跨系列');
         const otherFormat = candidate('2.10', 'Example-v2.10.modpack', compatible);
         assert.equal(versions.getDefaultSelection(baseMod, [latest, otherFormat]).defaultKey, '', '相同版本不同主资产格式不得擅自选择');
+        assert.equal(versions.getDefaultSelection(baseMod, [latest, otherFormat], { updateOnly: true, localVersion: '1.0' }).defaultKey, '', '全部更新仍保留同版主资产歧义，不能默认下载');
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, [latest, otherFormat]), null, '同版不同主包存在歧义时不得猜测更新候选');
+        assert.equal(versions.getLatestUpdateCandidate(baseMod, [latest, otherFormat, unknownNewer]), null, '当前游戏适配主包有歧义时不得借未知适配新版绕过人工选择');
         assert.equal(versions.getDefaultSelection(baseMod, [{ ...latest, compatibility: compatible }, { ...otherFormat, compatibility: compatible }, candidate('3.0')]).defaultKey,
             '', '匹配版本的主资产存在歧义时，不得借未知适配的新版绕过人工选择');
         const olderRelease = { ...latest, candidateKey: 'older-tag', updateDate: '2026-09-30' };

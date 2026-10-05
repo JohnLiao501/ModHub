@@ -1519,22 +1519,10 @@
     user-select: text;
 }
 
-.modhub-acquisition-dialog .modhub-modal-body,
 .modhub-spell-dialog .modhub-modal-body {
     min-height: 0;
     max-height: 65vh;
     overflow-y: auto;
-}
-
-.modhub-acquisition-dialog .modhub-acquisition {
-    max-height: 55vh;
-    overflow-y: auto;
-    scrollbar-width: thin;
-    -webkit-overflow-scrolling: touch;
-}
-
-.modhub-acquisition-dialog .modhub-modal-title {
-    color: var(--gold, #d4af37) !important;
 }
 
 .modhub-acquisition:focus-visible,
@@ -1607,8 +1595,7 @@
     overflow-wrap: anywhere;
 }
 
-.modhub-market-source-bar .modhub-market-source-link,
-.modhub-market-source-bar .modhub-market-acquisition-link {
+.modhub-market-source-bar .modhub-market-source-link {
     display: inline-flex;
     align-items: center;
     flex: 0 1 auto;
@@ -1631,9 +1618,7 @@
 }
 
 .modhub-market-source-bar .modhub-market-source-link:hover,
-.modhub-market-source-bar .modhub-market-source-link:focus-visible,
-.modhub-market-source-bar .modhub-market-acquisition-link:hover,
-.modhub-market-source-bar .modhub-market-acquisition-link:focus-visible {
+.modhub-market-source-bar .modhub-market-source-link:focus-visible {
     color: var(--link-hover, #8af) !important;
     text-decoration: underline !important;
     text-underline-offset: 3px;
@@ -1651,8 +1636,7 @@
     overflow-wrap: anywhere;
 }
 
-.modhub-market-source-bar .modhub-market-source-link:focus-visible,
-.modhub-market-source-bar .modhub-market-acquisition-link:focus-visible {
+.modhub-market-source-bar .modhub-market-source-link:focus-visible {
     outline: 2px solid var(--link-hover, #8af);
     outline-offset: 2px;
 }

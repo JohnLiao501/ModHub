@@ -160,24 +160,11 @@
         return [...links.values()].map(source => source.link);
     }
 
-    function renderAcquisitionDetails(entry, index) {
-        const sources = normalizeSources(entry), links = getSourceLinks(entry);
+    function renderAcquisitionDetails(entry) {
+        const links = getSourceLinks(entry);
         const linkHtml = links.map(source => `<a class="modhub-market-source-link" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(source.title)}">${escapeHtml(source.name)}</a>`).join('<span aria-hidden="true">·</span>');
-        const hasInstructions = new Set(sources.map(source => source.url)).size > links.length
-            || normalizePackages(entry).length || sources.some(source => source.instructions || source.extractionCode
-            || source.archivePassword || source.downloadUrl && source.downloadUrl !== source.url);
-        const instructionsHtml = hasInstructions ? `<span aria-hidden="true">·</span><a class="modhub-market-acquisition-link" href="#" data-mod-index="${Number.isSafeInteger(index) && index >= 0 ? index : ''}">安装说明</a>` : '';
         return `<div class="modhub-market-source-bar"><span class="modhub-market-source-summary">来源：</span>`
-            + (linkHtml || '<span class="modhub-market-source-empty">暂无来源链接</span>') + instructionsHtml + '</div>';
-    }
-
-    async function openAcquisition(entry) {
-        if (typeof window.modHubConfirm !== 'function') return false;
-        const importRequested = await window.modHubConfirm({ title: `来源与说明【${entry.name}】`,
-            trustedMessageHtml: acquisitionHtml(entry),
-            confirmText: '下载后导入', cancelText: '关闭', dialogClass: 'modhub-acquisition-dialog' });
-        if (importRequested && typeof window.modHubTriggerImport === 'function') window.modHubTriggerImport();
-        return Boolean(importRequested);
+            + (linkHtml || '<span class="modhub-market-source-empty">暂无来源链接</span>') + '</div>';
     }
 
     async function copyBody(entry) {
@@ -237,6 +224,6 @@
     }
 
     window.modHubMarketSpells = { applyIndex, restoreCache, normalizeSpells, normalizeSources, normalizePackages, isVerifiedPackage,
-        acquisitionHtml, getSourceLinks, renderAcquisitionDetails, openAcquisition, copyBody, showDetails, render, filter, getSpells: () => spells.slice(),
+        acquisitionHtml, getSourceLinks, renderAcquisitionDetails, copyBody, showDetails, render, filter, getSpells: () => spells.slice(),
         getRevision: () => revision, CACHE_KEY: MODHUB_SPELL_CACHE_KEY };
 })();

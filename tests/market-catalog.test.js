@@ -99,8 +99,11 @@ module.exports = async function() {
         for (const item of cases) {
             const card = html.split(`data-mod-name="${item.name}"`)[1].split('data-mod-name=')[0];
             assert.ok(card.includes(`最新版本：${item.latest}`), `${item.name} 保留真实线上最新字段`);
+            assert.ok(card.includes(`<span class="purple">最新版本：${item.latest}</span>`), '线上最新版本统一使用紫色');
             if (Object.hasOwn(item, 'local')) {
                 assert.ok(card.includes(`已安装版本：${item.local ? 'v' + item.local : '未知'}`), '已安装版本从本地包独立读取');
+                assert.ok(card.includes(`<span class="${item.badge === '已是最新' ? 'green' : 'gold'}">已安装版本：`),
+                    '仅核实已安装最新版本时使用绿色；较旧或版本未知时使用金色');
                 assert.equal((card.match(/最新版本：/g) || []).length, 1);
                 assert.equal((card.match(/已安装版本：/g) || []).length, 1);
             } else assert.ok(!card.includes('已安装版本：'), '未安装条目不构造本地版本');
@@ -143,7 +146,8 @@ module.exports = async function() {
         const groupedRow = api.renderAcquisitionDetails(grouped, 0);
         assert.equal((groupedRow.match(/>Discord<\/a>/g) || []).length, 1);
         assert.equal((groupedRow.match(/>GitHub<\/a>/g) || []).length, 1);
-        assert.ok(!groupedRow.includes('GitHub（发布）') && groupedRow.includes('modhub-market-acquisition-link'), '合并后其余原帖通过安装说明访问');
+        assert.ok(!groupedRow.includes('GitHub（发布）') && !groupedRow.includes('modhub-market-acquisition-link') && !groupedRow.includes('安装说明'),
+            '来源行按平台合并且不再提供安装说明入口');
         const groupedDetails = api.acquisitionHtml(grouped);
         for (const source of grouped.sources) assert.ok(groupedDetails.includes(`href="${source.url}"`), '每个原帖与附件仍完整保留');
         assert.equal(JSON.stringify(grouped), groupedBefore, '平台展示合并不得更改原始来源');
@@ -200,7 +204,7 @@ module.exports = async function() {
         assert.ok(cards().includes(`已安装版本：v${localVersion}`) && cards().includes('最新版本：v2.0'));
         assert.notEqual(sb.modHubMarket.checkModInstallStatus(mod), 'update_available', '显示事实不改变适配更新动作判断');
     }
-    // 两个板块独立筛选，获取资料通过独立面板展示，外部资源只提供一个主页动作。
+    // 两个板块独立筛选，来源直接链接原帖，卡片不再提供安装说明入口。
     {
         const sb = loadMarket();
         loadScripts(sb, ['javascript/modhub-market-spells.js']);
@@ -209,9 +213,6 @@ module.exports = async function() {
             'modHubMarketSearch', 'modHubStatusSelect', 'modHubSortSelect', 'modHubMirrorSelect',
             'modHubMarketBatchToolbar', 'modHubMarketBtnResetFilter'].map(id => [id, createStubElement()]));
         sb.document.getElementById = id => elements.get(id) || null;
-        const sourceButton = createStubElement('a');
-        sourceButton.dataset.modIndex = '0';
-        elements.get('modHubMarketCardsContainer').querySelectorAll = selector => selector === '.modhub-market-acquisition-link' ? [sourceButton] : [];
         const record = { id: 'external-v1', fileName: 'external.zip', format: 'ModLoader Zip', bootName: 'External',
             version: '1.0', gameVersionRange: '', dependencies: [{ id: 'Replace', version: '^1.0' }],
             sourceUrl: 'https://tieba.baidu.com/p/456', downloadUrl: 'https://pan.example.test/version',
@@ -239,24 +240,17 @@ module.exports = async function() {
         assert.ok(!externalCard.includes('>主页</a>') && !externalCard.includes('外部主页') && !externalCard.includes('获取与适配说明'));
         assert.equal((externalCard.match(/class="modhub-market-source-bar"/g) || []).length, 1, '每张卡片统一提供一行来源');
         assert.match(externalCard, /<a class="modhub-market-source-link" href="https:\/\/tieba.baidu.com\/p\/456"[^>]*>百度贴吧<\/a>/, '平台文字直接链接原帖');
-        assert.match(externalCard, /<a class="modhub-market-acquisition-link" href="#" data-mod-index="0">安装说明<\/a>/, '额外资料以同行文字链接打开');
-        assert.ok(!externalCard.includes('查看来源') && !externalCard.includes('<details') && !externalCard.includes('abc&lt;123') && !externalCard.includes('前置安装完成'), '来源无需中转，长资料仍保留独立入口');
-        assert.ok(!externalCard.includes('安装包资料待核对') && !externalCard.includes('未游戏实测') && !/已核验 \d+ 个安装包/.test(externalCard), '卡片不显示自动生成的核验统计，核验信息由安装说明保留');
+        assert.ok(!externalCard.includes('modhub-market-acquisition-link') && !externalCard.includes('安装说明'), '即使含额外资料，卡片也不提供安装说明入口');
+        assert.ok(!externalCard.includes('查看来源') && !externalCard.includes('<details') && !externalCard.includes('abc&lt;123') && !externalCard.includes('前置安装完成'), '来源直接链接原帖，不在卡片展开长资料');
+        assert.ok(!externalCard.includes('安装包资料待核对') && !externalCard.includes('未游戏实测') && !/已核验 \d+ 个安装包/.test(externalCard), '卡片不显示自动生成的核验统计');
         const githubName = sb.modHubMarket.getMarketMods().find(mod => mod.id === 'github-ui').name;
         const githubCard = cards().split(`data-mod-name="${githubName}"`)[1].split('data-mod-name=')[0];
         assert.ok(githubCard.includes('modhub-market-source-bar') && githubCard.includes('href="https://github.com/Owner/Direct"'), '普通 GitHub 也显示同一来源行');
         assert.ok(!githubCard.includes('modhub-market-acquisition-link') && !githubCard.includes('>主页</a>'), '没有额外资料时不增加说明或重复主页入口');
-        const openedSources = [], originalConfirm = sb.modHubConfirm;
-        sb.modHubConfirm = async options => { openedSources.push(options); return false; };
-        let prevented = 0, stopped = 0;
-        for (const detail of [1, 0]) await sourceButton.onclick({ detail, preventDefault() { prevented++; }, stopPropagation() { stopped++; } });
-        assert.equal(openedSources.length, 2, '鼠标点击和键盘生成的点击均打开同一原生资料面板');
-        assert.equal(prevented, 2); assert.equal(stopped, 2, '打开来源不冒泡到卡片多选');
-        assert.ok(openedSources.every(options => options.title === '来源与说明【外部资料】' && options.confirmText === '下载后导入'));
-        const sourceHtml = openedSources[0].trustedMessageHtml, sourceText = sourceHtml.replace(/<[^>]*>/g, '');
+        const sourceHtml = sb.modHubMarketSpells.acquisitionHtml(external), sourceText = sourceHtml.replace(/<[^>]*>/g, '');
         for (const text of ['提取码：4567', '解压密码：abc&lt;123', '前置要求：Replace ^1.0', '适配 DoL：未知，请核对作者说明',
             '原美化框架', 'external.zip', '版本 1.0', '保留存档\n选择对应语言', '安装包资料待核对', '未游戏实测', '支持 ModLoader']) {
-            assert.ok(sourceText.includes(text), `独立资料面板保留 ${text}`);
+            assert.ok(sourceText.includes(text), `底层原始资料仍保留 ${text}`);
         }
         assert.ok(sourceHtml.includes('旧游戏版本的原始说明\n&lt;script&gt;不能执行&lt;/script&gt;'));
         assert.ok(sourceHtml.includes('前置安装完成后导入此包。\n不能与另一语言版本同时启用。'), '作者说明与换行逐字保留');
@@ -268,10 +262,6 @@ module.exports = async function() {
         assert.ok(sb.modHubMarketSpells.renderAcquisitionDetails(sameGithub, 0).includes('modhub-market-source-link') && !sb.modHubMarketSpells.renderAcquisitionDetails(sameGithub, 0).includes('modhub-market-acquisition-link'), '同一 GitHub URL 仍统一显示来源，但不增加说明入口');
         assert.equal((sb.modHubMarketSpells.acquisitionHtml(sameGithub).match(/href="https:\/\/github\.com\/Owner\/Only"/g) || []).length, 1,
             '同一来源的原帖和下载地址相同时只显示一个链接');
-        for (const invalid of ['', '-1', '0.5', '1e0', '999']) { sourceButton.dataset.modIndex = invalid; await sourceButton.onclick(); }
-        assert.equal(openedSources.length, 2, '非法或不存在的索引不能打开其他条目');
-        sourceButton.dataset.modIndex = '0';
-        sb.modHubConfirm = originalConfirm;
         assert.ok(cards().includes('btn-market-install'), '普通 GitHub 条目仍可进入原有安装入口');
         assert.ok(!cards().includes('独立咒语') && !elements.get('modHubCategoryCapsules').innerHTML.includes('咒语配方'), '咒语独立于模组卡片和分类');
 
@@ -443,11 +433,6 @@ module.exports = async function() {
         sb.navigator = { clipboard: { writeText: async value => { copied = value; } } };
         assert.equal(await api.copyBody(spell), true);
         assert.equal(copied, body, '复制正文不能裁剪换行或执行正文');
-        let importCount = 0;
-        sb.modHubConfirm = async () => true;
-        sb.modHubTriggerImport = () => { importCount++; };
-        assert.equal(await api.openAcquisition(normalized), true);
-        assert.equal(importCount, 1, '下载后导入必须复用本地导入入口');
         let renderedBody;
         sb.modHubConfirm = async options => {
             const host = createStubElement();
@@ -1852,6 +1837,8 @@ module.exports = async function() {
         market.renderMarketCards();
         const installedCard = installedCardElements.get('modHubMarketCardsContainer').innerHTML;
         assert.ok(installedCard.includes('最新版本：v5.2.1') && installedCard.includes('已安装版本：v5.1.3'));
+        assert.ok(installedCard.includes('<span class="gold">已安装版本：v5.1.3') && installedCard.includes('<span class="purple">最新版本：v5.2.1'),
+            '当前游戏推荐版低于目录最新版时，已安装版本仍显示金色');
         assert.ok(installedCard.includes('已是推荐版本') && installedCard.includes('当前游戏推荐版本与已安装版本相同')
             && installedCard.includes('依据安装包名称参考，不代表游戏实测') && !installedCard.includes('已是最新') && !installedCard.includes('当前版本已适配'),
             '当前游戏候选已安装时只说明参考推荐，不声称全局最新或游戏兼容已验证');
@@ -1920,9 +1907,9 @@ module.exports = async function() {
         const unlabelled = { ...mod, id: 'unlabelled-update' };
         assert.notEqual(market.checkModInstallStatus(unlabelled), 'update_available');
         await market.getModUpdateInfo(unlabelled).promise;
-        assert.notEqual(market.checkModInstallStatus(unlabelled), 'update_available', '单一系列数值新版不能代替当前游戏适配证据');
-        assert.equal(market.getModUpdateInfo(unlabelled).version, '');
-        assert.equal(market.getModUpdateInfo(unlabelled).release, null, '未知兼容不能回退到最高历史版本');
+        assert.equal(market.checkModInstallStatus(unlabelled), 'update_available', '单一系列数值新版仍应提示更新，适配须另行核对');
+        assert.equal(market.getModUpdateInfo(unlabelled).version, '5.2.1');
+        assert.equal(market.getModUpdateInfo(unlabelled).release.compatibility.evidence, 'unknown');
 
         versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
             fetchedAt: '2026-10-02T00:00:00Z', releases: [makeRelease('5.1.3', '0.5.11.9')] });
@@ -1972,6 +1959,112 @@ module.exports = async function() {
         market.renderMarketCards();
         assert.ok(/badge-installed"[^>]*>已安装<\/span>/.test(cards.innerHTML) && cards.innerHTML.includes('无法识别当前游戏版本，尚未检查适配更新')
             && !cards.innerHTML.includes('已是最新') && !cards.innerHTML.includes('更新版本待核对'), '未知游戏保留已安装事实，并明确无法检查适配更新的原因');
+    }
+
+    // 怨灵的倒影无适配声明时，仍发现真实新版；所有安装入口必须先选择并核对版本。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        sb.StartConfig = { version: '0.5.12.13' };
+        const market = sb.modHubMarket, versions = sb.modHubMarketVersions;
+        let [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ id: 'wraiths-reflection', identityId: 'wraiths-reflection',
+            name: '怨灵的倒影', bootNames: ["Wraith'sReflection"], repositoryKeys: ['Water2311/WraithsReflection'],
+            githubUrl: 'https://github.com/Water2311/WraithsReflection', version: '1.3.3', versionSource: 'github' }] });
+        const local = { name: "Wraith'sReflection", bootJson: { name: "Wraith'sReflection", version: '1.3.2', repository: mod.githubUrl } };
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [local], getModListNameNoAlias: () => [local.name] } });
+        sb.modHubGetModInfo = name => name === local.name ? local : null;
+        let remoteVersion = '1.3.3', unexpectedDownloads = 0;
+        const history = () => ({ page: 1, hasMore: false, releases: [{ tagName: `v${remoteVersion}`, name: remoteVersion,
+            publishedAt: '2026-10-05T00:00:00Z', htmlUrl: `${mod.githubUrl}/releases/tag/v${remoteVersion}`,
+            assets: [{ name: `WraithsReflection-v${remoteVersion}.zip`, size: 100,
+                downloadUrl: `${mod.githubUrl}/releases/download/v${remoteVersion}/WraithsReflection-v${remoteVersion}.zip` }] }] });
+        versions.fetchReleases = async () => history();
+        sb.fetch = async () => { unexpectedDownloads++; throw new Error('更新入口不得绕过选版直接下载'); };
+        const elements = new Map(['modHubMarketCardsContainer', 'modHubMarketStats'].map(id => [id, createStubElement()]));
+        const cards = elements.get('modHubMarketCardsContainer');
+        const updateButton = createStubElement('button'), ignoreOnce = createStubElement('button'), ignoreAlways = createStubElement('button');
+        updateButton.dataset = { modIndex: '0' };
+        ignoreOnce.dataset = { modIndex: '0', ignoreMode: 'once' };
+        ignoreAlways.dataset = { modIndex: '0', ignoreMode: 'always' };
+        cards.querySelectorAll = selector => selector === '.btn-market-ignore' ? [ignoreOnce, ignoreAlways]
+            : selector === '.btn-market-install, .btn-market-update' ? [updateButton] : [];
+        sb.document.getElementById = id => elements.get(id) || null;
+        const notifications = [];
+        sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
+        [mod] = await market.loadMarketData();
+        market.checkModInstallStatus(mod);
+        await market.getModUpdateInfo(mod).promise;
+        market.renderMarketCards();
+        const update = market.getModUpdateInfo(mod), candidates = versions.buildCandidates(mod, history());
+        assert.equal(market.checkModInstallStatus(mod), 'update_available', '截图中的本地1.3.2须发现线上1.3.3');
+        assert.ok(cards.innerHTML.includes('已安装版本：v1.3.2') && cards.innerHTML.includes('最新版本：v1.3.3'));
+        assert.ok(cards.innerHTML.includes('<span class="gold">已安装版本：v1.3.2') && cards.innerHTML.includes('<span class="purple">最新版本：v1.3.3'),
+            '已安装旧版显示金色，线上最新版显示紫色');
+        assert.ok(cards.innerHTML.includes('发现新版，适配待核对') && cards.innerHTML.includes('选择更新版本'));
+        assert.ok(cards.innerHTML.includes(update.release.compatibility.reason) && !cards.innerHTML.includes('未找到适配当前游戏的版本'),
+            '卡片说明真实适配未知原因，不能隐藏已发现的新版');
+        assert.equal(update.version, '1.3.3');
+        assert.equal(market.getUpdatableMods()[0].newVersion, '1.3.3');
+        assert.equal(notifications.at(-1).count, 1);
+        assert.equal(notifications.at(-1).list[0].newVersion, '1.3.3');
+        assert.ok(elements.get('modHubMarketStats').innerHTML.includes('更新全部 1 个可更新模组'));
+        assert.equal(versions.getLatestGameCandidate(mod, candidates), null, '未知适配不能升级为当前游戏推荐');
+        const ranked = versions.rankCandidates(mod, candidates, { updateOnly: true, localVersion: '1.3.2' });
+        assert.equal(ranked.recommendedKey, '');
+        assert.equal(ranked.defaultKey, candidates[0].candidateKey, '批量更新默认选择单一系列的1.3.3新版');
+        assert.equal(ranked.defaultRisk, true, '默认选中新版仍须在安装前核对未知适配风险');
+
+        const alerts = [];
+        sb.modHubAlert = async message => { alerts.push(message); };
+        await updateButton.onclick();
+        assert.equal(await market.updateAllMods(), false);
+        assert.equal(alerts.length, 2);
+        assert.ok(alerts.every(message => message.includes('版本选择模块尚未就绪')));
+        const installs = [];
+        sb.modHubMarketInstaller = {
+            install: async (target, options) => { installs.push({ targets: [target], options }); return false; },
+            installBatch: async (targets, options) => { installs.push({ targets, options }); return false; }
+        };
+        await updateButton.onclick();
+        assert.equal(await market.updateAllMods(), false);
+        assert.equal(installs.length, 2);
+        assert.ok(installs.every(call => call.targets.length === 1 && call.targets[0].id === mod.id && call.options.restoreContext));
+        assert.equal(installs[1].options.updateOnly, true);
+        assert.equal(unexpectedDownloads, 0, '单项及批量更新都不能绕过共用选版模块');
+
+        await ignoreOnce.onclick();
+        assert.equal(market.getIgnoredUpdates()[mod.name], '1.3.3');
+        assert.equal(market.getUpdatableMods().length, 0);
+        assert.ok(cards.innerHTML.includes('<span class="gold">已安装版本：v1.3.2'), '忽略本次更新不能将旧版标为绿色');
+        remoteVersion = '1.3.4';
+        mod.revision = 1;
+        market.checkModInstallStatus(mod);
+        await market.getModUpdateInfo(mod).promise;
+        assert.equal(market.getUpdatableMods()[0].newVersion, '1.3.4', '忽略本次不能隐藏后续新版');
+        sb.modHubConfirm = async () => true;
+        await ignoreAlways.onclick();
+        assert.equal(market.getIgnoredUpdates()[mod.name], 'ignored');
+        assert.ok(cards.innerHTML.includes('<span class="gold">已安装版本：v1.3.2'), '永久忽略更新不能将旧版标为绿色');
+        remoteVersion = '1.3.5';
+        mod.revision = 2;
+        market.checkModInstallStatus(mod);
+        await market.getModUpdateInfo(mod).promise;
+        assert.equal(market.getUpdatableMods().length, 0, '永久忽略仍覆盖后续未知适配新版');
+        assert.equal(notifications.at(-1).count, 0);
+
+        market.setModUpdateIgnored(mod.name, '', false);
+        market.setModUpdateIgnored(local.name, '', false);
+        remoteVersion = '1.3.2';
+        mod.revision = 3;
+        market.checkModInstallStatus(mod);
+        await market.getModUpdateInfo(mod).promise;
+        market.renderMarketCards();
+        assert.ok(/badge-installed"[^>]*>已安装<\/span>/.test(cards.innerHTML)
+            && !cards.innerHTML.includes('已是推荐版本') && !cards.innerHTML.includes('推荐依据作者声明'),
+            '历史未知适配版本等于本地时，只能保留已安装事实，不能构造作者推荐');
+        assert.ok(cards.innerHTML.includes('<span class="gold">已安装版本：v1.3.2'), '本地低于目录最新版时仍显示金色');
+        assert.equal(versions.rankCandidates(mod, versions.buildCandidates(mod, history())).recommendedKey, '', '未知适配历史最高版仍没有严格推荐');
     }
 
     // 发布标题为日期时，更新入口必须使用真实安装包版号，且不猜测多个产品系列。
@@ -2040,12 +2133,14 @@ module.exports = async function() {
         await market.getModUpdateInfo(unordered).promise;
         assert.equal(market.getModUpdateInfo(unordered).version, '1.0.4', '单一系列声明适配时应按模组版号选择最高候选，不能按资产顺序选择');
 
-        releases = [{ ...makeRelease(['UCB-zedfix-1.0.4.zip']), compatibility: null }];
+        releases = [{ ...makeRelease(['UCB-zedfix-1.0.4.zip']), compatibility: undefined }];
         const unknownCompatibility = { ...mod, id: 'date-tag-unknown-compatibility' };
         market.checkModInstallStatus(unknownCompatibility);
         await market.getModUpdateInfo(unknownCompatibility).promise;
-        assert.equal(market.getModUpdateInfo(unknownCompatibility).version, '', '即使识别到真实包版号，没有适配证据也不能推断更新目标');
-        assert.notEqual(market.checkModInstallStatus(unknownCompatibility), 'update_available');
+        assert.equal(market.getModUpdateInfo(unknownCompatibility).version, '1.0.4', '单一系列无适配声明时，更新提醒仍使用真实包版号');
+        assert.equal(market.checkModInstallStatus(unknownCompatibility), 'update_available');
+        assert.equal(versions.buildCandidates(unknownCompatibility, { releases: [{ ...releases[0], compatibility: null }] }).length, 0,
+            '非法适配数据仍须排除，不能当作缺少声明提示更新');
 
         releases = [makeRelease(['UCB-zedfix-EN-1.0.3.zip', 'UCB-zedfix-CN-1.0.4.zip'])];
         const ambiguous = { ...mod, id: 'unlabelled-multiple-series' };

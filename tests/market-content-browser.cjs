@@ -7,7 +7,8 @@ const os = require('node:os');
 const crypto = require('node:crypto');
 const { chromium } = require('C:/Users/JohnLiao/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright');
 const root = path.resolve(__dirname, '..');
-const evidenceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'modhub-market-content-'));
+const evidenceDir = process.env.MODHUB_BROWSER_EVIDENCE_DIR || fs.mkdtempSync(path.join(os.tmpdir(), 'modhub-market-content-'));
+fs.mkdirSync(evidenceDir, { recursive: true });
 const boot = JSON.parse(fs.readFileSync(path.join(root, 'src/boot.json'), 'utf8'));
 const nativeCssPath = process.env.MODHUB_NATIVE_GAME_CSS || path.join(root, '资料/compat-v1.2.2/0.5.12.13/game-styles.css');
 const nativeCss = fs.readFileSync(nativeCssPath, 'utf8');
@@ -21,6 +22,11 @@ const versionCases = [
     { id: 'version-both-unknown', name: '已安装版本未识别', local: '', version: '', latest: '未知' },
     { id: 'version-registered', name: '登记真实包版本', local: '1.0.0', version: '1.0.20', assetVersion: '1.0.19', latest: 'v1.0.19' }
 ];
+const updateCase = { id: 'wraith-reflection', identityId: 'wraith-reflection', name: '怨灵的倒影',
+    bootNames: ["Wraith'sReflection"], repositoryKeys: ['Water2311/WraithsReflection'],
+    githubUrl: 'https://github.com/Water2311/WraithsReflection', version: '1.3.3', versionSource: 'github',
+    author: '水墨儿（悠飘过去了）', category: '玩法与内容', tags: ['恋爱'], updateDate: '2026-10-05',
+    description: '象牙怨灵的恋爱拓展，详细内容请在 GitHub 查看。（区别于外网的幽灵恋爱）' };
 const index = { schemaVersion: 1, communityRevision: 21, mods: [{ id: 'external-layout', name: '外部资源', author: '作者',
     contentType: 'package', catalogSource: 'community', sourcePlatform: 'tieba', sourceUrl: 'https://tieba.baidu.com/p/123',
     autoInstall: false, sources: [{ platform: 'tieba', url: 'https://tieba.baidu.com/p/123',
@@ -40,6 +46,7 @@ const index = { schemaVersion: 1, communityRevision: 21, mods: [{ id: 'external-
             { platform: 'discord', url: 'https://discord.com/channels/1103864219620884560/1197809298902896731/456' }] },
     { id: 'no-source-layout', name: '没有来源链接', author: '作者', contentType: 'package', catalogSource: 'community',
         sourcePlatform: 'unknown', autoInstall: false, sources: [] },
+    updateCase,
     ...versionCases.map(item => ({ id: item.id, identityId: item.id, bootNames: [item.id], name: item.name, author: '作者',
         githubUrl: `https://github.com/VersionTests/${item.id}`, version: item.version, releaseAssetVersion: item.assetVersion, versionSource: 'github' }))],
     spells: [{ id: 'spell-layout', name: '咒语正文', contentType: 'spell', description: '按指定位置复制使用。',
@@ -69,7 +76,20 @@ const results = [];
         await page.evaluate(data => {
             window.modHubEscapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char =>
                 ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
-            window.fetch = async () => ({ ok: true, json: async () => data });
+            window.modHubFixtureHistoryRequests = [];
+            window.fetch = async value => {
+                const url = new URL(String(value));
+                if (url.pathname !== '/mod-releases') return { ok: true, json: async () => data };
+                const mod = data.mods.find(item => item.id === url.searchParams.get('id'));
+                window.modHubFixtureHistoryRequests.push(mod.id);
+                const assetName = 'WraithsReflection-v1.3.3.zip';
+                const releases = mod.id === 'wraith-reflection' ? [{ tagName: 'v1.3.3', name: 'v1.3.3', version: '1.3.3',
+                    htmlUrl: `${mod.githubUrl}/releases/tag/v1.3.3`, publishedAt: '2026-10-05T00:00:00Z',
+                    assets: [{ name: assetName, size: 100, downloadUrl: `${mod.githubUrl}/releases/download/v1.3.3/${assetName}` }] }] : [];
+                return { ok: true, json: async () => ({ schemaVersion: 1, id: mod.id, sourceUrl: mod.githubUrl,
+                    page: Number(url.searchParams.get('page')), hasMore: false, communityRevision: data.communityRevision,
+                    fetchedAt: new Date().toISOString(), releases }) };
+            };
             window.modHubNotifyUpdateState = () => {};
             window.StartConfig = { version: '' };
             window.modHubShowToast = () => {};
@@ -77,12 +97,13 @@ const results = [];
             Object.defineProperty(navigator, 'clipboard', { configurable: true,
                 value: { writeText: async body => { window.modHubFixtureCopied = body; } } });
         }, index);
-        await page.evaluate(cases => {
+        await page.evaluate(({ cases, update }) => {
             const local = cases.filter(item => Object.hasOwn(item, 'local')).map(item => ({ name: item.id,
                 bootJson: { name: item.id, version: item.local, repository: `https://github.com/VersionTests/${item.id}` } }));
+            local.push({ name: update.bootNames[0], bootJson: { name: update.bootNames[0], version: '1.3.2', repository: update.githubUrl } });
             window.modHubGetGui = () => ({ gModUtils: { getModList: () => local, getModListNameNoAlias: () => local.map(item => item.name) } });
             window.modHubGetModInfo = name => local.find(item => item.name === name) || null;
-        }, versionCases);
+        }, { cases: versionCases, update: updateCase });
         for (const file of ['modhub-dialog.js', 'modhub-market.js', 'modhub-market-spells.js', 'modhub-market-versions.js']) {
             await page.addScriptTag({ content: fs.readFileSync(path.join(root, 'src/javascript', file), 'utf8') });
         }
@@ -100,7 +121,7 @@ const results = [];
         assert.match(await multiSource.innerText(), /来源：\s*GitHub\s*·\s*Discord/);
         assert.equal(await multiSource.locator('.modhub-market-source-link').first().getAttribute('href'), 'https://github.com/Owner/Multiple', 'GitHub 优先使用已有仓库主页');
         assert.equal(await multiSource.locator('.modhub-market-source-link').nth(1).getAttribute('href'), 'https://discord.com/channels/1103864219620884560/1197809298902896731', 'Discord 保留首个原帖');
-        assert.equal(await multiSource.locator('.modhub-market-acquisition-link').count(), 1, '合并同平台其他原帖后仍提供完整安装说明入口');
+        assert.equal(await page.locator('.modhub-market-acquisition-link').count(), 0, '市场卡片移除安装说明入口');
         const sourceNames = await page.locator('.modhub-market-source-bar').evaluateAll(bars => bars.map(bar =>
             [...bar.querySelectorAll('.modhub-market-source-link')].map(link => link.textContent)));
         assert.ok(sourceNames.every(names => names.length === new Set(names).size), '每张卡片来源行的平台名称只出现一次');
@@ -110,6 +131,11 @@ const results = [];
         const directSource = sourceCard('github-layout');
         assert.equal(await directSource.locator('.modhub-market-source-link').getAttribute('href'), 'https://github.com/Owner/Direct');
         assert.equal(await directSource.locator('.modhub-market-acquisition-link').count(), 0, '没有额外资料时不显示安装说明入口');
+        const versionPalette = await page.evaluate(() => Object.fromEntries(['gold', 'green', 'purple'].map(tone => {
+            const element = document.createElement('span'); element.className = tone; document.body.appendChild(element);
+            const color = getComputedStyle(element).color; element.remove(); return [tone, color];
+        }).concat([['body', getComputedStyle(document.body).color]])));
+        assert.notEqual(versionPalette.purple, versionPalette.body, '最新版本紫色区别于普通正文');
         for (const item of versionCases) {
             const card = page.locator(`[data-mod-name="${item.name}"]`);
             const versions = card.locator('.modhub-market-versions');
@@ -117,48 +143,22 @@ const results = [];
             if (Object.hasOwn(item, 'local')) assert.ok((await versions.innerText()).includes(`已安装版本：${item.local ? 'v' + item.local : '未知'}`));
             else assert.ok(!(await versions.innerText()).includes('已安装版本：'));
             const bounds = await versions.locator('span').evaluateAll(elements => elements.map(element => {
-                const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width, height: rect.height };
+                const rect = element.getBoundingClientRect(); return { left: rect.left, right: rect.right, width: rect.width, height: rect.height,
+                    tone: element.className, color: getComputedStyle(element).color };
             }));
             assert.ok(bounds.every(rect => rect.left >= 0 && rect.right <= width + 1 && rect.width > 40 && rect.height > 10), '当前与最新版本信息应在视口内完整换行');
+            assert.equal(bounds.at(-1).tone, 'purple');
+            assert.equal(bounds.at(-1).color, versionPalette.purple, '最新版本字段使用真实 DoL 紫色');
+            if (Object.hasOwn(item, 'local')) {
+                const tone = item.id === 'version-same' ? 'green' : 'gold';
+                assert.equal(bounds[0].tone, tone);
+                assert.equal(bounds[0].color, versionPalette[tone], '仅目录最新版相同的已安装字段使用绿色，其他状态使用金色');
+            }
         }
         const external = page.locator('[data-mod-name="外部资源"]');
         assert.equal(await external.locator('.modhub-market-actions a').count(), 0, '主页访问统一由来源文字链接承担');
         assert.equal(await external.locator('.modhub-market-actions button').count(), 0);
         assert.equal(await external.locator('.modhub-market-source-link').getAttribute('href'), 'https://tieba.baidu.com/p/123');
-        const acquisitionLink = external.locator('.modhub-market-acquisition-link');
-        assert.equal(await acquisitionLink.innerText(), '安装说明');
-        await acquisitionLink.focus();
-        await page.keyboard.press('Enter');
-        const sourceDialog = page.locator('.modhub-acquisition-dialog');
-        await sourceDialog.evaluate(async dialog => { await Promise.all(dialog.getAnimations().map(animation => animation.finished.catch(() => {}))); });
-        const sourcePanel = sourceDialog.locator('.modhub-acquisition');
-        assert.match(await sourcePanel.innerText(), /提取码：\s*1234/);
-        assert.match(await sourcePanel.innerText(), /前置要求：\s*Replace \^1.0/);
-        assert.equal(await sourcePanel.locator('.modhub-detail-footer').count(), 1, '通用导入说明只在资料面板内显示一次');
-        assert.equal(await sourcePanel.locator('.modhub-acquisition-package .modhub-detail-links a').count(), 1, '同一包来源、下载、核验的相同URL合并为一条明确入口');
-        assert.match(await sourcePanel.locator('.modhub-acquisition-package .modhub-detail-links').innerText(), /版本来源.*下载此版本.*核验来源/);
-        await page.screenshot({ path: path.join(evidenceDir, `sources-${width}.png`), fullPage: false });
-        const reading = sourcePanel.locator('.modhub-detail-readme').last();
-        await reading.focus();
-        await page.keyboard.press('PageDown');
-        await page.waitForFunction(() => [...document.querySelectorAll('.modhub-detail-readme')].some(element => element.scrollTop > 0));
-        const modalState = await sourceDialog.evaluate(dialog => {
-            const panel = dialog.querySelector('.modhub-acquisition');
-            const rect = element => { const value = element.getBoundingClientRect(); return { left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height }; };
-            return { dialog: rect(dialog), header: rect(dialog.querySelector('.modhub-modal-header')), footer: rect(dialog.querySelector('.modhub-modal-footer')),
-                links: [...panel.querySelectorAll('a')].map(element => ({ text: element.textContent, ...rect(element) })),
-                panel: { height: panel.clientHeight, scrollHeight: panel.scrollHeight, focusable: panel.tabIndex === 0 },
-                readings: [...panel.querySelectorAll('.modhub-detail-readme')].map(element => ({ text: element.textContent, height: element.clientHeight,
-                    scrollHeight: element.scrollHeight, scrollTop: element.scrollTop, focusable: element.tabIndex === 0,
-                    fontSize: getComputedStyle(element).fontSize, color: getComputedStyle(element).color, marginBottom: getComputedStyle(element).marginBottom })) };
-        });
-        assert.ok(modalState.dialog.left >= 0 && modalState.dialog.right <= width + 1 && modalState.header.top >= 0 && modalState.footer.bottom <= 901, '资料面板标题和底部操作在视口内');
-        assert.ok(modalState.links.every(link => link.width > 20 && link.height >= 32), '来源链接有足够触控面积');
-        assert.ok(modalState.readings.some(value => value.scrollHeight > value.height && value.focusable && value.scrollTop > 0), '作者长原文可聚焦并由键盘局部滚动');
-        assert.ok(modalState.readings.every(value => value.marginBottom === '0px'), '游戏全局段落边距不会撑高阅读区');
-        await page.screenshot({ path: path.join(evidenceDir, `sources-keyboard-${width}.png`), fullPage: false });
-        await page.keyboard.press('Escape');
-        await sourceDialog.waitFor({ state: 'detached' });
         assert.equal(await page.locator('.modhub-acquisition-dialog').count(), 0);
         const packageState = await page.evaluate(() => {
             const buttons = [...document.querySelectorAll('.modhub-market-section-button, .modhub-market-actions a, .modhub-market-actions button, .modhub-market-source-link, .modhub-market-acquisition-link')]
@@ -188,18 +188,7 @@ const results = [];
             const popup = await popupReady;
             await popup.close();
             assert.equal(await checkbox.isChecked(), false, `${input}访问平台不触发卡片多选`);
-            const notesLink = multiCard.locator('.modhub-market-acquisition-link');
-            if (input === '鼠标') await notesLink.click();
-            else { await notesLink.focus(); await page.keyboard.press('Enter'); }
-            const notesDialog = page.locator('.modhub-acquisition-dialog');
-            await notesDialog.waitFor({ state: 'visible' });
-            const originalUrls = index.mods.find(mod => mod.id === 'multi-source-layout').sources.map(source => source.url);
-            const reachableUrls = await notesDialog.locator('.modhub-acquisition-source a').evaluateAll(links => links.map(link => link.getAttribute('href')));
-            assert.ok(originalUrls.every(url => reachableUrls.includes(url)), '仓库、发布附件和三个 Discord 原帖都仍在安装说明可达');
-            assert.equal(await checkbox.isChecked(), false, `${input}打开安装说明不触发卡片多选`);
-            sourceInteractions.push({ input, selected: await checkbox.isChecked(), reachableUrls });
-            await page.keyboard.press('Escape');
-            await notesDialog.waitFor({ state: 'detached' });
+            sourceInteractions.push({ input, selected: await checkbox.isChecked(), href: await platformLink.getAttribute('href') });
         }
         await page.locator('[data-section="spells"]').click();
         await page.locator('[data-section="packages"]').click();
@@ -231,12 +220,107 @@ const results = [];
         assert.ok(spellState.actions.every(button => button.height >= 32));
         assert.equal(spellState.modCount, index.mods.length, '复制不会安装正文或改变模组目录');
         await page.screenshot({ path: path.join(evidenceDir, `spells-${width}.png`), fullPage: true });
+        await page.locator('#modHubToast').waitFor({ state: 'hidden' });
+        await page.evaluate(() => {
+            window.StartConfig.version = '0.5.12.13';
+            window.modHubFixtureInstalls = [];
+            window.modHubMarketInstaller = { install: async (mod, options) => {
+                window.modHubFixtureInstalls.push({ id: mod.id, name: mod._matchedLocal?.name,
+                    localVersion: mod._matchedLocal?.version, hasRestoreContext: Boolean(options.restoreContext) });
+                return false;
+            } };
+        });
+        await page.locator('[data-section="packages"]').click();
+        await page.evaluate(async () => {
+            await Promise.all(window.modHubMarket.getMarketMods().map(mod => window.modHubMarket.getModUpdateInfo(mod).promise));
+            window.modHubMarket.renderMarketCards();
+        });
+        const updateCard = page.locator('[data-mod-name="怨灵的倒影"]');
+        const updateButton = updateCard.locator('.btn-market-update');
+        assert.equal(await updateCard.locator('.badge-update').innerText(), '发现新版，适配待核对');
+        assert.equal(await updateButton.innerText(), '选择更新版本');
+        assert.ok(await updateButton.isEnabled());
+        assert.match(await updateCard.locator('.modhub-market-versions').innerText(), /已安装版本：v1\.3\.2/);
+        assert.match(await updateCard.locator('.modhub-market-versions').innerText(), /最新版本：v1\.3\.3/);
+        assert.match(await updateCard.innerText(), /适用的游戏版本尚未确定/);
+        assert.ok(!(await updateCard.innerText()).includes('未找到适配当前游戏的版本'));
+        await updateCard.scrollIntoViewIfNeeded();
+        const updateState = await updateCard.evaluate(card => {
+            const mod = window.modHubMarket.getMarketMods().find(item => item.id === 'wraith-reflection');
+            const release = window.modHubMarket.getModUpdateInfo(mod).release;
+            const rect = element => { const value = element.getBoundingClientRect(); return {
+                left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height }; };
+            return { gameVersion: window.modHubMarketVersions.getGameVersion(), status: window.modHubMarket.checkModInstallStatus(mod),
+                candidateVersion: release?.version, candidateAsset: release?.assetName, compatibility: release?.compatibility,
+                card: rect(card), badge: rect(card.querySelector('.badge-update')), button: rect(card.querySelector('.btn-market-update')),
+                versions: [...card.querySelectorAll('.modhub-market-versions span')].map(element => ({ ...rect(element),
+                    tone: element.className, color: getComputedStyle(element).color })),
+                clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth,
+                historyRequests: window.modHubFixtureHistoryRequests };
+        });
+        assert.equal(updateState.gameVersion, '0.5.12.13');
+        assert.equal(updateState.status, 'update_available');
+        assert.equal(updateState.candidateVersion, '1.3.3');
+        assert.equal(updateState.candidateAsset, 'WraithsReflection-v1.3.3.zip');
+        assert.equal(updateState.compatibility.evidence, 'unknown', '真实候选构建不能把无声明包识别为名称适配');
+        assert.ok(updateState.historyRequests.includes(updateCase.id), '新版发现应读取历史发布');
+        assert.ok(updateState.scrollWidth <= updateState.clientWidth + 1, '未知适配新版卡片不得横向溢出');
+        assert.ok([updateState.badge, updateState.button, ...updateState.versions].every(rect =>
+            rect.left >= updateState.card.left && rect.right <= updateState.card.right + 1 && rect.width > 20 && rect.height > 10
+            && rect.top >= 0 && rect.bottom <= 901), '新版徽章、按钮和两份版本字样完整可见');
+        assert.ok(updateState.button.height >= 32, '更新按钮保留触控面积');
+        assert.equal(updateState.versions[0].tone, 'gold');
+        assert.equal(updateState.versions[0].color, versionPalette.gold, '有新版时已安装版本显示金色');
+        assert.equal(updateState.versions[1].tone, 'purple');
+        assert.equal(updateState.versions[1].color, versionPalette.purple);
+        await updateCard.screenshot({ path: path.join(evidenceDir, `unknown-update-${width}.png`) });
+        await updateButton.click();
+        await page.waitForFunction(() => window.modHubFixtureInstalls.length === 1 && !window.modHubMarket.isInstallBusy());
+        const updateInteractions = await page.evaluate(() => window.modHubFixtureInstalls);
+        assert.deepEqual(updateInteractions, [{ id: updateCase.id, name: "Wraith'sReflection", localVersion: '1.3.2', hasRestoreContext: true }],
+            '选择更新版本通过原有安装器和同一还原上下文路由，不真实下载安装');
+        await page.addScriptTag({ content: fs.readFileSync(path.join(root, 'src/javascript/modhub-market-install.js'), 'utf8') });
+        await page.locator('.modhub-market-update-all').click();
+        const batchDialog = page.locator('.modhub-version-dialog');
+        await page.waitForFunction(() => {
+            const select = document.querySelector('.modhub-version-batch-select');
+            return select?.value && !select.disabled && !document.querySelector('.modhub-modal-btn-confirm')?.disabled;
+        });
+        assert.equal(await batchDialog.locator('.modhub-modal-title').innerText(), '选择全部更新版本');
+        assert.equal(await batchDialog.locator('.modhub-version-batch-select').count(), 1);
+        assert.match(await batchDialog.innerText(), /作者未声明支持的游戏版本，已默认选择最新版本；安装前需确认适配风险/);
+        assert.ok(await batchDialog.locator('.modhub-modal-btn-confirm').isEnabled());
+        await batchDialog.evaluate(async dialog => { await Promise.all(dialog.getAnimations().map(animation => animation.finished.catch(() => {}))); });
+        const batchUpdateState = await batchDialog.evaluate(dialog => {
+            const rect = element => { const value = element.getBoundingClientRect(); return {
+                left: value.left, right: value.right, top: value.top, bottom: value.bottom, width: value.width, height: value.height }; };
+            const select = dialog.querySelector('.modhub-version-batch-select');
+            return { selectedKey: select.value, selectedText: select.selectedOptions[0].textContent,
+                dialog: rect(dialog), header: rect(dialog.querySelector('.modhub-modal-header')), footer: rect(dialog.querySelector('.modhub-modal-footer')),
+                select: rect(select), clientWidth: document.documentElement.clientWidth, scrollWidth: document.documentElement.scrollWidth };
+        });
+        assert.match(batchUpdateState.selectedText, /1\.3\.3.*适配待核对/);
+        assert.ok(batchUpdateState.selectedKey.includes('WraithsReflection-v1.3.3.zip'), '全部更新自动预选单一无声明新版');
+        assert.ok([batchUpdateState.dialog, batchUpdateState.header, batchUpdateState.footer, batchUpdateState.select].every(rect =>
+            rect.left >= 0 && rect.right <= width + 1 && rect.top >= 0 && rect.bottom <= 901), '全部更新弹窗和预选控件完整位于视口内');
+        assert.ok(batchUpdateState.scrollWidth <= batchUpdateState.clientWidth + 1, '全部更新预选弹窗不得横向溢出');
+        await page.screenshot({ path: path.join(evidenceDir, `batch-update-default-${width}.png`), fullPage: false });
+        await batchDialog.locator('.modhub-modal-btn-cancel').click();
+        await batchDialog.waitFor({ state: 'detached' });
+        await page.waitForFunction(() => !window.modHubMarket.isInstallBusy());
+        assert.equal(await page.evaluate(() => window.modHubMarket.batchInstallState.running), false, '取消全部更新后释放批量操作锁');
+        await updateCard.locator('.btn-market-ignore[data-ignore-mode="once"]').click();
+        assert.equal(await updateCard.locator('.badge-ignored').innerText(), '已忽略本次');
+        const ignoredUpdate = await updateCard.locator('.modhub-market-versions span').first().evaluate(element => ({
+            tone: element.className, color: getComputedStyle(element).color }));
+        assert.equal(ignoredUpdate.tone, 'gold');
+        assert.equal(ignoredUpdate.color, versionPalette.gold, '忽略更新不能把旧版显示为绿色');
         assert.deepEqual(errors, []);
         assert.deepEqual(consoleErrors, []);
-        results.push({ width, nativeCssPath, nativeCssSha256, browserPath: 'Browser plugin not available', packageState, modalState, spellState, sourceInteractions,
-            pageErrors: errors, consoleErrors, isolatedRequests, fixtureOnly: true });
+        results.push({ width, nativeCssPath, nativeCssSha256, browserPath: 'Browser plugin not available', packageState, spellState, sourceInteractions,
+            versionPalette, updateState, updateInteractions, batchUpdateState, ignoredUpdate, pageErrors: errors, consoleErrors, isolatedRequests, fixtureOnly: true });
         await context.close();
-        console.log(`${width}px 市场资料与咒语布局通过`);
+        console.log(`${width}px 市场资料、咒语、未知适配新版与全部更新预选通过`);
     }
 })().catch(error => { console.error(error.stack); process.exitCode = 1; }).finally(async () => {
     fs.writeFileSync(path.join(evidenceDir, 'result.json'), JSON.stringify(results, null, 2));

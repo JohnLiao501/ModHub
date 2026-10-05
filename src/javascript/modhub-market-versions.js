@@ -505,6 +505,17 @@
         return latestUnambiguousCandidate(candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion)));
     }
 
+    /** 缺少适配声明不代表没有新版；仅补充身份和版号明确的未知适配候选。 */
+    function getLatestUpdateCandidate(mod, candidates) {
+        const gameVersion = getGameVersion();
+        if (!gameVersion || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
+        if (candidates.some(candidate => matchesCurrentGame(candidate, gameVersion))) return getLatestGameCandidate(mod, candidates);
+        return latestUnambiguousCandidate(candidates.filter(candidate => {
+            const info = candidate.compatibility || {};
+            return info.status !== 'incompatible' && !info.referenceMismatch && (!info.evidence || info.evidence === 'unknown');
+        }));
+    }
+
     /** 默认选择仅减少操作步骤，不能替代安装包的实际适配核对。 */
     function getDefaultSelection(mod, candidates, { updateOnly = false, localVersion = mod?._matchedLocal?.version || '' } = {}) {
         const empty = { defaultKey: '', defaultReason: '', defaultRisk: false };
@@ -512,7 +523,7 @@
         const market = window.modHubMarket, gameVersion = getGameVersion();
         const matching = candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion));
         const matched = getLatestGameCandidate(mod, candidates);
-        const latest = matching.length ? matched : !updateOnly && latestUnambiguousCandidate(
+        const latest = matching.length ? matched : latestUnambiguousCandidate(
             candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'));
         if (!latest || localVersion && market.compareVersions(latest.version, localVersion) < 0
             || updateOnly && (!localVersion || market.compareVersions(latest.version, localVersion) <= 0)) return empty;
@@ -554,5 +565,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

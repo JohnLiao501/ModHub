@@ -2782,7 +2782,7 @@
         }
     }
 
-    /** 更新状态复用历史选版证据，目录中的全局最新版仍保留为来源事实。 */
+    /** 更新状态复用历史包体身份与版号，适配推荐和未知适配新版分别处理。 */
     function getModUpdateInfo(mod) {
         const versions = window.modHubMarketVersions;
         const gameVersion = versions?.getGameVersion?.();
@@ -2808,7 +2808,7 @@
                 if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion || isWithdrawn(mod)) return;
                 candidates.push(...versions.buildCandidates(mod, history));
             } while (history.hasMore);
-            state.release = versions.getLatestGameCandidate(mod, candidates);
+            state.release = (versions.getLatestUpdateCandidate || versions.getLatestGameCandidate)(mod, candidates);
             state.version = state.release?.version || '';
             const asset = getReleaseInstallAssets(state.release)[0];
             const repository = parseGithubRepo(mod.githubUrl);
@@ -5542,6 +5542,7 @@
             label = '已是最新';
             title = '与当前目录最新版本相同';
         } else if (localVersion && latestVersion && updateInfo.release && isSameVersion(localVersion, updateInfo.version)
+            && ['declaration', 'filename'].includes(updateInfo.release.compatibility?.evidence)
             && compareVersions(latestVersion, localVersion) > 0) {
             label = '已是推荐版本';
             title = `当前游戏推荐版本与已安装版本相同；目录最新版本 ${formatVersionDisplay(latestVersion)} 更高。`
@@ -5631,6 +5632,7 @@
             const updateInfo = mod._updateCheck ? getModUpdateInfo(mod) : { version: mod.version };
             const latestVersionInfo = getLatestMarketVersionInfo(mod);
             const latestVersionText = latestVersionInfo.text;
+            const installedBadge = getInstalledMarketBadgeInfo(mod, updateInfo, latestVersionInfo.version);
             const isCommunity = mod.catalogSource === 'community';
             const tagsHtml = [
                 `<span class="modhub-market-tag modhub-market-category">${escapeHtml(mod.category || '待分类')}</span>`,
@@ -5645,6 +5647,7 @@
             const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
             const isUpdatable = mod._status === 'update_available' && !isDead;
             const isReferenceUpdate = updateInfo.release?.compatibility?.evidence === 'filename';
+            const isUnknownUpdate = updateInfo.release && (!updateInfo.release.compatibility?.evidence || updateInfo.release.compatibility.evidence === 'unknown');
             const isIgnored = !!mod._isIgnored;
             const isPermanentlyIgnored = mod._ignoredVersion === 'ignored';
             const selected = batchInstallState.selected.has(getMarketModKey(mod));
@@ -5659,8 +5662,9 @@
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
                 } else actionBtnHtml = '';
             } else if (isUpdatable) {
-                badgeHtml = `<span class="modhub-market-badge badge-update">${isReferenceUpdate ? '发现新版，依据文件名' : '发现新版'}</span>`;
-                const updateLabel = isReferenceUpdate ? '选择更新版本' : '一键更新';
+                badgeHtml = `<span class="modhub-market-badge badge-update">${isReferenceUpdate ? '发现新版，依据文件名' : isUnknownUpdate ? '发现新版，适配待核对' : '发现新版'}</span>`;
+                const updateLabel = isReferenceUpdate || isUnknownUpdate ? '选择更新版本' : '一键更新';
+                if (isUnknownUpdate) installedStatusDetail = updateInfo.release.compatibility?.reason || '适用的游戏版本尚未确定，下一步会核对安装包中的说明';
                 actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="${updateLabel}">${updateLabel}</button>`;
             } else if (mod._status === 'external_installed') {
                 badgeHtml = `<span class="modhub-market-badge badge-installed">已安装</span>`;
@@ -5670,7 +5674,6 @@
                     badgeHtml = `<span class="modhub-market-badge badge-ignored">${isPermanentlyIgnored ? '已永久忽略' : '已忽略本次'}</span>`;
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="更新">更新</button>`;
                 } else {
-                    const installedBadge = getInstalledMarketBadgeInfo(mod, updateInfo, latestVersionInfo.version);
                     installedStatusDetail = installedBadge.detail;
                     badgeHtml = `<span class="modhub-market-badge badge-installed"${installedBadge.title ? ` title="${escapeHtml(installedBadge.title)}"` : ''}>${installedBadge.label}</span>`;
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
@@ -5689,7 +5692,7 @@
                 actionBtnHtml = '';
             }
 
-            const acquisitionDetailsHtml = window.modHubMarketSpells?.renderAcquisitionDetails(mod, modIndex)
+            const acquisitionDetailsHtml = window.modHubMarketSpells?.renderAcquisitionDetails(mod)
                 || '<div class="modhub-market-source-bar"><span>来源：</span><span>来源资料模块尚未就绪</span></div>';
 
             const installedRelease = isReleasePackageInstalled(updateInfo.release, mod._matchedLocal) === true ? getPublishedVersion(updateInfo.release) : '';
@@ -5697,7 +5700,7 @@
                 ? `${formatVersionDisplay(installedRelease)}（包内 ${formatVersionDisplay(mod._matchedLocal.version)}）`
                 : mod._matchedLocal?.version ? formatVersionDisplay(mod._matchedLocal.version) : '未知';
             const localVerText = mod._matchedLocal
-                ? `<span class="${mod._status === 'update_available' ? 'gold' : 'green'}">已安装版本：${escapeHtml(mod._matchedLocal.version
+                ? `<span class="${installedBadge.label === '已是最新' ? 'green' : 'gold'}">已安装版本：${escapeHtml(mod._matchedLocal.version
                     ? installedVersionText : '未知')}</span>` : '';
 
             const ignoreActionsHtml = isUpdatable
@@ -5725,7 +5728,7 @@
                     </div>
                     <div class="modhub-market-meta modhub-market-versions grey">
                         ${localVerText}
-                        <span>最新版本：${escapeHtml(latestVersionText)}</span>
+                        <span class="purple">最新版本：${escapeHtml(latestVersionText)}</span>
                     </div>
                     ${installedStatusDetail || updateInfo.error ? `<div class="modhub-market-meta grey">${escapeHtml(installedStatusDetail || `更新检查失败：${updateInfo.error}。可刷新市场后重试。`)}</div>` : ''}
                     <div class="modhub-market-desc">
@@ -5749,17 +5752,6 @@
         downloadProgressState.forEach((progress, name) => updateDownloadProgress(name, progress.percent, progress.text, progress.state));
 
         // 绑定卡片内按钮事件
-        container.querySelectorAll('.modhub-market-acquisition-link').forEach(button => {
-            button.onclick = async event => {
-                event?.preventDefault();
-                event?.stopPropagation();
-                const index = Number(button.dataset.modIndex);
-                if (!Number.isSafeInteger(index) || index < 0 || !/^\d+$/.test(button.dataset.modIndex || '')) return false;
-                const targetMod = marketModList[index];
-                if (!targetMod || targetMod.contentType === 'spell') return false;
-                return await window.modHubMarketSpells?.openAcquisition(targetMod);
-            };
-        });
         container.querySelectorAll('.modhub-market-select').forEach(input => {
             input.onchange = () => setBatchModSelected(input.dataset.modKey, input.checked);
             const card = input.closest('.modhub-market-card');
