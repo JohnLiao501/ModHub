@@ -1,5 +1,6 @@
 // 市场包体准备、复用和写入边界。
-const { assert, loadMarket, createStubElement } = require('./helpers');
+const { assert, loadMarket, loadScripts, createStubElement } = require('./helpers');
+const { webcrypto, createHash } = require('node:crypto');
 
 module.exports = async function () {
     const fixture = () => {
@@ -99,6 +100,133 @@ module.exports = async function () {
         };
         return { ...base, mod, releaseInfo, mainBoot, audioBoot, mainName, audioName, syncState };
     };
+    const sameBootPackageFixture = (marker = 1) => {
+        const f = fixture(), { sb, mod, state, market } = f;
+        sb.crypto = webcrypto;
+        sb.atob = atob;
+        mod.version = '1.8';
+        mod.versionSource = 'github';
+        mod.releaseUrl = `${mod.githubUrl}/releases/tag/v1.8`;
+        const boot = { name: 'PreparedFixture', version: '1.7', dependenceInfo: [] };
+        const packages = new Map([[1, new Uint8Array([1, 42, 255])], [2, new Uint8Array([2, 42, 255])], [3, new Uint8Array([3, 42, 255])]]);
+        const stored = new Map([[boot.name, packages.get(marker)]]);
+        const digest = data => 'sha256:' + createHash('sha256').update(data).digest('hex');
+        const releaseInfo = { tagName: 'v1.8', version: '1.8', assets: [{ name: 'PreparedFixture.zip',
+            downloadUrl: `${mod.githubUrl}/releases/download/v1.8/PreparedFixture.zip`, digest: digest(packages.get(2)) }] };
+        sb._modHubModState = { sideEnabled: [boot.name], sideDisabled: [], sideMods: [{ name: boot.name, enabled: true }], builtInMods: [] };
+        const loader = { customStore: {}, constructor: { calcModNameKey: name => name } };
+        sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getIndexDBLoader: () => loader,
+            getModCacheArray: () => [{ mod: { name: boot.name, bootJson: boot } }] }),
+            getIdbKeyValRef: () => ({ get: async name => stored.get(name) }) } });
+        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async data => {
+            const bytes = typeof data === 'string' ? Uint8Array.from(atob(data), char => char.charCodeAt(0)) : data;
+            return bytes[0] === 3 ? { name: 'UnrelatedAliasProvider', alias: [boot.name], version: '99.0' }
+                : { ...boot, version: state.persistedVersion || boot.version };
+        } });
+        sb.modHubLoadModManageState = async () => {};
+        sb.fetch = async () => ({ ok: true, headers: { get: () => null }, blob: async () => new Blob([packages.get(2)]) });
+        sb.modHubHandleAddMod = async input => {
+            state.imports++;
+            const files = Array.isArray(input) ? input : Array.from(input.files);
+            stored.set(boot.name, new Uint8Array(await files[0].arrayBuffer()));
+            return true;
+        };
+        return { ...f, boot, packages, stored, releaseInfo, digest };
+    };
+    {
+        const { sb, market, mod, boot, releaseInfo, stored, packages, state } = sameBootPackageFixture();
+        await market.refreshLocalPackageProfiles();
+        const local = market.getLocalInstalledProfiles()[0];
+        assert.equal(local.version, '1.7');
+        assert.equal(market.isReleaseInstalled(releaseInfo, local), false, '同 boot 版本的旧包不能冒认为新发布已安装');
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        assert.equal(market.isPreparedComponentInstalled(prepared, prepared.boots[0]), false, '真正不同的包体需要替换');
+        assert.equal(prepared.boots[0].version, '1.7', '发行1.8不能改写作者真实依赖版本');
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared, batchMode: true, askRestart: false }), true);
+        assert.deepEqual(stored.get(boot.name), packages.get(2));
+        assert.equal(state.imports, 1);
+        const updated = market.getLocalInstalledProfiles()[0];
+        assert.equal(updated.version, '1.7', '更新后保留真实包内版本');
+        assert.equal(market.isReleaseInstalled(releaseInfo, updated), true, '回读新包摘要后可确认对应发行已安装');
+        assert.equal(sb.modHubGetModInfo(boot.name).bootJson.version, '1.7', '依赖接口不伪造发布标签版本');
+    }
+    {
+        const { market, mod, releaseInfo, state } = sameBootPackageFixture(2);
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        assert.equal(market.isPreparedComponentInstalled(prepared, prepared.boots[0]), true);
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared, batchMode: true,
+            onFailure: (reason, code) => { failure = { reason, code }; } }), false);
+        assert.equal(failure.code, 'ALREADY_INSTALLED', '真正同字节包不应重复安装');
+        assert.equal(state.imports, 0);
+    }
+    {
+        const { market, mod, releaseInfo, stored, packages, boot, state } = sameBootPackageFixture();
+        const prepared = await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        stored.set(boot.name, packages.get(2));
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, preparedPackage: prepared, batchMode: true,
+            onFailure: (reason, code) => { failure = { reason, code }; } }), false);
+        assert.equal(failure.code, 'INSTALL_PACKAGE_INVALID', '确认期间仓库包体变化，即使版本相同也须重新生成计划');
+        assert.equal(state.imports, 0);
+    }
+    for (const base64 of [false, true]) {
+        const { market, stored, packages, boot, releaseInfo } = sameBootPackageFixture(2);
+        if (base64) stored.set(boot.name, Buffer.from(packages.get(2)).toString('base64'));
+        await market.refreshLocalPackageProfiles();
+        assert.equal(market.isReleaseInstalled(releaseInfo, market.getLocalInstalledProfiles()[0]), true, '真实字节和加载器base64存储使用同一包摘要');
+        stored.set(boot.name, packages.get(3));
+        await market.refreshLocalPackageProfiles();
+        assert.equal(market.getLocalInstalledProfiles()[0].packageDigest, '', '错误技术名或别名仓库包不能取得当前模组的摘要身份');
+    }
+    for (const current of [1, 2]) {
+        const { sb, market, mod, releaseInfo, state } = sameBootPackageFixture(current);
+        sb.StartConfig = { version: '0.5.12.13' };
+        const candidate = { ...releaseInfo, candidateKey: 'same-boot-release:1.8', seriesKey: mod.id,
+            compatibility: { status: 'compatible', evidence: 'declaration', reason: '测试作者声明' } };
+        loadScripts(sb, ['javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js']);
+        sb.modHubMarketVersions.fetchReleases = async () => ({ page: 1, hasMore: false });
+        sb.modHubMarketVersions.buildCandidates = () => [candidate];
+        sb.modHubConfirm = async options => {
+            const dialog = createStubElement();
+            await options.onRender?.(dialog);
+            if (options.canConfirm && !options.canConfirm()) return false;
+            return options.customResult ? options.customResult() : true;
+        };
+        assert.equal(await sb.modHubMarketInstaller.install(mod), current === 1, '公共选版、预检和安装计划均须按真实包体区分同号发行');
+        assert.equal(state.imports, current === 1 ? 1 : 0, '已装原包不得再次写入，新内容同boot包允许替换');
+        assert.equal(market.getLocalInstalledProfiles()[0].version, '1.7');
+    }
+    {
+        const { sb, market, state, boot } = sameBootPackageFixture(2);
+        state.persistedVersion = '1.8';
+        assert.equal(sb.modHubGetModInfo(boot.name).bootJson.version, '1.7', '游戏尚在运行旧版时保留旧运行态');
+        await market.refreshLocalPackageProfiles();
+        assert.equal(market.getLocalInstalledProfiles()[0].version, '1.8', '市场必须显示新仓库版本，不能被旧运行态版本覆盖');
+    }
+    for (const preparedRoute of [false, true]) {
+        for (const current of [1, 2]) {
+            const { sb, market, mod, boot, releaseInfo, stored, state } = sameBootPackageFixture(current);
+            const prepared = preparedRoute ? await market.downloadAndInstallMod(mod, 'ddlc', {
+                releaseInfo, prepareOnly: true, batchMode: true }) : null;
+            const changedBytes = new Uint8Array([4, 42, 255]);
+            let waits = 0, failure;
+            sb.modHubWaitManagerIdle = async () => {
+                waits++;
+                stored.set(boot.name, changedBytes);
+                return true;
+            };
+            assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', {
+                releaseInfo, ...(prepared ? { preparedPackage: prepared } : {}),
+                batchMode: true, askRestart: false, restoreContext: {},
+                onFailure: (reason, code) => { failure = { reason, code }; }
+            }), false, '等待管理器期间同版本包体改变，直接与预检路径都须停止旧计划');
+            assert.equal(waits, 1, '真实回读不通过轮询无限等待管理器');
+            assert.equal(failure.code, 'INSTALL_PACKAGE_INVALID');
+            assert.equal(state.imports, 0, '变化后不得导入旧目标或按旧缓存复用组件');
+            assert.deepEqual(stored.get(boot.name), changedBytes, '等待期间新仓库内容不能被覆盖');
+        }
+    }
     {
         const { market, mod, releaseInfo, state, mainName, audioName, syncState } = optionalAudioFixture();
         state.localBoots.clear();

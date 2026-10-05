@@ -11,6 +11,12 @@ dolmod-site/
 # AI 工作区（本地记忆与缓存，不入库）
 .workbuddy/
 
+# 聊天附件仅供本地核对，不进入源码仓库
+.codex-remote-attachments/
+
+# 本地计划与工作记录
+/plans/
+
 # 打包产物（统一通过 GitHub Releases 分发，不入库）
 release/*.zip
 

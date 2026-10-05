@@ -322,10 +322,13 @@
         // 索引镜像只提供目录文件，历史接口与其他动态接口共用真实 Worker 地址。
         const base = new URL(market.RELEASE_WORKER_API_BASE);
         const communityRevision = market.getCommunityRevision?.() ?? mod.communityRevision;
-        const signature = JSON.stringify([base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
+        const signatureFields = [base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
             mod.autoInstallScope || '', mod.revision, communityRevision, mod.identityId, mod.name,
             mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
-            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, page, 'modpack-v1']);
+            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, page, 'modpack-v1'];
+        // 登记证据变化时废弃旧候选缓存；普通来源沿用原有缓存签名。
+        if (mod.verifiedReleaseAsset) signatureFields.push(mod.verifiedReleaseAsset);
+        const signature = JSON.stringify(signatureFields);
         const cacheKey = MODHUB_HISTORY_CACHE_PREFIX + encodeURIComponent(signature);
         const family = [base.origin, mod.id, sourceUrl], familyKey = JSON.stringify(family);
         const generation = MODHUB_HISTORY_GENERATIONS.get(familyKey) || 0;
@@ -420,6 +423,22 @@
         return { label, tone, reason: info.reason || '适用的游戏版本尚未确定，下一步会核对安装包中的说明' };
     }
 
+    /** 仅当前精确附件、摘要、大小和身份均匹配时采用登记的真实 boot 版本。 */
+    function verifiedCandidateBootVersion(mod, asset) {
+        const verified = mod?.verifiedReleaseAsset;
+        if (asset?.versionSource !== 'verified-boot' || !verified || typeof verified !== 'object' || Array.isArray(verified)
+            || typeof verified.version !== 'string' || !verified.version.trim()
+            || typeof verified.bootName !== 'string' || !verified.bootName.trim()
+            || !Array.isArray(mod.bootNames) || !mod.bootNames.some(name => String(name).toLowerCase() === verified.bootName.toLowerCase())
+            || !/^[a-f0-9]{64}$/i.test(verified.sha256 || '')
+            || !Number.isSafeInteger(verified.size) || verified.size <= 0 || asset.size !== verified.size
+            || asset.bootName !== verified.bootName || asset.version !== verified.version
+            || String(asset.digest || '').toLowerCase() !== `sha256:${verified.sha256.toLowerCase()}`
+            || !normalizeSource(verified.sourceUrl) || normalizeSource(asset.downloadUrl) !== normalizeSource(verified.sourceUrl)
+            || normalizeSource(mod.githubUrl) !== normalizeSource(verified.sourceUrl)) return '';
+        return verified.version;
+    }
+
     function buildCandidates(mod, history) {
         const market = window.modHubMarket;
         const source = getReleaseSource(normalizeSource(mod?.githubUrl));
@@ -434,11 +453,14 @@
             const assets = release.assets || [];
             const plan = market.buildReleaseAssetPlan(assets, '', mod, { preserveVersions: true });
             for (const asset of plan.candidates || []) {
+                const verifiedVersion = verifiedCandidateBootVersion(mod, asset);
+                if (asset.versionSource === 'verified-boot' && !verifiedVersion) continue;
                 const tagName = release.tagName || '';
                 const candidateKey = JSON.stringify([market.getMarketModKey(mod), tagName, asset.downloadUrl]);
                 if (seen.has(candidateKey)) continue;
                 seen.add(candidateKey);
-                const version = market.getAssetVersionParts(asset.name).join('.') || release.version
+                const version = verifiedVersion || market.getAssetVersionParts(asset.name).join('.')
+                    || (release.versionSource !== 'verified-boot' ? release.version : '')
                     || String(release.name || '').trim().match(/^v?(\d+(?:\.\d+)+)$/i)?.[1]
                     || (String(tagName).match(/(?:^|[^a-z0-9])v?(\d+(?:\.\d+)*)(?=$|[^a-z0-9.])/i)?.[1] || '');
                 const selectedAssets = [{ ...asset, packageRole: market.getAssetRole?.(asset.name) || 'main' },
@@ -452,6 +474,7 @@
                     compatibility: candidateCompatibility(asset, release, gameVersion),
                     ...(Array.isArray(asset.dependencies) ? { dependencies: asset.dependencies }
                         : Array.isArray(release.dependencies) ? { dependencies: release.dependencies } : {}),
+                    ...(verifiedVersion ? { versionSource: 'verified-boot', bootName: asset.bootName } : {}),
                     stale: Boolean(history?.stale), fromCache: Boolean(history?.fromCache) });
             }
         }
@@ -489,7 +512,8 @@
         const market = window.modHubMarket, gameVersion = getGameVersion();
         const matching = candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion));
         const matched = getLatestGameCandidate(mod, candidates);
-        const latest = matching.length ? matched : !updateOnly && latestUnambiguousCandidate(candidates);
+        const latest = matching.length ? matched : !updateOnly && latestUnambiguousCandidate(
+            candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'));
         if (!latest || localVersion && market.compareVersions(latest.version, localVersion) < 0
             || updateOnly && (!localVersion || market.compareVersions(latest.version, localVersion) <= 0)) return empty;
         let defaultReason;

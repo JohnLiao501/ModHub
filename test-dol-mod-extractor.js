@@ -15,6 +15,8 @@ async function main() {
     assert.equal(modHubIsModPackageName(name), false, `非模组附件不得进入安装包选择：${name}`);
   }
   const catalog = JSON.parse(await readFile(path.join(__dirname, 'mod-identities.json'), 'utf8'));
+  assert.deepEqual(await readFile(path.join(__dirname, 'mod-identities.json')),
+    await readFile(path.join(__dirname, 'dolmod-site', 'dist', 'mod-identities.json')), '根目录与网站身份表必须逐字节相同');
   assert.equal(catalog.schemaVersion, 1);
   assert.equal(new Set(catalog.mods.map((mod) => mod.id)).size, catalog.mods.length, '身份 ID 不得重复');
   const categories = new Set(['框架与前置', '剧情与角色', '玩法与内容', '界面与便利', '外观与资源', '规则与数值', '修复与兼容', '待分类']);
@@ -48,6 +50,34 @@ async function main() {
   assert.deepEqual(knownPackages[2].bootNames, ['deadwood-reblooms'], '主包技术名必须排除音频扩展');
   assert.deepEqual(knownPackages[0].dependencies, [{ id: 'maplebirch', version: '' }]);
   assert.deepEqual(knownPackages[2].dependencies, [{ id: 'maplebirch', version: '' }]);
+  const registeredIds = ['dol-mod-center', 'whitney-extra-mod', 'lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en',
+    'paperdoll-plus', 'realistic-pain', 'little-teachers-pet', 'fumo-mod', 'rw-beautification', 'eu-clothing-addition',
+    'layering-fixes', 'ray-beautification', 'ray-extra-clothes', 'decorations-zh-fix'];
+  const registeredIdentities = registeredIds.map(id => catalog.mods.find(identity => identity.id === id));
+  assert.ok(registeredIdentities.every(Boolean), '本轮14个身份均须登记');
+  assert.deepEqual(mergeModIdentities(registeredIdentities.map(identity => ({ name: identity.bootNames[0] })), catalog)
+    .map(mod => mod.identityId), registeredIds, '真实技术名须分别识别独立项目与语言变体');
+  for (const id of ['lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en', 'eu-clothing-addition', 'layering-fixes']) {
+    const identity = catalog.mods.find(item => item.id === id);
+    assert.deepEqual(identity.repositories, [], `${id} 不得按共享仓库别名匹配`);
+    assert.deepEqual(identity.repositoryKeys, [], `${id} 不得绑定整仓库身份`);
+  }
+  const [lnnChs, lnnEn] = ['lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en'].map(id => catalog.mods.find(item => item.id === id));
+  assert.deepEqual(lnnChs.bootNames, ['LNN 战斗对手状态显示·简中']);
+  assert.deepEqual(lnnEn.bootNames, ['LNN Enemy Stats Display']);
+  assert.ok([lnnChs, lnnEn].every(identity => !(identity.dependencies || []).some(item => item.id === 'modi18n')),
+    '作者说明中的中文汉化前提不能冒充包内依赖');
+  assert.deepEqual(mergeModIdentities([
+    { name: 'LNN 战斗对手状态显示' },
+    { name: 'dol-enemy-stats-display-mod', githubUrl: 'https://github.com/DGCK81LNN/dol-enemy-stats-display-mod' },
+    { name: 'LNN Enemy Stats Display', githubUrl: 'https://github.com/DGCK81LNN/dol-enemy-stats-display-mod' },
+    { name: 'DOL-Eu-ArtMods', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
+    { name: 'LJ改脸', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
+    { name: 'Eu Clothing Addition', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
+  ], catalog).map(mod => mod.identityId), [null, null, null, null, null, null],
+  '通用名称与共享仓库不能替代维护者指定的语言或项目身份');
+  assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-extra-clothes').bootNames, ['RAY额外服装']);
+  assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-beautification').bootNames, ['Ray美化']);
   const originalHistoryFetch = globalThis.fetch;
   try {
     const sourceUrl = 'https://github.com/Owner/Repo';

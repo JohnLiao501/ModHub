@@ -107,7 +107,7 @@ window.modHubConfirm = function(options) {
                 <span class="${isDanger ? 'red' : 'gold'} modhub-modal-title">${window.modHubEscapeHtml(title)}</span>
                 <button type="button" class="modhub-modal-close" aria-label="关闭">&times;</button>
             </div>
-            <div class="modhub-modal-body">
+            <div class="modhub-modal-body" tabindex="0" role="region" aria-label="提示内容">
                 <div class="modhub-modal-message">${messageHtml}</div>
                 ${selectHtml}
             </div>

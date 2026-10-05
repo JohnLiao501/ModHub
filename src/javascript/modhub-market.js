@@ -44,20 +44,14 @@
     // 准备结果只在本次安装内复用，不能把换版后的包或外部构造的对象直接导入。
     const preparedMarketPackages = new WeakMap();
     const modUpdateChecks = new Map();
+    const installedPackageRecords = new Map();
+    const downloadedPackageDigests = new Map();
+    let officialPackageMetadataQueue = Promise.resolve();
     const COMPANION_ASSET_PATTERN = /(?:photo|image|resource|asset)[\s._-]*pack|图包|图片包|资源包|素材包/i;
     const MODHUB_OPTIONAL_AUDIO_PATTERN = /(?:^|[\s._-])(?:audio(?:[\s._-]*pack)?|(?:sound|music|bgm)[\s._-]*pack)(?=[\s._-]|$)|音频包|音乐包|音效包/i;
 
     // 针对社区个别模组作者打包失误（如 Release 为新版但内部 boot.json 未递增）或 Wiki 录入虚高版本的容错规则库
     const MOD_MARKET_VERSION_RULES = [
-        {
-            // D.O.L.I: 远程 Release v0.2.3 资产包内 boot.json 未修改版本号仍写 0.2.2
-            name: 'D.O.L.I',
-            match: (name, repo) => /^(d\.?o\.?l\.?i|degreesoflewdityintelligence)$/i.test(name) || repo === 'degreesoflewdityintelligence',
-            isUpToDate: (localVer, remoteVer) => {
-                // 本地只要已安装 >= 0.2.2，且当前远程 <= 0.2.3，即认定为已是最新
-                return compareVersions(localVer, '0.2.2') >= 0 && compareVersions(remoteVer, '0.2.3') <= 0;
-            }
-        },
         {
             // 惠特尼剧情扩展: Wiki 词条误录为 v1.0，实际仓库与作者最新发布版为 0.3.1
             name: '惠特尼剧情扩展',
@@ -73,13 +67,6 @@
             match: (name, repo) => name === 'domrobin' || repo === 'degreesoflewdityrobinmod',
             isUpToDate: (localVer, remoteVer) =>
                 compareVersions(localVer, '0.0.8') >= 0 && /^v?0\.08(?:$|[-+_])/i.test(String(remoteVer).trim())
-        },
-        {
-            // 悉尼裸体学习: Release v1.5 的包内 boot.json 仍写 0.1
-            name: '悉尼裸体学习',
-            match: (name, repo) => name === 'sydneybarestudymod' || repo === 'dolsydneybarestudymod',
-            isUpToDate: (localVer, remoteVer) =>
-                compareVersions(localVer, '0.1') >= 0 && /^v?1\.5(?:$|[-+_])/i.test(String(remoteVer).trim())
         },
         {
             // 织境空间系列模组: 作者已移除 GitHub 仓库 (404)，且 Wiki 词条录入的料理扩展历史版本 (0.4.19) 虚高且无可用发布
@@ -306,6 +293,12 @@
     let currentStatusFilter = 'all';
     let currentSortBy = 'date'; // 'date' | 'name'
     let currentSearchText = '';
+    let currentMarketSection = 'packages';
+    let marketSearchTimer;
+    const sectionFilters = {
+        packages: { category: 'all', status: 'all', search: '', sort: 'date' },
+        spells: { category: 'all', status: 'all', search: '', sort: 'date' }
+    };
     let hideDeadSources = true;
     try { hideDeadSources = readStoredValue(HIDE_DEAD_SOURCES_KEY) !== 'false'; } catch (_) {}
     let isLoading = false;
@@ -319,7 +312,7 @@
     }
 
     function isBatchInstallEligible(mod, profiles = getLocalInstalledProfiles()) {
-        return Boolean(mod && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+(?:[/?#]|$)/i.test(mod.githubUrl || '')
+        return Boolean(mod && mod.contentType !== 'spell' && /^https:\/\/github\.com\/[^/?#]+\/[^/?#]+(?:[/?#]|$)/i.test(mod.githubUrl || '')
             && (mod.catalogSource !== 'community' || hasCommunityReleaseSource(mod))
             && !isWithdrawn(mod)
             && !mod._isDeadRepo && !isDeadRepo(mod.githubUrl, mod)
@@ -331,14 +324,14 @@
     }
 
     function toggleBatchSelection(selecting = !batchInstallState.selecting) {
-        if (batchInstallState.running) return;
+        if (currentMarketSection !== 'packages' || batchInstallState.running) return;
         batchInstallState.selecting = Boolean(selecting);
         if (!batchInstallState.selecting) batchInstallState.selected.clear();
         renderMarketCards();
     }
 
     function setBatchModSelected(key, checked) {
-        if (batchInstallState.running || !batchInstallState.selecting) return;
+        if (currentMarketSection !== 'packages' || batchInstallState.running || !batchInstallState.selecting) return;
         const mod = marketModList.find(item => getMarketModKey(item) === key);
         if (checked && isBatchInstallEligible(mod)) batchInstallState.selected.add(key);
         else batchInstallState.selected.delete(key);
@@ -350,7 +343,7 @@
     }
 
     function selectAllVisibleMods() {
-        if (batchInstallState.running || !batchInstallState.selecting) return;
+        if (currentMarketSection !== 'packages' || batchInstallState.running || !batchInstallState.selecting) return;
         const profiles = getLocalInstalledProfiles();
         filterAndSortMods().filter(mod => isBatchInstallEligible(mod, profiles)).forEach(mod => batchInstallState.selected.add(getMarketModKey(mod)));
         renderMarketCards();
@@ -375,6 +368,7 @@
         });
         const toolbar = document.getElementById('modHubMarketBatchToolbar');
         if (!toolbar) return;
+        toolbar.hidden = currentMarketSection !== 'packages';
         const escapeHtml = window.modHubEscapeHtml || (value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]));
         const focusedId = toolbar.contains?.(document.activeElement) ? document.activeElement?.id : '';
         toolbar.classList.toggle('is-active', state.selecting || state.running);
@@ -467,8 +461,10 @@
         return mod?.autoInstall === true && typeof mod.identityId === 'string' && !!mod.identityId.trim()
             && Array.isArray(mod.bootNames) && mod.bootNames.length > 0
             && !!repo && repositoryKeys.some(key => String(key).toLowerCase() === repo.key)
-            && /^\/[^/]+\/[^/]+\/releases\/(?:latest|tag\/[^/]+)\/?$/.test(new URL(githubUrl).pathname)
-            && sourceUrlKey(mod.sourceUrl) === sourceUrlKey(githubUrl);
+            && /^\/[^/]+\/[^/]+\/releases\/(?:latest|tag\/[^/]+|download\/[^/]+\/[^/]+)\/?$/.test(new URL(githubUrl).pathname)
+            && (sourceUrlKey(mod.sourceUrl) === sourceUrlKey(githubUrl)
+                || (Array.isArray(mod.sources) && mod.sources.some(source => source?.platform === 'github'
+                    && sourceUrlKey(source.url) === sourceUrlKey(githubUrl))));
     }
 
     function sourceUrlKey(value) {
@@ -2431,10 +2427,11 @@
     }
 
     const DEAD_REPOS_STORAGE_KEY = 'modhub_market_dead_repos_v1';
-    // 已确凿验证被作者彻底删除（HTTP 404）的 GitHub 仓库
+    // 已核实当前不可访问（HTTP 404）的 GitHub 仓库
     const KNOWN_DEAD_REPOSITORIES = new Set([
         'kanna-hanabi/wovenrealm',
-        'kanna-hanabi/wovenrealmui'
+        'kanna-hanabi/wovenrealmui',
+        '102326/dol-mod-center'
     ]);
     // 经核实正常活跃的仓库白名单（包含短横线单字符仓库名，防止误诊，并自动清洗本地可能存留的误诊记录）
     const KNOWN_ACTIVE_REPOSITORIES = new Set([
@@ -2615,7 +2612,7 @@
             throw new Error('自动版本索引格式异常');
         }
         rememberWithdrawals(index);
-        const activeMods = index.mods.filter(mod => mod && mod.status !== 'withdrawn');
+        const activeMods = index.mods.filter(mod => mod && mod.contentType !== 'spell' && mod.status !== 'withdrawn');
 
         // 客户端容错修正：若远程 release-index 仍包含未更新的旧身份映射，即时纠偏并拆分
         for (const mod of activeMods) {
@@ -2666,7 +2663,7 @@
                 mod = { ...mod, releaseUrl: null, version: mod.wikiVersion || '', versionLabel: '',
                     versionSource: 'wiki', updateDate: mod.wikiDate || '', updateDateSource: mod.wikiDate ? 'wiki' : null };
             }
-            const hasAuthoritativeClassification = mod.identityId !== null;
+            const hasAuthoritativeClassification = mod.identityId !== null || isCommunity;
             const classification = deriveClassification(
                 mod.name || mod.wikiName,
                 mod.description,
@@ -2677,6 +2674,9 @@
             const isDead = Boolean(isDeadRepo(repoKey) || isDeadRepo(mod.githubUrl));
             return {
                 ...mod,
+                contentType: 'package',
+                sources: window.modHubMarketSpells?.normalizeSources(mod) || [],
+                packageRecords: window.modHubMarketSpells?.normalizePackages(mod) || [],
                 _isDeadRepo: isDead,
                 name: cleanModTitle(mod.name || mod.wikiName) || mod.wikiName || '未命名模组',
                 githubUrls: Array.isArray(mod.githubUrls)
@@ -2707,7 +2707,9 @@
             try {
                 const res = await fetch(url, { cache: 'no-cache', signal: controller?.signal });
                 if (!res.ok) throw new Error(`自动版本索引返回状态码: ${res.status}`);
-                const mods = normalizeReleaseIndex(await res.json());
+                const index = await res.json();
+                const mods = normalizeReleaseIndex(index);
+                window.modHubMarketSpells?.applyIndex(index, withdrawnRevision);
                 activeReleaseWorkerBaseUrl = url;
                 writeLocalCache(WIKI_CACHE_KEY, mods);
                 return mods;
@@ -2784,7 +2786,8 @@
     function getModUpdateInfo(mod) {
         const versions = window.modHubMarketVersions;
         const gameVersion = versions?.getGameVersion?.();
-        if (!mod?.id || !gameVersion || !versions?.getLatestGameCandidate) return { version: mod?.version || '' };
+        if (!mod?.id || !versions?.getLatestGameCandidate) return { version: mod?.version || '' };
+        if (!gameVersion) return mod._updateCheck = { pending: false, version: '', release: null, error: '' };
         const signature = JSON.stringify([gameVersion, RELEASE_WORKER_API_BASE, mod.id, mod.githubUrl, mod.version,
             mod.releaseUrl, mod.catalogSource, mod.autoInstall, mod.autoInstallScope, mod.revision, withdrawnRevision,
             mod.identityId, mod.name, mod.sourceUrl, mod.repositoryKeys, mod.bootNames, mod.aliases,
@@ -2806,13 +2809,24 @@
                 candidates.push(...versions.buildCandidates(mod, history));
             } while (history.hasMore);
             state.release = versions.getLatestGameCandidate(mod, candidates);
-            const hasGameEvidence = candidates.some(candidate => candidate.compatibility?.evidence
-                && candidate.compatibility.evidence !== 'unknown');
-            if (!state.release && !hasGameEvidence && new Set(candidates.map(candidate => candidate.seriesKey)).size === 1) {
-                state.release = versions.rankCandidates(mod, candidates).candidates.find(candidate => candidate.version
-                    && candidate.compatibility?.status !== 'incompatible' && !candidate.compatibility?.referenceMismatch) || null;
-            }
             state.version = state.release?.version || '';
+            const asset = getReleaseInstallAssets(state.release)[0];
+            const repository = parseGithubRepo(mod.githubUrl);
+            if (mod._matchedLocal?.packageDigest && asset && !getAssetPackageDigest(asset) && repository && state.release.tagName) {
+                try {
+                    const official = await queueOfficialPackageMetadata(signal => {
+                        if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion) return null;
+                        return fetchModRelease({ ...mod,
+                            githubUrl: `https://github.com/${repository.owner}/${repository.repo}/releases/tag/${encodeURIComponent(state.release.tagName)}` }, { signal });
+                    });
+                    const matching = official?.availableAssets?.find(item => item.downloadUrl === asset.downloadUrl);
+                    if (matching?.digest) {
+                        asset.digest = matching.digest;
+                        const digest = getAssetPackageDigest(matching);
+                        if (digest) downloadedPackageDigests.set(asset.downloadUrl, digest);
+                    }
+                } catch (_) { /* 官方元数据不可用时保留包内版本，不推断发布身份。 */ }
+            }
         }).catch(error => { state.error = error.message || '更新版本暂时无法核对'; }).finally(() => {
             state.pending = false;
             if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion) return;
@@ -2833,7 +2847,9 @@
             if (!profileKey || seenNames.has(profileKey)) return;
             seenNames.add(profileKey);
 
-            let resolvedMod = window.modHubGetModInfo?.(modName) || modRef;
+            const stored = window._modHubDisabledModInfo?.get?.(profileKey);
+            const exactStored = String(stored?.bootJson?.name || '').trim().toLowerCase() === profileKey ? stored : null;
+            let resolvedMod = exactStored || window.modHubGetModInfo?.(modName) || modRef;
             let boot = resolvedMod?.bootJson || bootJson || modRef?.bootJson || {};
             const actualName = boot.name || resolvedMod?.name;
             if (actualName && String(actualName).trim().toLowerCase() !== String(modName).trim().toLowerCase()) {
@@ -2841,6 +2857,7 @@
                 boot = {};
             }
             const version = boot.version || '';
+            const packageRecord = installedPackageRecords.get(profileKey);
             const displayNames = new Set();
             const repos = new Set();
             const repositoryKeys = new Set();
@@ -2916,6 +2933,7 @@
 
             profiles.push({
                 name: modName,
+                packageDigest: packageRecord?.bootJson === boot ? packageRecord.digest : '',
                 version,
                 // 原生依赖别名与递归前置仅取同名 boot 声明，展示别名不能替代身份。
                 ...(boot.name ? { bootJson: boot } : {}),
@@ -2980,6 +2998,7 @@
 
     /** 检查市场模组是否与本地模组匹配，并返回状态与本地模组信息 */
     function checkModInstallStatus(mod, profiles, disabledNames) {
+        if (!mod || mod.contentType === 'spell') return 'unavailable';
         if (!profiles) profiles = getLocalInstalledProfiles();
         mod._isIgnored = false;
         mod._ignoredVersion = '';
@@ -3168,6 +3187,9 @@
             if (isDead || !hasAuthoritativeRelease && mod.versionSource === 'wiki') return 'up_to_date';
             remoteVer = getModUpdateInfo(mod).version;
             if (!remoteVer) return 'up_to_date';
+            const packageMatch = isReleasePackageInstalled(mod._updateCheck?.release, matchedProfile);
+            if (packageMatch === true) return 'up_to_date';
+            const packageUpdate = packageMatch === false && compareVersions(remoteVer, localVer) >= 0;
             // 1. 检查社区版本异常容错规则库（处理作者漏改内部版本号或 Wiki 虚高误录）
             const marketNorm = normalizeKey(cleanModTitle(mod.name));
             const marketRepo = extractRepoName(mod.githubUrl);
@@ -3175,7 +3197,7 @@
             const rule = MOD_MARKET_VERSION_RULES.find(r =>
                 r.match(marketNorm, marketRepo) || r.match(localNorm, marketRepo)
             );
-            if (rule && typeof rule.isUpToDate === 'function') {
+            if (!packageUpdate && rule && typeof rule.isUpToDate === 'function') {
                 if (rule.isUpToDate(localVer, remoteVer)) {
                     return 'up_to_date';
                 }
@@ -3183,7 +3205,7 @@
 
             // 2. 常规语义化版本比较；只有忽略记录实际挡住更新时才显示“已忽略”
             const cmp = compareVersions(remoteVer, localVer);
-            if (cmp > 0) {
+            if (cmp > 0 || packageUpdate) {
                 const ignoredMap = getIgnoredUpdates();
                 const ignoredVer = ignoredMap[mod.name] || (matchedProfile.name ? ignoredMap[matchedProfile.name] : null);
                 if (ignoredVer && (ignoredVer === 'ignored' || compareVersions(remoteVer, ignoredVer) <= 0)) {
@@ -3193,7 +3215,7 @@
                 }
                 const confirmedMap = getConfirmedUpdates();
                 const confirmedVer = confirmedMap[mod.name] || (matchedProfile.name ? confirmedMap[matchedProfile.name] : null);
-                if (confirmedVer && compareVersions(remoteVer, confirmedVer) <= 0) {
+                if (!packageUpdate && confirmedVer && compareVersions(remoteVer, confirmedVer) <= 0) {
                     return 'up_to_date';
                 }
                 return 'update_available';
@@ -3292,7 +3314,8 @@
     // 批量计划保留依赖边，显式跳过与执行失败分别处理。
     function buildBatchInstallPlan(targets, mods = marketModList, profiles = getLocalInstalledProfiles(), disabledNames,
         skippedDependencyKeys = new Set(), releaseInfos = new Map(), excludedKeys = new Map()) {
-        targets = [...new Map((targets || []).map(mod => [getMarketModKey(mod), mod])).values()];
+        targets = [...new Map((targets || []).filter(mod => mod && mod.contentType !== 'spell').map(mod => [getMarketModKey(mod), mod])).values()];
+        mods = mods.filter(mod => mod && mod.contentType !== 'spell');
         const targetKeys = new Set(targets.map(getMarketModKey));
         const catalog = new Map();
         [...mods, ...targets].forEach(mod => [mod.id, mod.identityId].filter(Boolean).forEach(id => catalog.set(String(id).toLowerCase(), mod)));
@@ -3536,6 +3559,7 @@
             return false;
         }
         marketInstallBusy = true;
+        renderMarketSections();
         let restoreContext;
         try {
             if (!window.modHubRestore) {
@@ -3551,6 +3575,7 @@
         }
         finally {
             marketInstallBusy = false;
+            renderMarketSections();
             if (restoreContext?.reloadOffer) await window.modHubCompleteOperationReload(restoreContext);
             else if (!restoreContext?.finishError && window._modHubReloadExitPending) window.modHubPromptPendingReload?.();
         }
@@ -3590,6 +3615,7 @@
     }
 
     async function installSelectedMods() {
+        if (currentMarketSection !== 'packages') return false;
         return runMarketInstallTask(async restoreContext => {
             const originalTargets = marketModList.filter(mod => batchInstallState.selected.has(getMarketModKey(mod)) && isBatchInstallEligible(mod));
             if (!originalTargets.length) {
@@ -4504,6 +4530,84 @@
         return new Blob(chunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' });
     }
 
+    async function getPackageDigest(data) {
+        if (!window.crypto?.subtle) return '';
+        const bytes = typeof data?.arrayBuffer === 'function' ? await data.arrayBuffer()
+            : typeof data === 'string' ? Uint8Array.from(window.atob(data), char => char.charCodeAt(0)) : data;
+        if (!bytes) return '';
+        const hash = await window.crypto.subtle.digest('SHA-256', bytes);
+        return 'sha256:' + Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    // 缺摘要的已安装条目按顺序补查官方元数据，不下载包体；复用精确标签缓存。
+    function queueOfficialPackageMetadata(operation) {
+        const request = officialPackageMetadataQueue.then(async () => {
+            const controller = typeof AbortController === 'function' ? new AbortController() : null;
+            const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+            try { return await operation(controller?.signal); }
+            finally { if (timer !== null) clearTimeout(timer); }
+        });
+        officialPackageMetadataQueue = request.catch(() => {});
+        return request;
+    }
+
+    // 只从加载器真实旁加载仓库读取精确技术名；运行时清单可能尚未重新载入。
+    async function refreshLocalPackageProfiles(names) {
+        const utils = window.modHubGetGui?.()?.gModUtils;
+        const loader = utils?.getModLoader?.()?.getIndexDBLoader?.();
+        const keyval = utils?.getIdbKeyValRef?.();
+        const controller = window.modHubGetController?.();
+        if (!loader?.customStore || typeof loader.constructor?.calcModNameKey !== 'function'
+            || typeof keyval?.get !== 'function' || typeof controller?.checkModZipFileIndexDB !== 'function') return;
+        const registered = [...(window._modHubModState?.sideEnabled || []), ...(window._modHubModState?.sideDisabled || [])];
+        const requested = names || registered;
+        for (const name of [...new Set(requested)]) {
+            const key = String(name || '').trim().toLowerCase();
+            if (!key || !registered.some(item => String(item).trim().toLowerCase() === key)) continue;
+            installedPackageRecords.delete(key);
+            try {
+                const storedName = registered.find(item => String(item).trim().toLowerCase() === key);
+                const data = await keyval.get(loader.constructor.calcModNameKey(storedName), loader.customStore);
+                if (!data) continue;
+                const bootJson = await controller.checkModZipFileIndexDB(data);
+                if (String(bootJson?.name || '').trim().toLowerCase() !== key) continue;
+                const digest = await getPackageDigest(data);
+                installedPackageRecords.set(key, { bootJson, digest });
+                window._modHubDisabledModInfo?.set?.(key, { name: bootJson.name, bootJson });
+            } catch (_) { /* 无法回读时不推断已安装的发布版本。 */ }
+        }
+    }
+
+    function getAssetPackageDigest(asset) {
+        const value = asset?.digest || downloadedPackageDigests.get(asset?.downloadUrl) || '';
+        return /^sha256:[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : '';
+    }
+
+    function isReleasePackageInstalled(release, profile) {
+        const asset = getReleaseInstallAssets(release)[0];
+        const digest = getAssetPackageDigest(asset);
+        return digest && profile?.packageDigest ? digest === profile.packageDigest : null;
+    }
+
+    function getPublishedVersion(release) {
+        const tag = String(release?.tagName || release?.releaseUrl?.match(/\/releases\/tag\/([^/?#]+)/)?.[1] || '');
+        const version = tag.match(/^v?(\d+(?:\.\d+){1,3}(?:-[0-9a-z][0-9a-z.-]*)?)$/i)?.[1] || '';
+        // 精确包体摘要不能证明日期标签就是产品版本，保留候选已核验的版本依据。
+        return version && (!release?.version || isSameVersion(version, release.version)) ? version : '';
+    }
+
+    function isReleaseInstalled(release, profile) {
+        const matched = isReleasePackageInstalled(release, profile);
+        if (matched !== null) return matched;
+        const published = getPublishedVersion(release);
+        if (published && release?.version && !isSameVersion(published, release.version)) return false;
+        return isSameVersion(release?.version, profile?.version);
+    }
+
+    function isPreparedComponentInstalled(prepared, boot) {
+        return preparedMarketPackages.get(prepared)?.sameComponents?.has(String(boot?.name || '').trim().toLowerCase());
+    }
+
     async function verifyAssetDigest(blob, digest) {
         if (!digest) return true;
         const match = String(digest).trim().match(/^sha256:([a-f0-9]{64})$/i);
@@ -4517,8 +4621,7 @@
             error.code = 'DIGEST_UNAVAILABLE';
             throw error;
         }
-        const hash = await window.crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
-        const actual = Array.from(new Uint8Array(hash), byte => byte.toString(16).padStart(2, '0')).join('');
+        const actual = (await getPackageDigest(blob)).slice(7);
         if (actual !== match[1].toLowerCase()) {
             const error = new Error('安装包 SHA-256 与 GitHub 官方摘要不一致');
             error.code = 'DIGEST_MISMATCH';
@@ -4556,7 +4659,7 @@
         return JSON.stringify(boots.map(boot => {
             const local = profiles.find(profile => String(profile.name).trim().toLowerCase() === String(boot.name).trim().toLowerCase());
             const actual = local?.bootJson || local;
-            return [boot.name, actual ? [actual.name, actual.version, actual.alias || [], actual.dependenceInfo || []] : null,
+            return [boot.name, actual ? [actual.name, actual.version, actual.alias || [], actual.dependenceInfo || [], local.packageDigest || ''] : null,
                 local ? !modHubComponentDisabled(local.name) : false];
         }));
     }
@@ -4582,7 +4685,7 @@
     }
 
     async function downloadAndInstallMod(mod, mirrorId = currentMirrorId, options = {}) {
-        if (!mod) return false;
+        if (!mod || mod.contentType === 'spell') return false;
         if (!options.prepareOnly && !options.restoreContext) {
             return runMarketInstallTask(context => downloadAndInstallMod(mod, mirrorId, { ...options, restoreContext: context }),
                 { label: `市场安装【${mod.name}】`, names: [mod.name], reloadOnChange: options.askRestart !== false && !options.skipReloadOffer });
@@ -4848,6 +4951,8 @@
                             }
 
                             await verifyAssetDigest(blob, assetDigest);
+                            const digest = await getPackageDigest(blob);
+                            if (digest) downloadedPackageDigests.set(asset.downloadUrl, digest);
                             activeMirror = currentCandidate;
                             success = true;
                             break;
@@ -4890,6 +4995,7 @@
             const modController = window.modHubGetController?.() || gui.modModLoadController;
             const communityInstall = mod.catalogSource === 'community' && mod.autoInstall === true;
             const boots = [];
+            const sameComponents = new Set();
             if ((options.prepareOnly || preparedPackage || communityInstall || options.dependencyRequirements?.some(item => item.bootVersions))
                 && typeof modController?.checkModZipFileIndexDB !== 'function') {
                 const error = new Error(communityInstall
@@ -4926,9 +5032,14 @@
                         if (boots.some(item => item.name.toLowerCase() === actualName.toLowerCase())) {
                             throw new Error(`所选安装文件重复提供【${actualName}】，请重新选择安装包。`);
                         }
+                        await refreshLocalPackageProfiles([actualName]);
+                        const profile = getLocalInstalledProfiles().find(local => String(local.name).trim().toLowerCase() === actualName.toLowerCase());
+                        const fileDigest = await getPackageDigest(file);
+                        const sameBytes = profile?.packageDigest && fileDigest ? profile.packageDigest === fileDigest
+                            : isSameVersion(boot.version, profile?.version);
+                        if (sameBytes) sameComponents.add(actualName.toLowerCase());
                         if (index === 0) {
-                            const profile = getLocalInstalledProfiles().find(local => String(local.name).trim().toLowerCase() === actualName.toLowerCase());
-                            const effectiveBoot = isSameVersion(boot.version, profile?.version) ? profile.bootJson || profile : boot;
+                            const effectiveBoot = sameBytes ? profile.bootJson || profile : boot;
                             const unmet = options.dependencyRequirements?.filter(dependency => !satisfiesDependency(effectiveBoot, dependency)) || [];
                             if (unmet.length) {
                                 const requirements = unmet.map(dependency => {
@@ -4950,7 +5061,8 @@
             if (preparedSnapshot && preparedSnapshot.dependencies !== getPreparedDependencySnapshot(boots)) {
                 throw Object.assign(new Error('安装包的身份、版本或前置声明已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
             }
-            if (preparedSnapshot && preparedSnapshot.localComponents !== getPreparedLocalComponentSnapshot(boots)) {
+            const checkedLocalComponents = getPreparedLocalComponentSnapshot(boots);
+            if (preparedSnapshot && preparedSnapshot.localComponents !== checkedLocalComponents) {
                 throw Object.assign(new Error('本地组件版本、依赖或启用状态已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
             }
             if (options.prepareOnly) {
@@ -4958,14 +5070,14 @@
                     bytes: fileObjects.reduce((sum, file) => sum + file.size, 0),
                     modKey: getMarketModKey(mod), sourceFingerprint: getPreparedPackageSource(mod, releaseInfo) };
                 preparedMarketPackages.set(prepared, { source: prepared.sourceFingerprint, files: fileObjects.slice(),
-                    dependencies: getPreparedDependencySnapshot(boots), localComponents: getPreparedLocalComponentSnapshot(boots) });
+                    sameComponents, dependencies: getPreparedDependencySnapshot(boots), localComponents: checkedLocalComponents });
                 clearActiveDownload();
                 reportProgress(100, '包体已核验，等待确认安装计划', 'prepared');
                 return prepared;
             }
             const componentProfiles = getLocalInstalledProfiles();
             const sameComponent = boot => boot && componentProfiles.find(profile =>
-                String(profile.name).trim().toLowerCase() === String(boot.name).trim().toLowerCase() && isSameVersion(boot.version, profile.version));
+                String(profile.name).trim().toLowerCase() === String(boot.name).trim().toLowerCase() && sameComponents.has(String(boot.name).trim().toLowerCase()));
             const effectiveBoots = boots.map(boot => { const profile = sameComponent(boot); return profile?.bootJson || profile || boot; });
             const approvedRisks = new Set(options.approvedCompatibilityRisks || []);
             const newRisks = getPreparedCompatibilityRisks(effectiveBoots).filter(risk => !approvedRisks.has(risk.key));
@@ -5020,9 +5132,10 @@
                 reportProgress(null, '模组管理器正在保存其他配置，请稍后再试', 'error');
                 return failBatch('模组管理器正忙，请稍后重试');
             }
+            await refreshLocalPackageProfiles(boots.map(boot => boot.name));
             if (controller?.signal.aborted) throw Object.assign(new Error('已取消安装'), { name: 'AbortError' });
             const primaryBoot = boots[0];
-            if (preparedSnapshot && preparedSnapshot.localComponents !== getPreparedLocalComponentSnapshot(boots)) {
+            if (checkedLocalComponents !== getPreparedLocalComponentSnapshot(boots)) {
                 throw Object.assign(new Error('等待写入时本地组件状态已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
             }
             if (!filesToImport.length && !boots.some(boot => sameComponent(boot) && modHubComponentDisabled(boot.name))) {
@@ -5080,6 +5193,7 @@
                 if (typeof window.modHubLoadModManageState === 'function') {
                     await window.modHubLoadModManageState(true);
                 }
+                await refreshLocalPackageProfiles(boots.map(boot => boot.name));
             } catch (refreshError) {
                 console.warn('[ModHub] 安装后刷新本地模组档案失败', refreshError);
             }
@@ -5153,8 +5267,9 @@
         if (!forceRefresh && marketModList.length > 0) return marketModList;
 
         if (!forceRefresh) {
+            window.modHubMarketSpells?.restoreCache(withdrawnRevision);
             const cached = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL);
-            if (cached && Array.isArray(cached) && cached.length > 0) {
+            if (cached && Array.isArray(cached) && (cached.length > 0 || window.modHubMarketSpells?.getSpells().length > 0)) {
                 marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: cached });
                 renderBatchInstallToolbar();
                 return marketModList;
@@ -5170,9 +5285,11 @@
         }
 
         const identityPromise = loadIdentityCatalog(forceRefresh);
+        window.modHubMarketSpells?.restoreCache(withdrawnRevision);
         const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
-        if (stale && Array.isArray(stale) && stale.length > 0) {
+        if (stale && Array.isArray(stale) && (stale.length > 0 || window.modHubMarketSpells?.getSpells().length > 0)) {
             await identityPromise;
+            window.modHubMarketSpells?.restoreCache(withdrawnRevision);
             marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: stale });
             renderBatchInstallToolbar();
             return marketModList;
@@ -5202,6 +5319,7 @@
         } catch (error) {
             const stale = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL, true);
             if (stale && Array.isArray(stale) && stale.length > 0) {
+                window.modHubMarketSpells?.restoreCache(withdrawnRevision);
                 marketModList = normalizeReleaseIndex({ schemaVersion: 1, mods: stale });
                 renderBatchInstallToolbar();
                 return marketModList;
@@ -5388,6 +5506,56 @@
         btn.setAttribute('aria-pressed', currentStatusFilter === 'ignored' ? 'true' : 'false');
     }
 
+    /** 目录最新版本与当前游戏的适配候选分开；本地版本仅用于已安装版本。 */
+    function getLatestMarketVersionInfo(mod) {
+        const indexedVersionSource = ['github', 'wiki'].includes(mod.versionSource)
+            || safeHttpsUrl(mod.releaseUrl) || safeHttpsUrl(mod.downloadUrl)
+            || mod.assets?.some(asset => safeHttpsUrl(asset.downloadUrl));
+        if (!indexedVersionSource) return { version: '', text: '未知' };
+        const indexedVersion = typeof mod.releaseAssetVersion === 'string' && mod.releaseAssetVersion.trim()
+            ? mod.releaseAssetVersion.trim() : typeof mod.version === 'string' ? mod.version.trim() : '';
+        const release = mod._updateCheck?.release;
+        const published = getPublishedVersion(release);
+        const latestPublished = getPublishedVersion(mod) || mod.version;
+        if (mod._matchedLocal?.packageDigest && published && getAssetPackageDigest(getReleaseInstallAssets(release)[0])
+            && isSameVersion(published, latestPublished)) {
+            return { version: published, text: formatVersionDisplay(published) };
+        }
+        return { version: indexedVersion, text: indexedVersion ? formatVersionDisplay(indexedVersion)
+            : typeof mod.versionLabel === 'string' && mod.versionLabel.trim() ? mod.versionLabel.trim() : '未知' };
+    }
+
+    /** 安装事实与适配检查独立显示，未知结果不能覆盖已核实的相同版本。 */
+    function getInstalledMarketBadgeInfo(mod, updateInfo, latestVersion) {
+        const localVersion = mod._matchedLocal?.version || '';
+        const details = [];
+        let label = '已安装';
+        let title = '';
+        if (!localVersion) details.push('无法识别已安装版本');
+        if (!latestVersion) details.push('未能获取最新版本');
+        const packageMatch = isReleasePackageInstalled(updateInfo.release, mod._matchedLocal);
+        const published = getPublishedVersion(updateInfo.release) || updateInfo.version;
+        const publishedVersion = getPublishedVersion(updateInfo.release) || getPublishedVersion(mod);
+        const unpublishedDifference = publishedVersion && !isSameVersion(publishedVersion, latestVersion);
+        if (packageMatch === true && isSameVersion(published, latestVersion)
+            || packageMatch !== false && !unpublishedDifference && localVersion && latestVersion && isSameVersion(localVersion, latestVersion)) {
+            label = '已是最新';
+            title = '与当前目录最新版本相同';
+        } else if (localVersion && latestVersion && updateInfo.release && isSameVersion(localVersion, updateInfo.version)
+            && compareVersions(latestVersion, localVersion) > 0) {
+            label = '已是推荐版本';
+            title = `当前游戏推荐版本与已安装版本相同；目录最新版本 ${formatVersionDisplay(latestVersion)} 更高。`
+                + (updateInfo.release.compatibility?.evidence === 'filename' ? '推荐依据安装包名称参考，不代表游戏实测。' : '推荐依据作者声明，不代表游戏实测。');
+        } else if (localVersion && latestVersion && mod._updateCheck && !updateInfo.version && !updateInfo.pending && !updateInfo.error) {
+            details.push(window.modHubMarketVersions?.getGameVersion?.()
+                ? '未找到适配当前游戏的版本' : '无法识别当前游戏版本，尚未检查适配更新');
+        }
+        if (updateInfo.pending) details.push('正在检查更新，请稍候。');
+        if (updateInfo.error) details.push(`更新检查失败：${updateInfo.error}。可刷新市场后重试。`);
+        const detail = details.join('；');
+        return { label, title: [title, detail].filter(Boolean).join('；'), detail };
+    }
+
     function renderMarketCards() {
         const container = document.getElementById('modHubMarketCardsContainer');
         if (!container) return;
@@ -5428,6 +5596,21 @@
             window.modHubNotifyUpdateState(updatableCount, updatableList);
         }
 
+        const spellView = currentMarketSection === 'spells';
+        renderMarketSections();
+        const batchToolbar = document.getElementById('modHubMarketBatchToolbar');
+        if (batchToolbar) batchToolbar.hidden = spellView;
+        ['modHubStatusSelect', 'modHubMirrorSelect'].forEach(id => {
+            const control = document.getElementById(id);
+            if (control) control.disabled = spellView || batchInstallState.running;
+        });
+        if (spellView) {
+            if (window.modHubMarketSpells) window.modHubMarketSpells.render(container, { search: currentSearchText, sort: currentSortBy });
+            else container.innerHTML = '<div class="modhub-empty-state grey">咒语资料模块尚未就绪。请重新载入游戏后重试。</div>';
+            updateToolbarResetBtn();
+            return;
+        }
+
         if (!filtered.length) {
             container.innerHTML = `
                 <div class="modhub-empty-state grey">
@@ -5446,14 +5629,9 @@
         const html = filtered.map(mod => {
             const modIndex = mod._marketIndex;
             const updateInfo = mod._updateCheck ? getModUpdateInfo(mod) : { version: mod.version };
+            const latestVersionInfo = getLatestMarketVersionInfo(mod);
+            const latestVersionText = latestVersionInfo.text;
             const isCommunity = mod.catalogSource === 'community';
-            const sourceName = { github: 'GitHub', tieba: '百度贴吧', discord: 'Discord' }[mod.sourcePlatform] || '其他社区';
-            const externalText = isCommunity
-                ? ({ github: '前往发布页', tieba: '前往原帖', discord: '前往社区' }[mod.sourcePlatform] || '前往来源')
-                : '外部主页';
-            const sourceInfo = isCommunity
-                ? `<div class="modhub-market-meta grey"><span>${mod.sourcePlatform === 'catalog' ? '目录资料已审核，暂无来源链接' : `来源: ${escapeHtml(sourceName)} · 已核验出处`}</span>${mod.sourcePlatform === 'discord' ? '<span>可能需要登录或加入服务器</span>' : ''}</div>`
-                : '';
             const tagsHtml = [
                 `<span class="modhub-market-tag modhub-market-category">${escapeHtml(mod.category || '待分类')}</span>`,
                 ...(mod.tags || []).map(t => `<span class="modhub-market-tag">${escapeHtml(t)}</span>`)
@@ -5462,9 +5640,11 @@
             // 状态徽章与主操作按钮
             let badgeHtml = '';
             let actionBtnHtml = '';
+            let installedStatusDetail = '';
             const marketRepoKey = extractRepoKey(mod.githubUrl);
             const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
             const isUpdatable = mod._status === 'update_available' && !isDead;
+            const isReferenceUpdate = updateInfo.release?.compatibility?.evidence === 'filename';
             const isIgnored = !!mod._isIgnored;
             const isPermanentlyIgnored = mod._ignoredVersion === 'ignored';
             const selected = batchInstallState.selected.has(getMarketModKey(mod));
@@ -5477,27 +5657,22 @@
                 badgeHtml = `<span class="modhub-market-badge badge-dead-repo">源已失效</span>`;
                 if (mod._status === 'up_to_date' || mod._matchedLocal) {
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
-                } else if (mod.otherUrl) {
-                    actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">${externalText}</button>`;
-                } else {
-                    actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>暂无下载</button>`;
-                }
+                } else actionBtnHtml = '';
             } else if (isUpdatable) {
-                badgeHtml = `<span class="modhub-market-badge badge-update">发现新版</span>`;
-                actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="一键更新">一键更新</button>`;
+                badgeHtml = `<span class="modhub-market-badge badge-update">${isReferenceUpdate ? '发现新版，依据文件名' : '发现新版'}</span>`;
+                const updateLabel = isReferenceUpdate ? '选择更新版本' : '一键更新';
+                actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="${updateLabel}">${updateLabel}</button>`;
             } else if (mod._status === 'external_installed') {
                 badgeHtml = `<span class="modhub-market-badge badge-installed">已安装</span>`;
-                actionBtnHtml = marketExternalUrl(mod)
-                    ? `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">${externalText}</button>`
-                    : `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
+                actionBtnHtml = '';
             } else if (mod._status === 'up_to_date') {
                 if (isIgnored) {
                     badgeHtml = `<span class="modhub-market-badge badge-ignored">${isPermanentlyIgnored ? '已永久忽略' : '已忽略本次'}</span>`;
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="更新">更新</button>`;
                 } else {
-                    const statusText = updateInfo.pending ? '正在检查更新' : updateInfo.error ? '更新检查失败'
-                        : mod._updateCheck && !updateInfo.version ? '更新版本待核对' : '已是最新';
-                    badgeHtml = `<span class="modhub-market-badge badge-installed"${updateInfo.error ? ` title="${escapeHtml(updateInfo.error)}"` : ''}>${statusText}</span>`;
+                    const installedBadge = getInstalledMarketBadgeInfo(mod, updateInfo, latestVersionInfo.version);
+                    installedStatusDetail = installedBadge.detail;
+                    badgeHtml = `<span class="modhub-market-badge badge-installed"${installedBadge.title ? ` title="${escapeHtml(installedBadge.title)}"` : ''}>${installedBadge.label}</span>`;
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
                 }
                 if (window.modHubMarketInstaller && mod.githubUrl && (!isCommunity || hasCommunityReleaseSource(mod))) {
@@ -5508,20 +5683,22 @@
                 actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-install" data-mod-index="${modIndex}" data-idle-text="下载安装">下载安装</button>`;
             } else if (mod._status === 'external_only') {
                 badgeHtml = `<span class="modhub-market-badge badge-external">外部资源</span>`;
-                actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary btn-market-external" data-mod-index="${modIndex}">${externalText}</button>`;
+                actionBtnHtml = '';
             } else {
                 badgeHtml = `<span class="modhub-market-badge badge-external">暂无直链</span>`;
-                actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>暂无下载</button>`;
+                actionBtnHtml = '';
             }
 
-            const homeUrl = safeHttpsUrl(isCommunity ? (mod.sourceUrl || mod.otherUrl || mod.githubUrl) : (mod.githubUrl || mod.otherUrl));
-            const homeBtnHtml = homeUrl && !(isCommunity && ['external_only', 'external_installed'].includes(mod._status))
-                ? `<a href="${escapeHtml(homeUrl)}" target="_blank" rel="noopener" class="buttonlike modhub-btn-sub" title="访问模组发布主页">主页</a>`
-                : '';
+            const acquisitionDetailsHtml = window.modHubMarketSpells?.renderAcquisitionDetails(mod, modIndex)
+                || '<div class="modhub-market-source-bar"><span>来源：</span><span>来源资料模块尚未就绪</span></div>';
 
-            const localVerText = mod._matchedLocal?.version
-                ? `<span class="${mod._status === 'update_available' ? 'gold' : 'green'}">已装: ${escapeHtml(formatVersionDisplay(mod._matchedLocal.version))}</span>`
-                : (mod._matchedLocal ? `<span class="green">已装</span>` : '');
+            const installedRelease = isReleasePackageInstalled(updateInfo.release, mod._matchedLocal) === true ? getPublishedVersion(updateInfo.release) : '';
+            const installedVersionText = installedRelease && !isSameVersion(installedRelease, mod._matchedLocal?.version)
+                ? `${formatVersionDisplay(installedRelease)}（包内 ${formatVersionDisplay(mod._matchedLocal.version)}）`
+                : mod._matchedLocal?.version ? formatVersionDisplay(mod._matchedLocal.version) : '未知';
+            const localVerText = mod._matchedLocal
+                ? `<span class="${mod._status === 'update_available' ? 'gold' : 'green'}">已安装版本：${escapeHtml(mod._matchedLocal.version
+                    ? installedVersionText : '未知')}</span>` : '';
 
             const ignoreActionsHtml = isUpdatable
                 ? `<div class="modhub-market-ignore-actions">
@@ -5545,11 +5722,12 @@
                     <div class="modhub-market-meta grey">
                         <span>作者: ${escapeHtml(mod.author)}</span>
                         ${updateInfo.release?.updateDate || mod.updateDate ? `<span>更新: ${escapeHtml(updateInfo.release?.updateDate || mod.updateDate)}</span>` : ''}
-                        ${updateInfo.version || mod.versionLabel ? `<span>版本: ${escapeHtml(updateInfo.version ? formatVersionDisplay(updateInfo.version) : mod.versionLabel)}</span>` : ''}
-                        ${localVerText}
                     </div>
-                    ${sourceInfo}
-                    ${updateInfo.error ? `<div class="modhub-market-meta grey">更新检查详情：${escapeHtml(updateInfo.error)}。可刷新市场后重试。</div>` : ''}
+                    <div class="modhub-market-meta modhub-market-versions grey">
+                        ${localVerText}
+                        <span>最新版本：${escapeHtml(latestVersionText)}</span>
+                    </div>
+                    ${installedStatusDetail || updateInfo.error ? `<div class="modhub-market-meta grey">${escapeHtml(installedStatusDetail || `更新检查失败：${updateInfo.error}。可刷新市场后重试。`)}</div>` : ''}
                     <div class="modhub-market-desc">
                         ${escapeHtml(mod.description)}
                     </div>
@@ -5561,10 +5739,8 @@
                         <button type="button" class="modhub-download-cancel" data-mod-index="${modIndex}" hidden>取消下载</button>
                     </div>
                     ${ignoreActionsHtml}
-                    <div class="modhub-market-actions">
-                        ${actionBtnHtml}
-                        ${homeBtnHtml}
-                    </div>
+                    ${acquisitionDetailsHtml}
+                    ${actionBtnHtml ? `<div class="modhub-market-actions">${actionBtnHtml}</div>` : ''}
                 </div>
             `;
         }).join('');
@@ -5573,6 +5749,17 @@
         downloadProgressState.forEach((progress, name) => updateDownloadProgress(name, progress.percent, progress.text, progress.state));
 
         // 绑定卡片内按钮事件
+        container.querySelectorAll('.modhub-market-acquisition-link').forEach(button => {
+            button.onclick = async event => {
+                event?.preventDefault();
+                event?.stopPropagation();
+                const index = Number(button.dataset.modIndex);
+                if (!Number.isSafeInteger(index) || index < 0 || !/^\d+$/.test(button.dataset.modIndex || '')) return false;
+                const targetMod = marketModList[index];
+                if (!targetMod || targetMod.contentType === 'spell') return false;
+                return await window.modHubMarketSpells?.openAcquisition(targetMod);
+            };
+        });
         container.querySelectorAll('.modhub-market-select').forEach(input => {
             input.onchange = () => setBatchModSelected(input.dataset.modKey, input.checked);
             const card = input.closest('.modhub-market-card');
@@ -5647,16 +5834,6 @@
             };
         });
 
-        container.querySelectorAll('.btn-market-external').forEach(btn => {
-            btn.onclick = () => {
-                const targetMod = marketModList[Number(btn.dataset.modIndex)];
-                if (targetMod) {
-                    const url = marketExternalUrl(targetMod);
-                    if (url) window.open(url, '_blank', 'noopener');
-                }
-            };
-        });
-
         renderBatchInstallToolbar();
         updateToolbarResetBtn();
     }
@@ -5667,9 +5844,13 @@
     }
 
     async function promptDownloadMirrorAndInstallUnlocked(mod, restoreContext) {
-        if (isWithdrawn(mod)) return false;
+        if (mod?.contentType === 'spell' || isWithdrawn(mod)) return false;
         if (window.modHubMarketInstaller && mod.githubUrl && (mod.catalogSource !== 'community' || hasCommunityReleaseSource(mod))) {
             return window.modHubMarketInstaller.install(mod, { restoreContext });
+        }
+        if (window.modHubMarketVersions && mod.githubUrl && (mod.catalogSource !== 'community' || hasCommunityReleaseSource(mod))) {
+            await window.modHubAlert('版本选择模块尚未就绪，请重新载入游戏后选择安装版本。', '无法核对安装版本');
+            return false;
         }
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
         let externalOnly = !mod.githubUrl || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod));
@@ -5988,10 +6169,71 @@
         return !['installed', 'updatable', 'ignored'].includes(statusFilter);
     }
 
+    /** 两个板块保留各自搜索；模组状态和分类不参与咒语筛选。 */
+    function selectMarketSection(section, render = true) {
+        if (!['packages', 'spells'].includes(section) || batchInstallState.running || marketInstallBusy) return false;
+        clearTimeout(marketSearchTimer);
+        const searchInput = document.getElementById('modHubMarketSearch');
+        if (searchInput) currentSearchText = searchInput.value.trim();
+        if (section !== currentMarketSection) {
+            sectionFilters[currentMarketSection] = { category: currentCategory, status: currentStatusFilter,
+                search: currentSearchText, sort: currentSortBy };
+            currentMarketSection = section;
+            const restored = sectionFilters[section];
+            currentCategory = restored.category;
+            currentStatusFilter = restored.status;
+            currentSearchText = restored.search;
+            currentSortBy = restored.sort;
+            if (searchInput) searchInput.value = currentSearchText;
+            const statusSelect = document.getElementById('modHubStatusSelect');
+            if (statusSelect) statusSelect.value = currentStatusFilter;
+            const sortSelect = document.getElementById('modHubSortSelect');
+            if (sortSelect) sortSelect.value = currentSortBy;
+        }
+        if (render) {
+            renderCategoryFilters();
+            renderMarketCards();
+        }
+        return true;
+    }
+
+    function renderMarketSections() {
+        const spellView = currentMarketSection === 'spells';
+        const sectionButtons = document.getElementById('modHubMarketSections');
+        if (sectionButtons) {
+            const focusedSection = sectionButtons.contains?.(document.activeElement) ? document.activeElement?.dataset?.section : '';
+            const counts = { packages: marketModList.filter(mod => !isWithdrawn(mod)).length,
+                spells: window.modHubMarketSpells?.getSpells().length || 0 };
+            sectionButtons.innerHTML = [['packages', 'MOD 与美化'], ['spells', '咒语']].map(([section, label]) =>
+                `<button type="button" class="macro-button modhub-market-section-button ${currentMarketSection === section ? 'is-selected' : ''}" data-section="${section}" aria-pressed="${currentMarketSection === section}" aria-controls="modHubMarketCardsContainer" ${batchInstallState.running || marketInstallBusy ? 'disabled' : ''}>${label}（${counts[section]}）</button>`).join('');
+            sectionButtons.querySelectorAll('.modhub-market-section-button').forEach(button => {
+                button.onclick = () => selectMarketSection(button.dataset.section);
+                if (focusedSection === button.dataset.section && !button.disabled) button.focus();
+            });
+        }
+        ['modHubMarketStats', 'modHubMarketFilterFooter', 'modHubStatusSelect', 'modHubMirrorSelect', 'modHubMarketBatchToolbar'].forEach(id => {
+            const control = document.getElementById(id);
+            if (control) control.hidden = spellView;
+        });
+        const note = document.getElementById('modHubMarketSpellNote');
+        if (note) note.hidden = !spellView;
+        const searchInput = document.getElementById('modHubMarketSearch');
+        if (searchInput) {
+            searchInput.placeholder = spellView ? '搜索咒语名称、正文或使用说明……' : '搜索模组名称、作者或简介关键词……';
+            searchInput.setAttribute('aria-label', spellView ? '搜索咒语' : '搜索 MOD 与美化');
+        }
+        const sortSelect = document.getElementById('modHubSortSelect');
+        if (sortSelect?.options) {
+            Array.from(sortSelect.options).forEach(option => {
+                if (option.value === 'name') option.textContent = spellView ? '按咒语名称' : '按模组名称';
+            });
+        }
+    }
+
     function renderCategoryFilters() {
         const container = document.getElementById('modHubCategoryCapsules');
         if (!container) return;
-        const showCategories = shouldShowCategoryFilters(currentStatusFilter);
+        const showCategories = currentMarketSection === 'packages' && shouldShowCategoryFilters(currentStatusFilter);
         container.style.display = showCategories ? '' : 'none';
         if (!showCategories) return;
         const counts = new Map();
@@ -6022,6 +6264,8 @@
         if (!root) return;
 
         root.innerHTML = `
+            <div id="modHubMarketSections" class="modhub-market-sections" role="group" aria-label="市场内容板块"></div>
+            <p id="modHubMarketSpellNote" class="modhub-market-section-note grey" hidden>咒语按原文展示和复制。请按使用说明在对应位置使用；市场不执行咒语，也不会将其安装为模组。</p>
             <!-- ===== 顶部状态信息卡 ===== -->
             <div id="modHubMarketStats" class="settingsGridSmall modhub-stats-container"></div>
 
@@ -6067,7 +6311,7 @@
                         </select>
                     </div>
                 </div>
-                <div class="modhub-market-filter-footer">
+                <div id="modHubMarketFilterFooter" class="modhub-market-filter-footer">
                     <label class="modhub-market-source-toggle" title="仅隐藏已确认失效的来源；需要手动下载的模组仍会显示">
                         <input id="modHubHideDeadSources" type="checkbox" ${hideDeadSources ? 'checked' : ''}>隐藏失效来源<span id="modHubDeadSourceCount" class="grey"></span>
                     </label>
@@ -6075,7 +6319,7 @@
                 </div>
             </div>
 
-            <div id="modHubMarketBatchToolbar" class="modhub-market-batch-toolbar" role="group" aria-label="模组多选安装"></div>
+            <div id="modHubMarketBatchToolbar" class="modhub-market-batch-toolbar" role="group" aria-label="模组多选安装" ${currentMarketSection === 'spells' ? 'hidden' : ''}></div>
 
             <!-- ===== 模组卡片列表容器 ===== -->
             <div id="modHubMarketCardsContainer" class="modhub-market-grid">
@@ -6084,15 +6328,15 @@
                 </div>
             </div>
         `;
+        renderMarketSections();
         renderBatchInstallToolbar();
 
         // 绑定搜索与筛选事件
         const searchInput = document.getElementById('modHubMarketSearch');
         if (searchInput) {
-            let debounceTimer;
             searchInput.oninput = () => {
-                clearTimeout(debounceTimer);
-                debounceTimer = setTimeout(() => {
+                clearTimeout(marketSearchTimer);
+                marketSearchTimer = setTimeout(() => {
                     currentSearchText = searchInput.value.trim();
                     renderMarketCards();
                 }, 200);
@@ -6110,7 +6354,7 @@
                     await loadMarketData(true);
                     renderCategoryFilters();
                     renderMarketCards();
-                    window.modHubShowToast(`刷新成功，已载入 ${marketModList.length} 个模组`, 'success');
+                    window.modHubShowToast(`刷新成功，已载入 ${marketModList.length} 个模组、${window.modHubMarketSpells?.getSpells().length || 0} 个咒语配方`, 'success');
                 } catch (e) {
                     window.modHubShowToast(`刷新失败: ${e.message}`, 'warning');
                 } finally {
@@ -6180,6 +6424,7 @@
             if (typeof window.modHubLoadDisabledModInfo === 'function') {
                 await window.modHubLoadDisabledModInfo();
             }
+            await refreshLocalPackageProfiles();
         } catch (_) {}
 
         // 加载数据
@@ -6234,12 +6479,16 @@
     function updateToolbarResetBtn() {
         const btn = document.getElementById('modHubMarketBtnResetFilter');
         if (!btn) return;
-        const isFiltering = (currentCategory !== 'all' || currentStatusFilter !== 'all' || !!currentSearchText);
+        const spellView = currentMarketSection === 'spells';
+        const isFiltering = spellView ? !!currentSearchText : (currentCategory !== 'all' || currentStatusFilter !== 'all' || !!currentSearchText);
+        btn.textContent = spellView ? '清除搜索' : '返回全部模组';
+        btn.title = spellView ? '清除搜索，查看全部咒语' : '清除当前所有筛选与搜索，查看全部模组';
         btn.style.display = isFiltering ? 'inline-block' : 'none';
     }
 
     /** 重置分类、状态与搜索，保留失效来源显示偏好 */
     function resetFilters() {
+        clearTimeout(marketSearchTimer);
         currentCategory = 'all';
         currentStatusFilter = 'all';
         currentSearchText = '';
@@ -6251,12 +6500,13 @@
         renderMarketCards();
         updateToolbarResetBtn();
         if (typeof window.modHubShowToast === 'function') {
-            window.modHubShowToast('已返回并展示全部模组', 'info');
+            window.modHubShowToast(currentMarketSection === 'spells' ? '已清除搜索并展示全部咒语' : '已返回并展示全部模组', 'info');
         }
     }
 
     /** 快捷将市场卡片过滤为“已安装模组” */
     function filterInstalledOnly() {
+        if (!selectMarketSection('packages', false)) return;
         currentStatusFilter = 'installed';
         currentCategory = 'all';
         const sel = document.getElementById('modHubStatusSelect');
@@ -6268,6 +6518,7 @@
 
     /** 快捷将市场卡片过滤为“仅看可更新” */
     function filterUpdatableOnly() {
+        if (!selectMarketSection('packages', false)) return;
         currentStatusFilter = 'updatable';
         currentCategory = 'all';
         const sel = document.getElementById('modHubStatusSelect');
@@ -6279,6 +6530,7 @@
 
     /** 进入独立的已忽略更新列表 */
     function filterIgnoredOnly() {
+        if (!selectMarketSection('packages', false)) return;
         currentStatusFilter = 'ignored';
         currentCategory = 'all';
         const sel = document.getElementById('modHubStatusSelect');
@@ -6300,6 +6552,10 @@
             return;
         }
         if (window.modHubMarketInstaller) return window.modHubMarketInstaller.installBatch(updatables.map(item => item.marketMod), { updateOnly: true, restoreContext });
+        if (window.modHubMarketVersions) {
+            await window.modHubAlert('版本选择模块尚未就绪，请重新载入游戏后选择更新版本。', '无法核对更新版本');
+            return false;
+        }
 
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
         if (selectedMirror.browserOnly) {
@@ -6394,6 +6650,8 @@
         isWithdrawn,
         hasCommunityReleaseSource,
         renderMarketCards,
+        selectMarketSection,
+        getCurrentMarketSection: () => currentMarketSection,
         renderBatchInstallToolbar,
         batchInstallState,
         MAX_DOWNLOAD_BYTES,
@@ -6402,6 +6660,9 @@
         getDownloadUrl,
         readDownloadResponse,
         verifyAssetDigest,
+        refreshLocalPackageProfiles,
+        isReleaseInstalled,
+        isPreparedComponentInstalled,
         getLocalInstalledProfiles,
         getModUpdateInfo,
         checkModInstallStatus,

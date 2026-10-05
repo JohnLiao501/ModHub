@@ -5,6 +5,474 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 发行标签与包内版本不同时，卡片必须用真实仓库包及官方摘要确认发行身份。
+    for (const { currentPackage, version, bootVersion, tag } of [
+        { currentPackage: 1, version: '1.8', bootVersion: '1.7', tag: 'v1.8' },
+        { currentPackage: 2, version: '1.8', bootVersion: '1.7', tag: 'v1.8' },
+        { currentPackage: 2, version: '0.0.5', bootVersion: '0.0.5', tag: '25.5.23' }
+    ]) {
+        const { webcrypto, createHash } = require('node:crypto');
+        const sb = loadMarket();
+        sb.crypto = webcrypto;
+        sb.StartConfig = { version: '0.5.12.13' };
+        const id = 'same-boot-published', githubUrl = `https://github.com/VersionTests/${id}`;
+        const boot = { name: id, version: bootVersion, dependenceInfo: [] };
+        const digest = 'sha256:' + createHash('sha256').update(new Uint8Array([2, 42])).digest('hex');
+        const downloadUrl = `${githubUrl}/releases/download/${tag}/Published.zip`;
+        const release = { tagName: tag, version, assets: [{ name: 'Published.zip', downloadUrl }] };
+        const loader = { customStore: {}, constructor: { calcModNameKey: name => name } };
+        sb._modHubModState = { sideEnabled: [id], sideDisabled: [], sideMods: [{ name: id, enabled: true }], builtInMods: [] };
+        sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getIndexDBLoader: () => loader,
+            getModCacheArray: () => [{ mod: { name: id, bootJson: boot } }] }),
+            getIdbKeyValRef: () => ({ get: async () => new Uint8Array([currentPackage, 42]) }) } });
+        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async () => ({ ...boot }) });
+        sb.modHubLoadModManageState = async () => {};
+        sb.modHubLoadDisabledModInfo = async () => {};
+        sb.modHubMarketVersions = { getGameVersion: () => '0.5.12.13',
+            fetchReleases: async () => ({ page: 1, hasMore: false }), buildCandidates: () => [release], getLatestGameCandidate: () => release };
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketStats'].map(key => [key, createStubElement()]));
+        sb.document.getElementById = key => elements.get(key) || null;
+        const requests = [];
+        sb.fetch = async url => {
+            requests.push(String(url));
+            if (String(url).startsWith('https://api.github.com/')) return { ok: true, json: async () => ({ tag_name: tag,
+                html_url: `${githubUrl}/releases/tag/${tag}`, assets: [{ name: 'Published.zip', browser_download_url: downloadUrl, size: 2, digest }] }) };
+            return { ok: true, json: async () => ({ schemaVersion: 1, mods: [{ id, identityId: id, name: id, bootNames: [id],
+                githubUrl, version, releaseAssetVersion: bootVersion, releaseUrl: `${githubUrl}/releases/tag/${tag}`, versionSource: 'github' }] }) };
+        };
+        await sb.modHubInitMarket(true);
+        const [mod] = sb.modHubMarket.getMarketMods();
+        const update = sb.modHubMarket.getModUpdateInfo(mod);
+        await update.promise;
+        sb.modHubMarket.renderMarketCards();
+        const card = elements.get('modHubMarketCardsContainer').innerHTML;
+        assert.ok(requests.includes(`https://api.github.com/repos/VersionTests/${id}/releases/tags/${tag}`), '索引无摘要时补取精确tag的官方元数据');
+        assert.ok(card.includes(`最新版本：v${version}`));
+        assert.equal(mod._matchedLocal.version, bootVersion, '市场身份与依赖保留真实boot版本');
+        if (currentPackage === 2) {
+            const installedText = version === bootVersion ? `v${bootVersion}` : `v${version}（包内 v${bootVersion}）`;
+            assert.ok(card.includes(`已安装版本：${installedText}`) && card.includes('>已是最新</span>'), '已装新包可显示真实发行版及包内版本');
+            if (tag === '25.5.23') assert.ok(!card.includes('版本：v25.5.23'), '已核验0.0.5不能因包摘要一致被替换为日期tag');
+            assert.equal(sb.modHubMarket.checkModInstallStatus(mod), 'up_to_date');
+        } else {
+            assert.ok(card.includes('已安装版本：v1.7') && !card.includes('>已是最新</span>'), '同boot旧包不能声称已装最新');
+            assert.equal(sb.modHubMarket.checkModInstallStatus(mod), 'update_available');
+            sb.modHubMarket.setModUpdateIgnored(mod.name, '1.8');
+            assert.equal(sb.modHubMarket.checkModInstallStatus(mod), 'up_to_date', '精确摘要证明有更新时仍尊重忽略本次');
+            sb.modHubMarket.setModUpdateIgnored(mod.name, 'ignored');
+            assert.equal(sb.modHubMarket.checkModInstallStatus(mod), 'up_to_date', '包体摘要判断不能绕过永久忽略');
+            sb.modHubMarket.setModUpdateIgnored(mod.name, '', false);
+            assert.equal(sb.modHubMarket.checkModInstallStatus(mod), 'update_available');
+        }
+    }
+    // 目录最新与已安装版本独立显示；未知游戏不能使线上版本字段消失。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        sb.StartConfig = { version: '' };
+        const cases = [
+            { id: 'version-uninstalled', name: '未安装有最新版', version: '1.20', source: 'github', latest: 'v1.20' },
+            { id: 'version-different', name: '已安装不同版本', local: '1.0', version: '2.0', source: 'github', latest: 'v2.0' },
+            { id: 'version-same', name: '已安装相同版本', local: '2.0', version: '2.0', source: 'github', latest: 'v2.0', badge: '已是最新', reason: '与当前目录最新版本相同' },
+            { id: 'version-unknown', name: '已安装远端未知', local: '7.0', version: '', source: 'github', latest: '未知', badge: '已安装', reason: '未能获取最新版本' },
+            { id: 'version-local-only', name: '仅本地版本线索', local: '7.0', version: '7.0', source: 'installed', latest: '未知', badge: '已安装', reason: '未能获取最新版本' },
+            { id: 'version-both-unknown', name: '已安装版本未识别', local: '', version: '', source: 'github', latest: '未知', badge: '已安装', reason: '无法识别已安装版本' },
+            { id: 'version-local-unknown', name: '本地版本未知目录已知', local: '', version: '2.0', source: 'github', latest: 'v2.0', badge: '已安装', reason: '无法识别已安装版本' },
+            { id: 'version-label', name: '原始版号说明', version: '', label: '公开测试版 <说明>', source: 'wiki', latest: '公开测试版 &lt;说明&gt;' },
+            { id: 'version-registered', name: '登记真实包版本', local: '1.0.0', version: '1.0.20', assetVersion: '1.0.19', source: 'github', latest: 'v1.0.19' },
+            { id: 'version-registered-same', name: '本地等于真实包版本', local: '1.0.19', version: '1.0.20', assetVersion: '1.0.19', source: 'github', latest: 'v1.0.19', badge: '已是最新' },
+            { id: 'version-tag-same', name: '本地仅等于发布标签', local: '1.0.20', version: '1.0.20', assetVersion: '1.0.19', source: 'github', latest: 'v1.0.19', badge: '已安装' }
+        ];
+        const local = cases.filter(item => Object.hasOwn(item, 'local')).map(item => ({ name: item.id,
+            bootJson: { name: item.id, version: item.local, repository: `https://github.com/VersionTests/${item.id}` } }));
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => local, getModListNameNoAlias: () => local.map(item => item.name) } });
+        sb.modHubGetModInfo = name => local.find(item => item.name === name) || null;
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubCategoryCapsules', 'modHubMarketStats']
+            .map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        const mods = cases.map(item => ({ id: item.id, identityId: item.id, name: item.name, bootNames: [item.id], author: '作者',
+            githubUrl: `https://github.com/VersionTests/${item.id}`, version: item.version, versionSource: item.source,
+            releaseAssetVersion: item.assetVersion, versionLabel: item.label }));
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods }) });
+        await sb.modHubInitMarket(true);
+        const html = elements.get('modHubMarketCardsContainer').innerHTML;
+        for (const item of cases) {
+            const card = html.split(`data-mod-name="${item.name}"`)[1].split('data-mod-name=')[0];
+            assert.ok(card.includes(`最新版本：${item.latest}`), `${item.name} 保留真实线上最新字段`);
+            if (Object.hasOwn(item, 'local')) {
+                assert.ok(card.includes(`已安装版本：${item.local ? 'v' + item.local : '未知'}`), '已安装版本从本地包独立读取');
+                assert.equal((card.match(/最新版本：/g) || []).length, 1);
+                assert.equal((card.match(/已安装版本：/g) || []).length, 1);
+            } else assert.ok(!card.includes('已安装版本：'), '未安装条目不构造本地版本');
+            if (item.badge) assert.ok(new RegExp(`class="modhub-market-badge badge-installed"[^>]*>${item.badge}</span>`).test(card), `${item.name} 徽标须反映可核实的安装事实`);
+            if (item.reason) assert.ok(card.includes(item.reason), `${item.name} 须提供明确原因`);
+            if (item.badge === '已安装') assert.ok(!card.includes('>已是最新</span>'), '缺少版本事实或只有标签相同不能声称全局最新');
+        }
+        assert.ok(!html.includes('已安装版本：v1.20') && !html.includes('<说明>'), '未安装和原文说明不能伪造本地状态或注入HTML');
+        assert.ok(!html.includes('更新版本待核对') && !html.includes('最新版本待核对'), '已安装事实不得被空适配检查替换成笼统待核对标签');
+    }
+    // 所有有效来源回退，卡片按平台合并，附件展示不触发下载，原始资料保持完整。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
+        const api = sb.modHubMarketSpells;
+        const asset = 'https://github.com/Owner/Repo/releases/download/v1%2F2/Mod.zip';
+        const entry = { sources: [{ platform: 'discord', url: 'https://discord.com/channels/1/2', instructions: '原文\r\n保留末尾\n' },
+            { platform: 'tieba', url: 'https://discord.com/channels/1/2' }], sourceUrl: 'javascript:bad', githubUrl: asset,
+            otherUrl: 'https://other.example.test/home' };
+        const before = JSON.stringify(entry), links = api.getSourceLinks(entry);
+        assert.equal(links.length, 3, '按真实平台合并，同名来源只展示一次');
+        assert.ok(links.some(item => item.name === 'Discord' && item.url === 'https://discord.com/channels/1/2'));
+        assert.ok(links.some(item => item.name === 'GitHub' && item.url === 'https://github.com/Owner/Repo/releases/tag/v1%2F2'));
+        assert.ok(links.some(item => item.name === 'other.example.test' && item.url === entry.otherUrl), '未知站点使用真实域名');
+        assert.equal(JSON.stringify(entry), before, '展示归一不得改写来源、附件和精确资格原数据');
+        assert.equal(api.getSourceLinks({ githubUrl: asset + '/' })[0].url, 'https://github.com/Owner/Repo/releases/tag/v1%2F2', '附件尾斜杠仍展示发布页，与网站保持一致');
+        assert.ok(api.acquisitionHtml(entry).includes('原文\r\n保留末尾\n') && api.acquisitionHtml(entry).includes(asset), '原附件及作者原文仍可在安装说明访问');
+        const grouped = { sources: [
+            { platform: 'discord', url: 'https://discord.com/channels/1/2', label: '主要原帖' },
+            { platform: 'github', url: asset },
+            { platform: 'discord', url: 'https://discord.com/channels/1/3', label: '补充原帖' },
+            { platform: 'github', url: 'https://github.com/Owner/Repo/releases/tag/v2.0' },
+            { platform: 'discord', url: 'https://discord.gg/OriginalInvite' },
+            { platform: 'github', url: 'https://github.com/Owner/Repo/' }
+        ] };
+        const groupedBefore = JSON.stringify(grouped), groupedLinks = api.getSourceLinks(grouped);
+        assert.deepEqual(Array.from(groupedLinks, item => [item.name, item.url]), [
+            ['Discord', 'https://discord.com/channels/1/2'], ['GitHub', 'https://github.com/Owner/Repo/']
+        ], 'Discord 保留首个原帖，GitHub 优先已提供的仓库主页，平台顺序稳定');
+        const groupedRow = api.renderAcquisitionDetails(grouped, 0);
+        assert.equal((groupedRow.match(/>Discord<\/a>/g) || []).length, 1);
+        assert.equal((groupedRow.match(/>GitHub<\/a>/g) || []).length, 1);
+        assert.ok(!groupedRow.includes('GitHub（发布）') && groupedRow.includes('modhub-market-acquisition-link'), '合并后其余原帖通过安装说明访问');
+        const groupedDetails = api.acquisitionHtml(grouped);
+        for (const source of grouped.sources) assert.ok(groupedDetails.includes(`href="${source.url}"`), '每个原帖与附件仍完整保留');
+        assert.equal(JSON.stringify(grouped), groupedBefore, '平台展示合并不得更改原始来源');
+        const withoutHome = api.getSourceLinks({ sources: [grouped.sources[1], grouped.sources[3]] });
+        assert.equal(withoutHome.length, 1);
+        assert.equal(withoutHome[0].url, grouped.sources[3].url, '没有仓库主页时优先现有发布页，避免附件下载');
+        const aliases = { sources: [
+            { url: 'https://canary.discord.com/channels/1/2' }, { url: 'https://ptb.discord.com/channels/1/3' },
+            { url: 'https://discordapp.com/channels/1/4' }, { url: 'https://discord.com/channels/1/5' },
+            { url: 'https://www.github.com/Owner/Repo/releases/download/v1%2F2/Mod.zip?download=1#asset' },
+            { url: 'https://github.com/Owner/Repo' }
+        ] };
+        assert.deepEqual(Array.from(api.getSourceLinks(aliases), item => [item.name, item.url]), [
+            ['Discord', aliases.sources[0].url], ['GitHub', aliases.sources[5].url]
+        ], 'Discord 官方域名和 GitHub www 入口仍按同一平台合并，与网站一致');
+        assert.equal(api.getSourceLinks({ sources: [aliases.sources[4]] })[0].url,
+            'https://www.github.com/Owner/Repo/releases/tag/v1%2F2', 'www 附件只派生发布页，标签编码保持且不携带下载参数');
+        const mixed = { sources: [{ url: 'https://github.com/Owner/Repo' }], sourceUrl: 'https://tieba.baidu.com/p/123',
+            githubUrl: 'https://github.com/Owner/Repo', otherUrl: 'https://other.example.test/home' };
+        assert.equal(api.getSourceLinks(mixed).length, 3, '三字段有效来源全部补齐且不重复');
+        const unsafe = { sources: [{ url: 'https://user:secret@example.test/' }, { url: 'javascript:bad' }],
+            sourceUrl: 'https://user:secret@example.test/', githubUrl: 'http://github.com/Owner/Repo' };
+        const empty = api.renderAcquisitionDetails(unsafe, 0);
+        assert.ok(empty.includes('来源：') && empty.includes('暂无来源链接') && !empty.includes('<a '), '无有效来源固定显示空状态且不构造链接');
+        const escaped = api.renderAcquisitionDetails({sources:[{url:'https://other.example.test/',label:'<script>bad</script>'}]},0);
+        assert.ok(escaped.includes('&lt;script&gt;') && !escaped.includes('<script>'), '链接标题安全转义');
+    }
+    // 适配检查进度和错误保留版本事实，相等版本不因异步结果空白而改变徽标。
+    for (const sameVersion of [true, false]) {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        sb.StartConfig = { version: '0.5.12.13' };
+        const id = `stable-status-${sameVersion}`, localVersion = sameVersion ? '2.0' : '1.0';
+        const local = { name: id, bootJson: { name: id, version: localVersion, repository: `https://github.com/StatusTests/${id}` } };
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [local], getModListNameNoAlias: () => [id] } });
+        sb.modHubGetModInfo = () => local;
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketStats'].map(key => [key, createStubElement()]));
+        sb.document.getElementById = key => elements.get(key) || null;
+        let failHistory;
+        sb.modHubMarketVersions.fetchReleases = () => new Promise((_, reject) => { failHistory = reject; });
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [{ id, identityId: id, name: id,
+            bootNames: [id], author: '作者', githubUrl: `https://github.com/StatusTests/${id}`, version: '2.0', versionSource: 'github' }] }) });
+        await sb.modHubInitMarket(true);
+        const [mod] = sb.modHubMarket.getMarketMods(), pending = sb.modHubMarket.getModUpdateInfo(mod);
+        const expectedBadge = sameVersion ? '已是最新' : '已安装';
+        const cards = () => elements.get('modHubMarketCardsContainer').innerHTML;
+        assert.equal(pending.pending, true);
+        assert.ok(new RegExp(`badge-installed"[^>]*>${expectedBadge}</span>`).test(cards()));
+        assert.ok(cards().includes('正在检查更新') && cards().includes(`已安装版本：v${localVersion}`) && cards().includes('最新版本：v2.0'));
+        failHistory(new Error('测试历史服务离线 <script>不执行</script>'));
+        await pending.promise;
+        assert.ok(new RegExp(`badge-installed"[^>]*>${expectedBadge}</span>`).test(cards()), '网络失败不覆盖已核实的安装与目录版本事实');
+        assert.ok(cards().includes('更新检查失败') && cards().includes('&lt;script&gt;不执行&lt;/script&gt;') && !cards().includes('<script>'));
+        assert.ok(cards().includes(`已安装版本：v${localVersion}`) && cards().includes('最新版本：v2.0'));
+        assert.notEqual(sb.modHubMarket.checkModInstallStatus(mod), 'update_available', '显示事实不改变适配更新动作判断');
+    }
+    // 两个板块独立筛选，获取资料通过独立面板展示，外部资源只提供一个主页动作。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketSections',
+            'modHubMarketStats', 'modHubCategoryCapsules', 'modHubMarketFilterFooter', 'modHubMarketSpellNote',
+            'modHubMarketSearch', 'modHubStatusSelect', 'modHubSortSelect', 'modHubMirrorSelect',
+            'modHubMarketBatchToolbar', 'modHubMarketBtnResetFilter'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        const sourceButton = createStubElement('a');
+        sourceButton.dataset.modIndex = '0';
+        elements.get('modHubMarketCardsContainer').querySelectorAll = selector => selector === '.modhub-market-acquisition-link' ? [sourceButton] : [];
+        const record = { id: 'external-v1', fileName: 'external.zip', format: 'ModLoader Zip', bootName: 'External',
+            version: '1.0', gameVersionRange: '', dependencies: [{ id: 'Replace', version: '^1.0' }],
+            sourceUrl: 'https://tieba.baidu.com/p/456', downloadUrl: 'https://pan.example.test/version',
+            evidenceUrl: 'https://tieba.baidu.com/p/789', framework: '原美化框架', prerequisites: ['保留存档', '选择对应语言'],
+            verificationScope: '旧游戏版本的原始说明\n<script>不能执行</script>',
+            instructions: '前置安装完成后导入此包。\n不能与另一语言版本同时启用。',
+            archivePassword: 'abc<123', extractionCode: '4567' };
+        const external = { id: 'external-ui', name: '外部资料', author: '作者', contentType: 'package',
+            catalogSource: 'community', sourcePlatform: 'tieba', sourceUrl: 'https://tieba.baidu.com/p/456',
+            autoInstall: false, sources: [{ platform: 'tieba', url: 'https://tieba.baidu.com/p/456',
+                instructions: '作者原文\n登录后下载', downloadUrl: 'https://pan.example.test/file', extractionCode: '4567' }],
+            packageRecords: [record] };
+        const github = { id: 'github-ui', name: '可下载包', author: '作者', githubUrl: 'https://github.com/Owner/Direct',
+            sources: [{ platform: 'github', url: 'https://github.com/Owner/Direct' }] };
+        const spell = { id: 'spell-ui', name: '独立咒语', contentType: 'spell', spell: { body: '<<set $x to "t">>\n原文', inputLocation: '指定位置' } };
+        const index = { schemaVersion: 1, communityRevision: 21, mods: [external, github], spells: [spell] };
+        sb.fetch = async () => ({ ok: true, json: async () => index });
+        await sb.modHubInitMarket(true);
+        const cards = () => elements.get('modHubMarketCardsContainer').innerHTML;
+        const sections = () => elements.get('modHubMarketSections').innerHTML;
+        const search = elements.get('modHubMarketSearch');
+        assert.ok(sections().includes('MOD 与美化（2）') && sections().includes('咒语（1）'), '板块入口直接显示两区数量');
+        assert.ok(sections().includes('data-section="packages" aria-pressed="true"'), '默认明确选中 MOD 与美化');
+        const externalCard = cards().split('data-mod-name="外部资料"')[1].split('<div class="childItem modhub-market-card')[0];
+        assert.ok(!externalCard.includes('>主页</a>') && !externalCard.includes('外部主页') && !externalCard.includes('获取与适配说明'));
+        assert.equal((externalCard.match(/class="modhub-market-source-bar"/g) || []).length, 1, '每张卡片统一提供一行来源');
+        assert.match(externalCard, /<a class="modhub-market-source-link" href="https:\/\/tieba.baidu.com\/p\/456"[^>]*>百度贴吧<\/a>/, '平台文字直接链接原帖');
+        assert.match(externalCard, /<a class="modhub-market-acquisition-link" href="#" data-mod-index="0">安装说明<\/a>/, '额外资料以同行文字链接打开');
+        assert.ok(!externalCard.includes('查看来源') && !externalCard.includes('<details') && !externalCard.includes('abc&lt;123') && !externalCard.includes('前置安装完成'), '来源无需中转，长资料仍保留独立入口');
+        assert.ok(!externalCard.includes('安装包资料待核对') && !externalCard.includes('未游戏实测') && !/已核验 \d+ 个安装包/.test(externalCard), '卡片不显示自动生成的核验统计，核验信息由安装说明保留');
+        const githubName = sb.modHubMarket.getMarketMods().find(mod => mod.id === 'github-ui').name;
+        const githubCard = cards().split(`data-mod-name="${githubName}"`)[1].split('data-mod-name=')[0];
+        assert.ok(githubCard.includes('modhub-market-source-bar') && githubCard.includes('href="https://github.com/Owner/Direct"'), '普通 GitHub 也显示同一来源行');
+        assert.ok(!githubCard.includes('modhub-market-acquisition-link') && !githubCard.includes('>主页</a>'), '没有额外资料时不增加说明或重复主页入口');
+        const openedSources = [], originalConfirm = sb.modHubConfirm;
+        sb.modHubConfirm = async options => { openedSources.push(options); return false; };
+        let prevented = 0, stopped = 0;
+        for (const detail of [1, 0]) await sourceButton.onclick({ detail, preventDefault() { prevented++; }, stopPropagation() { stopped++; } });
+        assert.equal(openedSources.length, 2, '鼠标点击和键盘生成的点击均打开同一原生资料面板');
+        assert.equal(prevented, 2); assert.equal(stopped, 2, '打开来源不冒泡到卡片多选');
+        assert.ok(openedSources.every(options => options.title === '来源与说明【外部资料】' && options.confirmText === '下载后导入'));
+        const sourceHtml = openedSources[0].trustedMessageHtml, sourceText = sourceHtml.replace(/<[^>]*>/g, '');
+        for (const text of ['提取码：4567', '解压密码：abc&lt;123', '前置要求：Replace ^1.0', '适配 DoL：未知，请核对作者说明',
+            '原美化框架', 'external.zip', '版本 1.0', '保留存档\n选择对应语言', '安装包资料待核对', '未游戏实测', '支持 ModLoader']) {
+            assert.ok(sourceText.includes(text), `独立资料面板保留 ${text}`);
+        }
+        assert.ok(sourceHtml.includes('旧游戏版本的原始说明\n&lt;script&gt;不能执行&lt;/script&gt;'));
+        assert.ok(sourceHtml.includes('前置安装完成后导入此包。\n不能与另一语言版本同时启用。'), '作者说明与换行逐字保留');
+        for (const url of [record.sourceUrl, record.downloadUrl, record.evidenceUrl, external.sources[0].downloadUrl]) {
+            assert.ok(sourceHtml.includes(`href="${url}"`), '原平台、逐包下载和核验链接保留');
+        }
+        assert.ok(!sourceHtml.includes('<script>') && !sourceHtml.includes('安装包结构已核验'));
+        const sameGithub = { sources: [{ platform: 'github', url: 'https://github.com/Owner/Only', downloadUrl: 'https://github.com/Owner/Only' }] };
+        assert.ok(sb.modHubMarketSpells.renderAcquisitionDetails(sameGithub, 0).includes('modhub-market-source-link') && !sb.modHubMarketSpells.renderAcquisitionDetails(sameGithub, 0).includes('modhub-market-acquisition-link'), '同一 GitHub URL 仍统一显示来源，但不增加说明入口');
+        assert.equal((sb.modHubMarketSpells.acquisitionHtml(sameGithub).match(/href="https:\/\/github\.com\/Owner\/Only"/g) || []).length, 1,
+            '同一来源的原帖和下载地址相同时只显示一个链接');
+        for (const invalid of ['', '-1', '0.5', '1e0', '999']) { sourceButton.dataset.modIndex = invalid; await sourceButton.onclick(); }
+        assert.equal(openedSources.length, 2, '非法或不存在的索引不能打开其他条目');
+        sourceButton.dataset.modIndex = '0';
+        sb.modHubConfirm = originalConfirm;
+        assert.ok(cards().includes('btn-market-install'), '普通 GitHub 条目仍可进入原有安装入口');
+        assert.ok(!cards().includes('独立咒语') && !elements.get('modHubCategoryCapsules').innerHTML.includes('咒语配方'), '咒语独立于模组卡片和分类');
+
+        search.value = '外部资料';
+        sb.modHubMarket.selectMarketSection('packages');
+        assert.ok(cards().includes('外部资料') && !cards().includes('可下载包'), '点击当前板块应立即使用搜索框当前值');
+
+        sb.setTimeout = callback => { callback(); return 0; };
+        search.value = '外部资料';
+        search.oninput();
+        assert.ok(cards().includes('外部资料') && !cards().includes('可下载包'));
+        const selectedMod = sb.modHubMarket.getMarketMods().find(mod => mod.id === 'github-ui');
+        const selectedKey = sb.modHubMarket.getMarketModKey(selectedMod);
+        sb.modHubMarket.toggleBatchSelection(true);
+        sb.modHubMarket.setBatchModSelected(selectedKey, true);
+        assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '用例先明确勾选可安装 MOD');
+        assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
+        assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话进入咒语不清除 MOD 勾选');
+        assert.equal(sb.modHubMarket.selectMarketSection('packages'), true);
+        assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话返回 MOD 区恢复原勾选');
+        assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
+        let finishManagerRead, startedManagerRead;
+        const managerReadStarted = new Promise(resolve => { startedManagerRead = resolve; });
+        const originalManagerRead = sb.modHubLoadModManageState;
+        sb.modHubLoadModManageState = () => { startedManagerRead(); return new Promise(resolve => { finishManagerRead = resolve; }); };
+        const reopening = sb.modHubInitMarket();
+        await managerReadStarted;
+        assert.equal(elements.get('modHubMarketBatchToolbar').hidden, true, '重新进入咒语区时，管理状态读取未完成也必须立即隐藏批量栏');
+        assert.ok(elements.get('modHubModMarketContainer').innerHTML.includes('aria-label="模组多选安装" hidden'), '初始DOM就隐藏咒语板块的批量入口');
+        assert.equal(await sb.modHubMarket.installSelectedMods(), false, '咒语期间残留的批量动作不能安装已勾选 MOD');
+        assert.equal(sb.modHubMarket.isInstallBusy(), false, '阻止动作不建立安装或恢复上下文');
+        finishManagerRead();
+        await reopening;
+        sb.modHubLoadModManageState = originalManagerRead;
+        assert.equal(search.value, '', '首次进入咒语区不继承 MOD 搜索');
+        assert.ok(cards().includes('独立咒语') && !cards().includes('btn-market-install'));
+        assert.ok(sections().includes('data-section="spells" aria-pressed="true"'));
+        assert.equal(elements.get('modHubMarketBatchToolbar').hidden, true);
+        assert.equal(elements.get('modHubStatusSelect').hidden, true);
+        assert.equal(elements.get('modHubMarketFilterFooter').hidden, true);
+        assert.equal(elements.get('modHubMarketStats').hidden, true);
+        assert.equal(elements.get('modHubMarketSpellNote').hidden, false);
+        assert.equal(elements.get('modHubCategoryCapsules').style.display, 'none');
+        search.value = '不匹配';
+        search.oninput();
+        assert.ok(cards().includes('没有匹配的咒语配方'));
+        sb.modHubMarket.resetFilters();
+        assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'spells', '清除咒语搜索保持当前板块');
+        assert.ok(cards().includes('独立咒语'));
+        search.value = '原文';
+        search.oninput();
+        assert.equal(sb.modHubMarket.selectMarketSection('packages'), true);
+        assert.equal(search.value, '外部资料', '返回 MOD 区恢复该区的搜索');
+        assert.equal(elements.get('modHubMarketBatchToolbar').hidden, false);
+        assert.equal(elements.get('modHubMarketStats').hidden, false);
+        assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
+        assert.equal(search.value, '原文', '返回咒语区恢复该区搜索');
+        sb.modHubMarket.filterInstalledOnly();
+        assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'packages', '已安装快捷入口明确返回 MOD 区');
+        assert.equal(elements.get('modHubStatusSelect').value, 'installed');
+        assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
+        sb.modHubMarketSpells.applyIndex({ communityRevision: 22, spells: [] });
+        sb.modHubMarket.resetFilters();
+        assert.ok(sections().includes('咒语（0）') && cards().includes('当前暂无咒语配方'), '空板块保留可发现的入口及原因');
+        sb.modHubMarket.batchInstallState.running = true;
+        assert.equal(sb.modHubMarket.selectMarketSection('packages'), false, '安装处理中不切换板块或混入其他操作');
+        assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'spells');
+    }
+    // 维护者批准的固定附件仍受原安装资格校验，语言和历史渠道不能互相替换。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-spells.js', 'javascript/modhub-market-versions.js']);
+        const market = sb.modHubMarket;
+        const url = 'https://github.com/Owner/Shared/releases/download/v1.0/Shared.CHS.1.0.zip';
+        const approved = { id: 'community-chs', identityId: 'shared-chs', name: '共享仓库中文包', contentType: 'package',
+            catalogSource: 'community', sourcePlatform: 'github', sourceUrl: url, githubUrl: url,
+            autoInstall: true, bootNames: ['SharedCHS'], repositoryKeys: ['Owner/Shared'] };
+        const [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [approved] });
+        assert.equal(mod.githubUrl, url, '可信社区固定附件保留完整 GitHub 来源');
+        assert.equal(market.hasCommunityReleaseSource(mod), true);
+        assert.equal(market.isBatchInstallEligible(mod, []), true);
+        assert.equal(market.hasCommunityReleaseSource({ ...approved, autoInstall: false }), false, '关闭安装资格时不能因已知仓库或资产绕过');
+        const [manual] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ ...approved, autoInstall: false,
+            sourcePlatform: 'discord', sourceUrl: 'https://discord.com/channels/1/2', sources: [{ platform: 'github', url }] }] });
+        assert.equal(manual.githubUrl, null, '追加 GitHub 来源不能擅自赋予直接安装资格');
+        assert.equal(market.isBatchInstallEligible(manual, []), false);
+        assert.equal(market.hasCommunityReleaseSource({ ...approved, repositoryKeys: ['Owner/Other'] }), false);
+        assert.equal(market.hasCommunityReleaseSource({ ...approved, bootNames: [] }), false);
+        assert.equal(market.hasCommunityReleaseSource({ ...approved, githubUrl: 'https://github.com/Owner/Shared' }), false);
+        const release = { tagName: 'v1.0', publishedAt: '2026-10-04T00:00:00Z', assets: [{ name: 'Shared.CHS.1.0.zip', size: 100, downloadUrl: url }] };
+        const candidates = sb.modHubMarketVersions.buildCandidates(mod, { id: mod.id, sourceUrl: url, releases: [release] });
+        assert.equal(candidates.length, 1);
+        assert.equal(candidates[0].assetName, 'Shared.CHS.1.0.zip');
+        assert.equal(sb.modHubMarketVersions.buildCandidates(mod, { id: mod.id, sourceUrl: url, releases: [{ ...release,
+            assets: [{ name: 'Shared.EN.1.0.zip', size: 100, downloadUrl: url.replace('CHS', 'EN') }] }] }).length, 0, '固定中文附件不能改选英文附件');
+        assert.equal(sb.modHubMarketVersions.buildCandidates(mod, { id: mod.id, sourceUrl: url, releases: [{ ...release,
+            tagName: 'v2.0', assets: [{ name: 'Shared.CHS.2.0.zip', size: 100, downloadUrl: url.replaceAll('1.0', '2.0') }] }] }).length, 0, '未经登记的新标签不能替换历史固定包');
+        sb.fetch = async () => ({ ok: true, status: 200, json: async () => ({ tag_name: 'v1.0',
+            assets: [{ name: 'Shared.EN.1.0.zip', browser_download_url: url.replace('CHS', 'EN') },
+                { name: 'Shared.CHS.1.0.zip', browser_download_url: url }] }) });
+        const fetched = await market.fetchModRelease(mod, { useCache: false });
+        assert.equal(fetched.assetName, 'Shared.CHS.1.0.zip', '直接发布解析同样只采用指定附件');
+        assert.equal(fetched.availableAssets?.length || fetched.assets?.length, 1);
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubCategoryCapsules']
+            .map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [approved] }) });
+        await sb.modHubInitMarket(true);
+        const card = elements.get('modHubMarketCardsContainer').innerHTML;
+        assert.ok(card.includes('btn-market-install'), '批准的精确附件以普通安装卡片呈现');
+        assert.ok(card.includes('href="https://github.com/Owner/Shared/releases/tag/v1.0"'), '主页应查看标签发布页，不直接触发 ZIP 下载');
+    }
+    // v1 扩展保持安装身份，并将配方与所有安装入口隔离。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
+        const api = sb.modHubMarketSpells;
+        const body = '<<set $test = "<script>alert(1)</script>">>\n  第二行\n';
+        const spell = { id: 'spell-test', name: '测试配方', contentType: 'spell', sourceUrl: 'https://tieba.baidu.com/p/123',
+            spell: { body, syntax: 'SugarCube', inputLocation: '作者指定位置', gameVersionRange: '0.5.12.13' } };
+        assert.equal(api.applyIndex({ communityRevision: 3, spells: [spell] }), true);
+        assert.equal(api.getSpells()[0].spell.body, body, '原始正文及尾部换行必须逐字保留');
+        assert.equal(api.filter('第二行').length, 1, '配方正文必须参与搜索');
+        assert.equal(api.applyIndex({ communityRevision: 2, spells: [] }), false, '旧目录不得覆盖新修订');
+        assert.equal(api.restoreCache(2), false, '修订不匹配不得复活缓存配方');
+        assert.equal(api.restoreCache(3), true);
+        assert.equal(api.applyIndex({ communityRevision: 4, spells: [], withdrawnSpellIds: [spell.id] }), true);
+        assert.equal(api.getSpells().length, 0, '下架后的完整快照必须清除配方');
+        assert.equal(api.applyIndex({ communityRevision: 5, spells: [{ ...spell, spell: { body: '更正文' } }] }), true);
+        assert.equal(api.getSpells()[0].spell.body, '更正文', '更正或恢复只读取新快照');
+        assert.equal(api.applyIndex({ communityRevision: 6, mods: [] }), true);
+        assert.equal(api.getSpells().length, 0, '旧索引缺少配方字段时视为空列表');
+        assert.equal(sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [spell] }).length, 0);
+        assert.equal(sb.modHubMarket.isBatchInstallEligible({ ...spell, githubUrl: 'https://github.com/Owner/Test' }), false);
+        assert.equal(sb.modHubMarket.checkModInstallStatus(spell), 'unavailable');
+        assert.equal(await sb.modHubMarket.downloadAndInstallMod(spell), false, '配方不能下载或创建还原上下文');
+        assert.equal(sb.modHubMarket.buildBatchInstallPlan([spell]).actions.length, 0, '配方不得进入批量安装计划');
+        loadScripts(sb, ['javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js']);
+        assert.equal(await sb.modHubMarketInstaller.install(spell), false, '共用选版入口必须拒绝配方');
+        assert.equal(await sb.modHubMarketInstaller.installBatch([spell]), false, '共用批量入口必须拒绝纯配方列表');
+        const repository = 'https://github.com/Owner/Package/releases/tag/v1';
+        const mod = { id: 'community-package', name: '测试安装包', contentType: 'package', catalogSource: 'community',
+            identityId: 'package', bootNames: ['Package'], repositoryKeys: ['Owner/Package'], sourcePlatform: 'tieba',
+            sourceUrl: 'https://tieba.baidu.com/p/456', githubUrl: repository, autoInstall: true,
+            sources: [{ platform: 'github', url: repository }, { platform: 'tieba', url: 'https://tieba.baidu.com/p/456',
+                downloadUrl: 'https://pan.example.test/download', extractionCode: '1234', archivePassword: 'abcd', instructions: '<script>不执行</script>' }],
+            packageRecords: [{ id: 'package-v1', sourceUrl: 'https://tieba.baidu.com/p/456', fileName: 'Package.zip', format: 'zip',
+                sha256: 'a'.repeat(64), evidenceUrl: 'https://tieba.baidu.com/p/456', verifiedAt: '2026-10-04T08:00:00Z',
+                version: '1', gameVersionRange: '0.5.12.13', gameTested: false, verificationStatus: 'package-checked',
+                wholePackageStructureChecked: true, verificationScope: '外层及内层完整引用；<script>只读检查</script>' }] };
+        const [normalized] = sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, mods: [mod] });
+        assert.equal(normalized.githubUrl, repository, '追加贴吧来源不能移除已审核 GitHub 发布源');
+        assert.equal(normalized.autoInstall, true);
+        assert.equal(normalized.packageRecords[0].gameVersionRange, '0.5.12.13');
+        assert.equal(api.isVerifiedPackage(normalized.packageRecords[0]), true);
+        assert.equal(api.isVerifiedPackage({ ...normalized.packageRecords[0], sha256: '缺少摘要' }), false);
+        assert.equal(api.isVerifiedPackage({ ...normalized.packageRecords[0], verificationStatus: 'pending' }), false);
+        assert.equal(api.isVerifiedPackage({ ...normalized.packageRecords[0], wholePackageStructureChecked: undefined }), false, '缺少完整结构证据不能显示核验徽标');
+        assert.equal(api.isVerifiedPackage({ ...normalized.packageRecords[0], wholePackageStructureChecked: false }), false, '仅外层核验不能显示完整包徽标');
+        assert.equal(api.isVerifiedPackage({ ...normalized.packageRecords[0], verificationStatus: 'package-defect' }), false, '缺陷包不能显示完整核验徽标');
+        assert.equal(api.isVerifiedPackage({ ...normalized.packageRecords[0], verificationStatus: 'outer-only' }), false);
+        const html = api.acquisitionHtml(normalized);
+        const acquisitionText = html.replace(/<[^>]*>/g, '');
+        assert.ok(acquisitionText.includes('提取码：1234') && acquisitionText.includes('解压密码：abcd') && acquisitionText.includes('未游戏实测'));
+        assert.ok(html.includes('&lt;script&gt;不执行&lt;/script&gt;'), '获取说明必须转义');
+        assert.ok(acquisitionText.includes('核验范围：外层及内层完整引用；&lt;script&gt;只读检查&lt;/script&gt;'), '核验范围按文本显示并转义');
+        assert.equal(api.normalizeSources({ sources: [{ platform: 'tieba', url: 'javascript:alert(1)' }] }).length, 0);
+        let copied = '';
+        sb.navigator = { clipboard: { writeText: async value => { copied = value; } } };
+        assert.equal(await api.copyBody(spell), true);
+        assert.equal(copied, body, '复制正文不能裁剪换行或执行正文');
+        let importCount = 0;
+        sb.modHubConfirm = async () => true;
+        sb.modHubTriggerImport = () => { importCount++; };
+        assert.equal(await api.openAcquisition(normalized), true);
+        assert.equal(importCount, 1, '下载后导入必须复用本地导入入口');
+        let renderedBody;
+        sb.modHubConfirm = async options => {
+            const host = createStubElement();
+            options.onRender({ querySelector: () => host });
+            renderedBody = host.children.find(element => element.tagName === 'PRE');
+            return false;
+        };
+        await api.showDetails(spell);
+        assert.ok(renderedBody, '配方详情必须真实构建可选择的 pre 节点');
+        assert.equal(renderedBody.textContent, body, '详情只写 textContent 并逐字保留正文');
+        assert.equal(renderedBody.innerHTML, '', '正文不能写入 HTML 或执行');
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, communityRevision: 7, mods: [mod], spells: [spell] }) });
+        await sb.modHubMarket.fetchReleaseIndex();
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
+        await sb.modHubMarket.loadMarketData();
+        assert.equal(sb.modHubMarketSpells.getSpells()[0].spell.body, body, '从模组目录缓存加载时按同一修订恢复独立配方缓存');
+        const emptySb = loadMarket();
+        loadScripts(emptySb, ['javascript/modhub-market-spells.js']);
+        emptySb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, communityRevision: 8, mods: [], spells: [spell] }) });
+        await emptySb.modHubMarket.fetchReleaseIndex();
+        loadScripts(emptySb, ['javascript/modhub-market-spells.js']);
+        emptySb.fetch = async () => { throw new Error('离线配方缓存测试'); };
+        assert.equal((await emptySb.modHubMarket.loadMarketData()).length, 0);
+        assert.equal(emptySb.modHubMarketSpells.getSpells().length, 1, '纯配方目录离线时仍可恢复同修订的配方缓存');
+    }
     {
         const sb = loadManager();
         const boot = { name: 'ModLoader DoL ImageLoaderHook', version: '2.101.0', alias: ['ImageLoaderHook', 'ImageLoaderHookCore'],
@@ -30,6 +498,11 @@ module.exports = async function() {
         const updated = sb.modHubMarket.getLocalInstalledProfiles()[0];
         assert.equal(updated.version, '2.102.0', '同名新缓存必须覆盖旧运行时声明');
         assert.deepEqual([...updated.bootJson.alias], ['CurrentAlias']);
+        const pendingBoot = { ...boot, version: '2.103.0', alias: ['PendingAlias'] };
+        sb._modHubDisabledModInfo.set(boot.name.toLowerCase(), { name: boot.name, bootJson: pendingBoot });
+        assert.equal(sb.modHubMarket.getLocalInstalledProfiles()[0].version, '2.103.0', '已持久化的新安装清单不能被尚未重载的旧运行态覆盖');
+        sb._modHubDisabledModInfo.set(boot.name.toLowerCase(), { name: boot.name, bootJson: { name: 'UnrelatedAliasProvider', version: '99.0' } });
+        assert.equal(sb.modHubMarket.getLocalInstalledProfiles()[0].version, '2.102.0', '仓库记录的别名或错误技术名不能覆盖精确身份');
     }
     // 作者展示名与包内技术名不同时，旧索引和离线目录也须使用精确身份。
     {
@@ -180,13 +653,16 @@ module.exports = async function() {
     // 社区外链默认只开放原帖；审核通过的精确 GitHub 发布源才可自动安装。
     {
         const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
         const market = sb.modHubMarket;
         const sourceUrl = 'https://tieba.baidu.com/p/12345';
         const manual = {
             id: 'community-manual', name: '社区手动模组', description: '<img src=x onerror=alert(1)>',
             author: '作者', catalogSource: 'community', sourcePlatform: 'tieba',
             sourceUrl, otherUrl: sourceUrl, githubUrl: 'https://github.com/Other/Wrong',
-            autoInstall: false, version: '9.0.0', versionSource: 'github'
+            autoInstall: false, version: '9.0.0', versionSource: 'github', identityId: null,
+            contentType: 'package', sources: [{ platform: 'tieba', url: sourceUrl }], packageRecords: [],
+            category: '外观与资源', tags: ['美化']
         };
         const [external] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [manual] });
         assert.equal(external.githubUrl, null, '社区条目未获安装资格时不得使用投稿的 GitHub 仓库');
@@ -194,6 +670,11 @@ module.exports = async function() {
         assert.equal(market.checkModInstallStatus(external, [{ name: manual.name, version: '1.0.0', repository: 'https://github.com/Other/Else' }]),
             'external_only', '未核实身份的同名社区条目不能声称本地已安装');
         assert.equal(market.isBatchInstallEligible(external, []), false);
+        assert.equal(external.identityId, null, '原帖条目不能虚构安装身份');
+        assert.equal(external.category, manual.category, '已审批社区原帖的分类不依赖安装身份');
+        assert.ok(external.tags.includes('美化'), '已审批原帖标签须保留以供检索');
+        assert.equal(external.packageRecords.length, 0, '原帖条目不能虚构包体核验记录');
+        assert.equal(external.sources[0].url, sourceUrl, '空包记录仍须保留来源访问');
         const [identified] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{
             ...manual, id: 'community-identified', identityId: 'verified-tech', bootNames: ['VerifiedTech']
         }] });
@@ -239,6 +720,7 @@ module.exports = async function() {
         assert.equal(catalogOnly.autoInstall, false, '无来源目录条目不能获得一键安装资格');
         assert.equal(market.checkModInstallStatus(catalogOnly, []), 'unavailable');
 
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
         const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer',
             'modHubCategoryCapsules'].map(id => [id, createStubElement()]));
         sb.document.getElementById = id => elements.get(id) || null;
@@ -251,7 +733,7 @@ module.exports = async function() {
         assert.ok(toolbar.includes('modHubMarketBtnSubmit') && toolbar.includes('modHubMarketBtnMy'), '市场必须提供游戏内投稿与查询入口');
         assert.ok(toolbar.includes('modHubMarketBtnFeedback'), '纠错与下架申请应共用一个入口');
         assert.ok(!toolbar.includes('issues/new'), '市场投稿不应再跳转 GitHub Issue');
-        assert.ok(card.includes('来源: 百度贴吧') && card.includes('前往原帖'));
+        assert.ok(card.includes('modhub-market-source-link') && card.includes('>百度贴吧</a>') && !card.includes('>主页</a>'));
         assert.ok(!card.includes('btn-market-correct') && !card.includes('btn-market-withdraw'), '反馈入口不应挤占每张卡片的主操作区');
         assert.ok(!card.includes('一键更新') && !card.includes('已是最新') && !card.includes('<img src=x'), '外链卡片不能承诺自动更新，也不能渲染投稿 HTML');
         const opened = [];
@@ -302,7 +784,7 @@ module.exports = async function() {
             catalogSource: 'community', sourcePlatform: 'catalog', sourceUrl: '', autoInstall: false };
         sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [linkless] }) });
         await sb.modHubInitMarket(true);
-        assert.ok(elements.get('modHubMarketCardsContainer').innerHTML.includes('目录资料已审核，暂无来源链接'),
+        assert.ok(elements.get('modHubMarketCardsContainer').innerHTML.includes('暂无来源链接'),
             '无来源目录条目不能误称出处已核验');
         opened.length = 0;
         sb.fetch = async (url, options) => {
@@ -1079,6 +1561,102 @@ module.exports = async function() {
             ['主模组', '扩展', '独立工具'], '空作者的无链接条目也不能从实际 Wiki 解析回退复活');
     }
 
+    // 生育扩展只登记真实技术身份；游戏范围通过不代替原包前置核验。
+    {
+        const catalogBytes = fs.readFileSync(path.join(srcRoot, '..', 'mod-identities.json'));
+        assert.deepEqual(catalogBytes, fs.readFileSync(path.join(srcRoot, '..', 'dolmod-site', 'dist', 'mod-identities.json')),
+            '生育扩展身份登记必须在根目录与网站逐字节同步');
+        const catalog = JSON.parse(catalogBytes);
+        const identities = catalog.mods.filter(item => item.id === 'fertility-expansion');
+        assert.equal(identities.length, 1, '生育扩展只能登记一个身份');
+        const identity = identities[0];
+        assert.deepEqual(identity.bootNames, ['FertilityExpansion']);
+        assert.deepEqual(identity.aliases, ['生育扩展', '生育拓展'], '显示别名不能添加其他模组技术名');
+        assert.deepEqual(identity.repositoryKeys, ['Liliths-Legacy/DOL-FertilityExpansion-MOD']);
+        assert.deepEqual(identity.repositories, ['DOL-FertilityExpansion-MOD']);
+        assert.deepEqual(identity.dependencies || [], [], '不存在的市场身份不能写入目录前置');
+        const assetUrl = 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/download/v1.5.12/FertilityExpansion.mod.zip';
+        assert.deepEqual(identity.verifiedReleaseAssets, [{ sourceUrl: assetUrl,
+            sha256: '660ef7c7fe64b30602a08703358595023de18d97d28c8e629130e890d613fb9a',
+            bootName: 'FertilityExpansion', version: '1.5.12', size: 126498,
+            verifiedAt: '2026-10-04T17:58:11.884768+00:00' }], '官方附件URL与原包摘要、身份、版本、大小必须完整绑定');
+        assert.deepEqual(identity.releaseCompatibility, [{ releaseTag: 'v1.5.12', assetName: 'FertilityExpansion.mod.zip',
+            gameVersionRange: '=0.5.12.13', evidenceUrl: 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/tag/v1.5.12' }]);
+        const actualBoot = { name: 'FertilityExpansion', version: '1.5.12', dependenceInfo: [
+            { modName: 'ModLoader', version: '^2.101.0' }, { modName: 'GameVersion', version: '=0.5.12.13' },
+            { modName: 'TweeReplacer', version: '^1.7.0' }
+        ] };
+        for (const scenario of ['缺少TweeReplacer', 'ModLoader版本不足', '游戏版本不同']) {
+            const sb = loadMarket();
+            sb.AbortController = AbortController;
+            sb.StartConfig = { version: scenario === '游戏版本不同' ? '0.5.11.9' : '0.5.12.13' };
+            loadScripts(sb, ['javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js']);
+            const market = sb.modHubMarket, versions = sb.modHubMarketVersions;
+            market.applyIdentityCatalog(catalog);
+            const target = { ...identity, identityId: identity.id, githubUrl: assetUrl, version: '1.5.12' };
+            const profiles = scenario === '缺少TweeReplacer' ? [] : [{ name: 'TweeReplacer', version: '1.7.0',
+                bootJson: { name: 'TweeReplacer', version: '1.7.0', dependenceInfo: [] } }];
+            market.checkModInstallStatus(target, [{ name: '生育扩展', version: '99.0', bootJson: { name: '生育扩展', version: '99.0' } }]);
+            assert.equal(target._matchedLocal, null, '展示别名不能证明真实技术包已安装');
+            market.getLocalInstalledProfiles = () => profiles;
+            market.refreshLocalPackageProfiles = async () => profiles;
+            market.getMarketMods = () => [target];
+            market.confirmInstallConflicts = async () => true;
+            sb.modHubLoadModManageState = async () => {};
+            const loaderVersion = scenario === 'ModLoader版本不足' ? '2.100.0' : '2.101.1';
+            // 范围解析接口是沙箱依赖；实际选版、依赖图、运行环境和原包风险检查保留。
+            sb.modSC2DataManager = { getModUtils: () => ({ version: loaderVersion }), getDependenceChecker: () => ({
+                getInfiniteSemVerApi: () => ({
+                    parseVersion: value => ({ version: { version: value.split('.').map(Number) } }),
+                    parseRange: range => [{ range }],
+                    satisfies: (value, ranges) => market.satisfiesVersion(value.version.join('.'), ranges[0].range.replace(/^=/, ''))
+                })
+            }) };
+            const release = { tagName: 'v1.5.12', publishedAt: '2026-10-04T12:43:01Z',
+                htmlUrl: identity.releaseCompatibility[0].evidenceUrl,
+                assets: [{ name: 'FertilityExpansion.mod.zip', downloadUrl: assetUrl, size: 126498,
+                    compatibility: { gameVersionRange: identity.releaseCompatibility[0].gameVersionRange,
+                        evidenceUrl: identity.releaseCompatibility[0].evidenceUrl } }] };
+            versions.fetchReleases = async () => ({ releases: [release], page: 1, hasMore: false });
+            const candidates = versions.buildCandidates(target, { releases: [release] });
+            assert.equal(candidates.length, 1);
+            assert.equal(candidates[0].compatibility.status, scenario === '游戏版本不同' ? 'incompatible' : 'compatible',
+                '选版的游戏范围声明必须保留，不表示前置已满足');
+            const prompts = [], alerts = [];
+            let prepared = 0, imported = 0;
+            market.downloadAndInstallMod = async (_mod, _mirror, options) => {
+                if (!options.prepareOnly) { imported++; return true; }
+                prepared++;
+                return { files: [{}], boots: [actualBoot], bytes: 126498, releaseInfo: options.releaseInfo };
+            };
+            sb.modHubConfirm = async options => {
+                prompts.push(options);
+                if (options.title.startsWith('选择【')) {
+                    await options.onRender?.(createStubElement());
+                    return { selectedKey: candidates[0].candidateKey, manual: true };
+                }
+                if (options.title === '前置需要手动处理') return 'stop';
+                if (options.title === '确认版本风险') return prepared === 0;
+                return true;
+            };
+            sb.modHubAlert = async (message, title) => { alerts.push({ message, title }); };
+            assert.equal(await sb.modHubMarketInstaller.install(target, { restoreContext: {} }), false,
+                `${scenario}时采用停止处理，不得安装`);
+            assert.equal(prepared, 1, `${scenario}必须核对原包声明，不能只测目录提示`);
+            assert.equal(imported, 0, `${scenario}取消后不得导入`);
+            if (scenario === '缺少TweeReplacer') {
+                assert.ok(prompts.some(item => item.title === '前置需要手动处理' && item.message.includes('TweeReplacer')
+                    && item.message.includes('1.7.0')), '缺少真实包前置必须说明要求并默认停止');
+                assert.ok(alerts.some(item => item.message.includes('TweeReplacer')));
+            } else {
+                const warning = prompts.filter(item => item.title === '确认版本风险').at(-1);
+                assert.ok(warning, '下载后仍须明确确认原包版本风险');
+                assert.ok(warning.message.includes(scenario === 'ModLoader版本不足' ? 'ModLoader' : '需要游戏版本'));
+                assert.ok(warning.message.includes(scenario === 'ModLoader版本不足' ? '2.101.0' : '0.5.12.13'));
+            }
+        }
+    }
+
     // 同名、子串和仓库尾名都不能跨模组建立身份。
     {
         const market = loadMarket().modHubMarket;
@@ -1269,6 +1847,14 @@ module.exports = async function() {
         assert.equal(market.getModUpdateInfo({ ...mod }).version, '5.1.3', '卡片副本必须复用同来源同游戏检测结果');
         assert.deepEqual(requestedPages, [1, 2, 3], '重绘与重复检测不得重复读取历史');
         assert.equal(mod.version, '5.2.1', '适配检测不得覆写统一索引版本或破坏历史缓存签名');
+        const installedCardElements = new Map(['modHubMarketCardsContainer', 'modHubMarketStats'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => installedCardElements.get(id) || null;
+        market.renderMarketCards();
+        const installedCard = installedCardElements.get('modHubMarketCardsContainer').innerHTML;
+        assert.ok(installedCard.includes('最新版本：v5.2.1') && installedCard.includes('已安装版本：v5.1.3'));
+        assert.ok(installedCard.includes('已是推荐版本') && installedCard.includes('当前游戏推荐版本与已安装版本相同')
+            && installedCard.includes('依据安装包名称参考，不代表游戏实测') && !installedCard.includes('已是最新') && !installedCard.includes('当前版本已适配'),
+            '当前游戏候选已安装时只说明参考推荐，不声称全局最新或游戏兼容已验证');
 
         localVersion = '5.1.1';
         assert.equal(market.checkModInstallStatus(mod), 'update_available', '当前游戏的旧版仍须提示5.1.3更新');
@@ -1282,11 +1868,21 @@ module.exports = async function() {
         sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
         market.renderMarketCards();
         assert.ok(cards.innerHTML.includes('发现新版') && cards.innerHTML.includes('5.1.3'), '卡片更新提醒应展示当前游戏候选');
-        assert.ok(/版本:\s+v?5\.1\.3/.test(cards.innerHTML) && !cards.innerHTML.includes('5.2.1'), '卡片版本字段不得仍显示另一游戏系列的最新版');
+        assert.ok(cards.innerHTML.includes('依据文件名') && cards.innerHTML.includes('选择更新版本'), '文件名线索更新须明示参考依据并要求选版');
+        assert.ok(cards.innerHTML.includes('最新版本：v5.2.1') && cards.innerHTML.includes('已安装版本：v5.1.1'),
+            '目录最新与当前已安装版本独立显示；更新动作仍使用当前游戏的5.1.3候选');
         assert.ok(/仅忽略\s+v?5\.1\.3/.test(cards.innerHTML), '忽略本次说明必须引用当前游戏候选');
         assert.equal(notifications.at(-1).count, 1);
         assert.equal(notifications.at(-1).list[0].newVersion, '5.1.3', '管理页徽标与统计必须使用同一个候选版本');
         assert.equal(market.getUpdatableMods()[0].newVersion, '5.1.3', '全部更新和管理页直接更新列表必须使用同一个候选版本');
+        const missingModuleAlerts = [];
+        const originalAlert = sb.modHubAlert;
+        sb.modHubAlert = async message => { missingModuleAlerts.push(message); };
+        assert.equal(await market.promptDownloadMirrorAndInstall(mod), false, '参考更新缺少选版模块时不能退回旧下载入口');
+        assert.equal(await market.updateAllMods(), false, '全部更新缺少选版模块时不能直接下载参考版本');
+        assert.equal(missingModuleAlerts.length, 2);
+        assert.ok(missingModuleAlerts.every(message => message.includes('版本选择模块尚未就绪')));
+        sb.modHubAlert = originalAlert;
         await ignoreOnce.onclick();
         assert.equal(market.getIgnoredUpdates()[mod.name], '5.1.3', '忽略本次不能把另一游戏系列5.2.1一并忽略');
         assert.equal(market.getUpdatableMods().length, 0);
@@ -1324,9 +1920,9 @@ module.exports = async function() {
         const unlabelled = { ...mod, id: 'unlabelled-update' };
         assert.notEqual(market.checkModInstallStatus(unlabelled), 'update_available');
         await market.getModUpdateInfo(unlabelled).promise;
-        assert.equal(market.checkModInstallStatus(unlabelled), 'update_available', '单一系列未声明适配时仍应比较真实历史候选版本');
-        assert.equal(market.getModUpdateInfo(unlabelled).version, '5.2.1');
-        assert.equal(market.getModUpdateInfo(unlabelled).release.version, '5.2.1');
+        assert.notEqual(market.checkModInstallStatus(unlabelled), 'update_available', '单一系列数值新版不能代替当前游戏适配证据');
+        assert.equal(market.getModUpdateInfo(unlabelled).version, '');
+        assert.equal(market.getModUpdateInfo(unlabelled).release, null, '未知兼容不能回退到最高历史版本');
 
         versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
             fetchedAt: '2026-10-02T00:00:00Z', releases: [makeRelease('5.1.3', '0.5.11.9')] });
@@ -1370,6 +1966,12 @@ module.exports = async function() {
         assert.equal(market.checkModInstallStatus(mod), 'update_available');
         assert.equal(market.getModUpdateInfo(mod).version, '5.2.1');
         assert.ok(!market.getModUpdateInfo(mod).error);
+        sb.StartConfig.version = '';
+        assert.equal(market.getModUpdateInfo(mod).version, '', '无法识别当前游戏时不能使用目录最新版推断更新');
+        assert.notEqual(market.checkModInstallStatus(mod), 'update_available');
+        market.renderMarketCards();
+        assert.ok(/badge-installed"[^>]*>已安装<\/span>/.test(cards.innerHTML) && cards.innerHTML.includes('无法识别当前游戏版本，尚未检查适配更新')
+            && !cards.innerHTML.includes('已是最新') && !cards.innerHTML.includes('更新版本待核对'), '未知游戏保留已安装事实，并明确无法检查适配更新的原因');
     }
 
     // 发布标题为日期时，更新入口必须使用真实安装包版号，且不猜测多个产品系列。
@@ -1380,14 +1982,20 @@ module.exports = async function() {
         const market = sb.modHubMarket, versions = sb.modHubMarketVersions;
         let [mod] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ id: 'universal-combat-zed-fix', identityId: 'universal-combat-zed-fix',
             name: '战斗美化修复', bootNames: ['通用战斗美化-zed修复'], repositoryKeys: ['Zed660033/mysterious'],
-            githubUrl: 'https://github.com/Zed660033/mysterious', version: '9.26', versionSource: 'github',
+            githubUrl: 'https://github.com/Zed660033/mysterious', version: '9.26', releaseAssetVersion: '1.0.3', versionSource: 'github',
             releaseUrl: 'https://github.com/Zed660033/mysterious/releases/tag/9.26' }] });
         let localVersion = '1.0.3';
         const localMod = () => ({ name: '通用战斗美化-zed修复', bootJson: { name: '通用战斗美化-zed修复', version: localVersion, repository: mod.githubUrl } });
         sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [localMod()], getModListNameNoAlias: () => ['通用战斗美化-zed修复'] } });
         sb.modHubGetModInfo = name => name === '通用战斗美化-zed修复' ? localMod() : null;
+        sb.modSC2DataManager = { getDependenceChecker: () => ({ getInfiniteSemVerApi: () => ({
+            parseVersion: value => ({ version: { version: value.split('.').map(Number) } }),
+            parseRange: value => [{ range: value }],
+            satisfies: (version, ranges) => version.version.join('.') === ranges[0].range
+        }) }) };
         const makeRelease = names => ({ tagName: '9.26', name: '9.26', version: '9.26', publishedAt: '2026-09-26T00:00:00Z',
             htmlUrl: `${mod.githubUrl}/releases/tag/9.26`,
+            compatibility: { gameVersionRange: '0.5.11.9', evidenceUrl: `${mod.githubUrl}/releases/tag/9.26` },
             assets: names.map(name => ({ name, size: 100, downloadUrl: `${mod.githubUrl}/releases/download/9.26/${name}` })) });
         let releases = [makeRelease(['Z-outdate-UCB-zedfix-1.0.0.zip', 'Z-outdate-UCB-zedfix-1.0.1.zip',
             'Z-outdate-UCB-zedfix-1.0.2.zip', 'UCB-zedfix-1.0.3.zip'])];
@@ -1399,7 +2007,7 @@ module.exports = async function() {
         await market.getModUpdateInfo(mod).promise;
         const current = market.getModUpdateInfo(mod);
         assert.equal(current.version, '1.0.3', '目录9.26不能覆盖安装包中可识别的1.0.3版号');
-        assert.equal(current.release.assetName, 'UCB-zedfix-1.0.3.zip', '无游戏证据的单一系列也须保留真实发布候选');
+        assert.equal(current.release.assetName, 'UCB-zedfix-1.0.3.zip', '作者声明适配的单一系列须保留真实发布候选');
         assert.equal(current.release.version, '1.0.3');
         assert.equal(market.checkModInstallStatus(mod), 'up_to_date', '本地1.0.3不能因日期Tag9.26误报新版');
         assert.equal(market.getUpdatableMods().length, 0);
@@ -1415,8 +2023,8 @@ module.exports = async function() {
         const notifications = [];
         sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
         market.renderMarketCards();
-        assert.ok(cards.innerHTML.includes('发现新版') && /版本:\s+v?1\.0\.3/.test(cards.innerHTML), '卡片应展示安装包1.0.3版号');
-        assert.ok(!/版本:\s+v?9\.26/.test(cards.innerHTML), '卡片不能把发布日期当作模组版本');
+        assert.ok(cards.innerHTML.includes('发现新版') && cards.innerHTML.includes('最新版本：v1.0.3'), '卡片应采用目录核验安装包1.0.3版号');
+        assert.ok(!cards.innerHTML.includes('最新版本：v9.26'), '卡片不能把发布日期当作模组版本');
         assert.ok(/仅忽略\s+v?1\.0\.3/.test(cards.innerHTML));
         assert.equal(notifications.at(-1).list[0].newVersion, '1.0.3', '管理页徽标必须共用真实包版号');
         assert.equal(market.getUpdatableMods()[0].newVersion, '1.0.3', '管理页直接更新和全部更新必须共用真实包版号');
@@ -1430,7 +2038,14 @@ module.exports = async function() {
         const unordered = { ...mod, id: 'unlabelled-unordered' };
         market.checkModInstallStatus(unordered);
         await market.getModUpdateInfo(unordered).promise;
-        assert.equal(market.getModUpdateInfo(unordered).version, '1.0.4', '单一系列无适配证据时应按模组版号选择最高候选，不能按资产顺序选择');
+        assert.equal(market.getModUpdateInfo(unordered).version, '1.0.4', '单一系列声明适配时应按模组版号选择最高候选，不能按资产顺序选择');
+
+        releases = [{ ...makeRelease(['UCB-zedfix-1.0.4.zip']), compatibility: null }];
+        const unknownCompatibility = { ...mod, id: 'date-tag-unknown-compatibility' };
+        market.checkModInstallStatus(unknownCompatibility);
+        await market.getModUpdateInfo(unknownCompatibility).promise;
+        assert.equal(market.getModUpdateInfo(unknownCompatibility).version, '', '即使识别到真实包版号，没有适配证据也不能推断更新目标');
+        assert.notEqual(market.checkModInstallStatus(unknownCompatibility), 'update_available');
 
         releases = [makeRelease(['UCB-zedfix-EN-1.0.3.zip', 'UCB-zedfix-CN-1.0.4.zip'])];
         const ambiguous = { ...mod, id: 'unlabelled-multiple-series' };
@@ -1514,6 +2129,22 @@ module.exports = async function() {
         };
         assert.equal(market.checkModInstallStatus(deadWithOtherUrl, []), 'external_only', '已删库但有外部链接未安装模组必须返回 external_only');
 
+        // 当前仓库、正式发布与附件均不可访问时，历史可信记录不能让新玩家默认下载安装。
+        const modCenterSource = 'https://github.com/102326/DoL-Mod-Center/releases/download/v2.3.2/DoLModCenter-2.3.2.mod.zip';
+        const modCenter = { id: 'dol-mod-center', identityId: 'dol-mod-center', name: 'DoL Mod Center',
+            bootNames: ['DoLModCenter'], repositoryKeys: ['102326/dol-mod-center'], catalogSource: 'community',
+            sourcePlatform: 'github', autoInstall: true, sourceUrl: modCenterSource, githubUrl: modCenterSource,
+            version: '2.3.2', versionSource: 'github', releaseUrl: 'https://github.com/102326/DoL-Mod-Center/releases/tag/v2.3.2' };
+        assert.ok(market.isDeadRepo(modCenter.githubUrl, modCenter), '没有本地失效记录的新玩家也须识别当前不可访问仓库');
+        assert.ok(market.isDeadRepo('https://github.com/102326/DOL-MOD-CENTER/releases/tag/v2.3.2'), '失效仓库键须沿用大小写归一化');
+        assert.ok(market.hasCommunityReleaseSource(modCenter), '历史安装资格仍保留，失效保护不改目录和包记录');
+        assert.equal(market.checkModInstallStatus(modCenter, []), 'unavailable', '当前失效仓库不能显示默认下载状态');
+        assert.equal(market.isBatchInstallEligible(modCenter, []), false, '当前失效仓库不能加入批量安装');
+        assert.equal(market.checkModInstallStatus({ ...modCenter, otherUrl: 'https://discord.com/channels/1103864219620884560/1553436520944238612' }, []),
+            'external_only', '关闭失效隐藏后仍保留原帖人工核对入口');
+        assert.equal(market.checkModInstallStatus(modCenter, [{ name: 'DoLModCenter', version: '2.3.1' }]),
+            'up_to_date', '当前失效仓库不能凭历史更高版本向已安装玩家推荐更新');
+
         // 12.3 无有效 Release 产物且版本来源为 Wiki 时，不误报更新
         const wikiOnlyMod = {
             name: '纯Wiki旧版本模组',
@@ -1593,6 +2224,12 @@ module.exports = async function() {
         const cleanedList = market.getDeadRepos();
         assert.ok(!cleanedList.includes('dawalizhang/-'), '活跃白名单仓库必须自动从失效存储中清洗剔除');
         assert.ok(cleanedList.includes('kanna-hanabi/wovenrealm'), '真正失效的仓库必须继续保留');
+
+        assert.ok(cleanedList.includes('102326/dol-mod-center'), '新增已核验失效仓库仍沿用原名单机制');
+        market.markRepoAsDead('https://github.com/ModHubTests/TransientSource');
+        assert.ok(market.isDeadRepo('modhubtests/transientsource'), '临时失效检测仍须登记仓库');
+        market.unmarkRepoAsDead('https://github.com/ModHubTests/TransientSource');
+        assert.equal(market.isDeadRepo('modhubtests/transientsource'), false, '未列入固定失效名单的仓库恢复后仍可解除标记');
 
         // 12.10 本地安装 GuideToMe 等模组被市场准确识别为已安装
         const mouthMod = {
@@ -1694,7 +2331,7 @@ module.exports = async function() {
             'ImageLoaderHook 在模组市场反向检索中必须返回 null，不得误匹配到 D.O.L.I'
         );
 
-        // 当本地真正安装了 DOLI 时，必须能准确匹配并判定为已是最新
+        // 同一包内版本可能对应不同发布内容，不能仅凭作者漏改版本号认定最新。
         const realDoliProfiles = [
             {
                 name: 'DOLI',
@@ -1707,8 +2344,8 @@ module.exports = async function() {
         ];
         assert.equal(
             market.checkModInstallStatus(doliMarketMod, realDoliProfiles),
-            'up_to_date',
-            '本地真正安装 DOLI 时，市场中的 D.O.L.I 必须准确识别为 up_to_date'
+            'update_available',
+            'DOLI 0.2.2 未有包体一致证据时，不能冒认为 0.2.3 已安装'
         );
         const realMatchedMarket = market.findMarketModByLocalName('DOLI', [doliMarketMod]);
         assert.ok(

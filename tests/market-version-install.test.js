@@ -229,6 +229,63 @@ function useNativeDependencyRanges(f) {
 }
 
 module.exports = async function () {
+    // 429 登记附件恢复默认选择，但须确认适配风险；SHA 和大小完整交给包体预检。
+    {
+        const id = 'RegisteredSnapshot';
+        const f = fixture([{ id, boot: { name: id, version: '1.0.19' } }]);
+        const url = `https://github.com/ModHubTests/${id}/releases/download/v1.0.20/${id}-v1.0.20.zip`;
+        const tuple = { sourceUrl: url, sha256: 'a'.repeat(64), bootName: id, version: '1.0.19', size: 123,
+            verifiedAt: '2026-10-04T04:39:46.309327+00:00' };
+        const mod = f.mods[0];
+        Object.assign(mod, { githubUrl: url, verifiedReleaseAsset: tuple });
+        for (const key of ['getAssetSeries', 'getAssetVersionParts', 'getAssetGameVersion', 'buildReleaseAssetPlan',
+            'getMatchingCompanionAssets', 'getMatchingOptionalAssets', 'getAssetRole']) f.sb.modHubMarket[key] = f.runtimeMarket[key];
+        const history = { schemaVersion: 1, id, sourceUrl: url, page: 1, hasMore: false, fetchedAt: tuple.verifiedAt,
+            verifiedAt: tuple.verifiedAt, stale: true, snapshotSource: 'verified-package',
+            releases: [{ tagName: 'v1.0.20', name: 'v1.0.20', version: tuple.version, versionSource: 'verified-boot', publishedAt: null,
+                assets: [{ name: `${id}-v1.0.20.zip`, downloadUrl: url, digest: `sha256:${tuple.sha256}`, size: tuple.size,
+                    bootName: id, version: tuple.version, versionSource: 'verified-boot' }] }] };
+        f.sb.modHubMarketVersions.fetchReleases = async () => history;
+        f.sb.modHubMarketVersions.buildCandidates = f.actualVersions.buildCandidates;
+        let selectionConfirmed = false, riskConfirmed = false, preparedCount = 0;
+        f.sb.modHubConfirm = async options => {
+            f.prompts.push(options);
+            await f.renderDialog(options);
+            if (options.title === `选择【${id}】版本`) {
+                const candidates = f.actualVersions.buildCandidates(mod, history);
+                assert.equal(candidates.length, 1);
+                assert.equal(options.customResult().selectedKey, candidates[0].candidateKey, '已登记唯一主包恢复自动勾选');
+                assert.equal(options.customResult().manual, false, '自动勾选不能被记为人工选版');
+                assert.equal(options.canConfirm(), true);
+                assert.ok(options.renderedHtml.includes('发布日期未知') && options.renderedHtml.includes(`获取时间：${tuple.verifiedAt}`),
+                    '原核验时间只用于快照获取提示，不生成 GitHub 发布时间');
+                assert.ok(options.renderedHtml.includes('安装前需确认适配风险'));
+                selectionConfirmed = true;
+                return options.customResult();
+            }
+            if (options.title === '确认版本风险') {
+                assert.match(options.message, /已默认选择最新版本/);
+                riskConfirmed = true;
+            }
+            return true;
+        };
+        const download = f.sb.modHubMarket.downloadAndInstallMod;
+        f.sb.modHubMarket.downloadAndInstallMod = async (target, mirror, options) => {
+            if (options.prepareOnly) {
+                assert.equal(selectionConfirmed && riskConfirmed, true, '未确认选版及回退风险不得提前下载');
+                assert.equal(options.releaseInfo.version, tuple.version);
+                assert.equal(options.releaseInfo.assets.length, 1);
+                assert.equal(options.releaseInfo.assets[0].downloadUrl, tuple.sourceUrl);
+                assert.equal(options.releaseInfo.assets[0].digest, `sha256:${tuple.sha256}`);
+                assert.equal(options.releaseInfo.assets[0].size, tuple.size);
+                preparedCount++;
+            }
+            return download(target, mirror, options);
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(mod), true);
+        assert.equal(preparedCount, 1);
+        assert.equal(f.profiles.get(id).version, tuple.version, '安装后采用预检回读的真实 boot 版本');
+    }
     {
         const id = 'CardArea';
         const candidate = version => ({ candidateKey: `${id}:${version}`, seriesKey: id, version,
@@ -331,9 +388,11 @@ module.exports = async function () {
         f.sb.modHubConfirm = async options => {
             const ui = groupedChoiceDialog(f.sb);
             await options.onRender(ui.dialog);
-            assert.equal(options.customResult().selectedKey, 'EvidenceUpdate:new', '已有本地版本时必须默认当前游戏的最高模组版本，不能被旧版声明证据挤掉');
+            assert.equal(options.customResult().selectedKey, 'EvidenceUpdate:new', '默认当前游戏的最高模组版本，不能被旧版声明证据挤掉');
             assert.equal(ui.radios.find(input => input.checked).value, 'EvidenceUpdate:new');
             assert.equal(ui.radios.find(input => input.value === 'EvidenceUpdate:old').checked, false);
+            assert.ok(ui.area.innerHTML.includes('参考推荐'), '文件名线索仍须明示证据性质');
+            assert.ok(ui.area.innerHTML.includes('已根据安装包名称默认选择匹配当前游戏的最新版本'), '默认选择原因应直接显示');
             assert.equal(options.canConfirm(), true);
             return false;
         };
@@ -655,6 +714,7 @@ module.exports = async function () {
         for (const compatibility of [
             { status: 'unknown', evidence: 'unknown' },
             { status: 'incompatible', evidence: 'declaration' },
+            { status: 'unknown', evidence: 'filename', targetGameVersion: '0.5.0.0' },
             { status: 'unknown', evidence: 'filename', targetGameVersion: '0.4.0.0', referenceMismatch: true },
             { status: 'unknown', evidence: 'declaration', gameVersionRange: '>=0.5.0.0', unknownGame: true }
         ]) {
@@ -664,17 +724,29 @@ module.exports = async function () {
             if (compatibility.unknownGame) f.sb.StartConfig.version = '';
             const confirm = f.sb.modHubConfirm;
             let risk;
+            const filenameMatch = compatibility.evidence === 'filename' && !compatibility.referenceMismatch;
             f.sb.modHubConfirm = async options => {
                 if (options.title === '确认版本风险') { risk = options; return false; }
+                if (filenameMatch && options.title === '请确认安装计划') return false;
                 return confirm(options);
             };
             const result = batch ? await f.sb.modHubMarketInstaller.installBatch(f.mods) : await f.sb.modHubMarketInstaller.install(f.mods[0]);
             assert.equal(result, false);
-            assert.ok(risk && risk.message.includes('已默认选择最新版本'), '回退默认选择必须在安装前解释原因并确认风险');
             const choicePrompt = f.prompts.find(prompt => prompt.title.startsWith('选择【') || prompt.title === '选择批量安装版本');
-            assert.ok(choicePrompt.renderedHtml.includes('已默认选择最新版本'));
-            assert.ok(!choicePrompt.renderedHtml.includes('推荐，作者声明适配'), '回退默认选择不能伪装成作者声明匹配');
-            assert.deepEqual(f.events, [], '拒绝回退风险时不得下载、导入或重载');
+            assert.ok(!choicePrompt.renderedHtml.includes('推荐，作者声明适配'), '未知或不兼容候选不能伪装成作者声明匹配');
+            if (compatibility.status === 'incompatible') {
+                assert.equal(risk, undefined, '明确不适配的候选保持空选，不提前进入风险确认');
+                assert.equal(choicePrompt.canConfirm(), false);
+            } else if (filenameMatch) {
+                assert.equal(risk, undefined);
+                assert.equal(choicePrompt.canConfirm(), true);
+                assert.ok(choicePrompt.renderedHtml.includes('已根据安装包名称默认选择匹配当前游戏的最新版本'));
+            } else {
+                assert.ok(risk && risk.message.includes('已默认选择最新版本'), '回退默认选择必须在安装前解释原因并确认风险');
+                assert.ok(choicePrompt.renderedHtml.includes('已默认选择最新版本'));
+                assert.equal(choicePrompt.canConfirm(), true);
+            }
+            assert.deepEqual(f.events, [], '拒绝计划或回退风险时不得下载、导入或重载');
         }
     }
     {
@@ -1129,8 +1201,9 @@ module.exports = async function () {
         const cases = [
             { id: 'LatestUnknown', candidates: [candidate('LatestUnknown', '1.0'), candidate('LatestUnknown', '2.0')], expected: '2.0' },
             { id: 'PreferSupported', candidates: [candidate('PreferSupported', '9.0'), candidate('PreferSupported', '1.0', { status: 'compatible', evidence: 'declaration' })], expected: '1.0' },
-            { id: 'OnlyMismatch', candidates: [candidate('OnlyMismatch', '2.0', { status: 'incompatible', evidence: 'declaration' })], expected: '2.0' },
+            { id: 'OnlyMismatch', candidates: [candidate('OnlyMismatch', '2.0', { status: 'incompatible', evidence: 'declaration' })] },
             { id: 'FilenameMismatch', candidates: [candidate('FilenameMismatch', '2.0', { status: 'unknown', evidence: 'filename', referenceMismatch: true })], expected: '2.0' },
+            { id: 'FilenameMatch', candidates: [candidate('FilenameMatch', '2.0', { status: 'unknown', evidence: 'filename', targetGameVersion: '0.5.0.0' })], expected: '2.0' },
             { id: 'Languages', candidates: [candidate('Languages', '1.0', undefined, 'CN'), candidate('Languages', '2.0', undefined, 'EN')] },
             { id: 'Models', candidates: [candidate('Models', '1.0', undefined, 'female'), candidate('Models', '2.0', undefined, 'male')] },
             { id: 'UnknownSeries', candidates: [candidate('UnknownSeries', '1.0', undefined, '')] },
@@ -1144,8 +1217,8 @@ module.exports = async function () {
             f.sb.modHubConfirm = async options => {
                 await f.renderDialog(options);
                 const selected = options.customResult();
-                assert.equal(selected[0]?.release.version, entry.expected, '批量默认最新版必须保留适配优先、歧义和不降级边界');
-                if (entry.expected) assert.equal(selected[0].manual, false, '自动回退的未知版本不能被记为人工选版');
+                assert.equal(selected[0]?.release.version, entry.expected, '批量默认最新版保留适配优先、歧义和不降级边界');
+                if (entry.expected) assert.equal(selected[0].manual, false, '自动选择与人工选版须区分');
                 assert.equal(options.canConfirm(), Boolean(entry.expected));
                 return false;
             };
@@ -1154,6 +1227,7 @@ module.exports = async function () {
         }
         const definitions = [
             { id: 'UpdateUnknown', candidates: [candidate('UpdateUnknown', '2.0')] },
+            { id: 'UpdateReference', candidates: [candidate('UpdateReference', '2.0', { status: 'unknown', evidence: 'filename', targetGameVersion: '0.5.0.0' })] },
             { id: 'UpdateEqual', candidates: [candidate('UpdateEqual', '1.0', { status: 'compatible', evidence: 'declaration' })] },
             { id: 'UpdateProven', candidates: [candidate('UpdateProven', '2.0', { status: 'compatible', evidence: 'declaration' })] },
         ];
@@ -1161,15 +1235,15 @@ module.exports = async function () {
         f.sb.modHubMarketVersions.rankCandidates = f.actualVersions.rankCandidates;
         f.sb.modHubConfirm = async options => {
             await f.renderDialog(options);
-            assert.deepEqual(Array.from(options.customResult(), item => item.mod.id), ['UpdateProven'], '全部更新只能预选高于本地且有适配依据的版本');
+            assert.deepEqual(Array.from(options.customResult(), item => item.mod.id), ['UpdateReference', 'UpdateProven'], '全部更新预选当前游戏匹配的更高版本，无匹配证据仍空选');
             return false;
         };
         assert.equal(await f.sb.modHubMarketInstaller.installBatch(f.mods, { updateOnly: true }), false);
-        const downgrade = fixture([{ id: 'UnknownRealDowngrade', candidates: [candidate('UnknownRealDowngrade', '2.0')],
+        const downgrade = fixture([{ id: 'UnknownRealDowngrade', candidates: [candidate('UnknownRealDowngrade', '2.0', { status: 'compatible', evidence: 'declaration' })],
             boot: { name: 'UnknownRealDowngrade', version: '0.9' } }], [{ name: 'UnknownRealDowngrade', version: '1.0' }]);
         downgrade.sb.modHubMarketVersions.rankCandidates = downgrade.actualVersions.rankCandidates;
         await downgrade.sb.modHubMarketInstaller.installBatch(downgrade.mods);
-        assert.deepEqual(downgrade.events, ['prepare:UnknownRealDowngrade'], '自动回退默认包的真实版本低于本地时仍须阻止自动降级');
+        assert.deepEqual(downgrade.events, ['prepare:UnknownRealDowngrade'], '声明适配默认包的真实版本低于本地时仍须阻止自动降级');
         assert.equal(downgrade.profiles.get('UnknownRealDowngrade').version, '1.0');
     }
     {
@@ -1297,8 +1371,10 @@ module.exports = async function () {
     }
     {
         const f = fixture([{ id: 'Unknown', compatibility: 'unknown' }]);
-        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), true, '兼容性未知时应默认最新并在确认风险后继续核对安装包');
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), true, '兼容性未知时默认最新，并在确认风险后核对安装包');
+        assert.ok(f.prompts[0].renderedHtml.includes('适配待核对') && f.prompts[0].renderedHtml.includes('已默认选择最新版本'));
         assert.ok(f.prompts.some(options => options.title === '确认版本风险' && options.message.includes('默认选择最新版本')));
+        assert.ok(f.prompts.some(options => options.title === '请确认安装计划' && options.trustedMessageHtml.includes('是否支持当前游戏待确认')));
         assert.deepEqual(f.events, ['prepare:Unknown', 'install:Unknown', 'reload']);
     }
     {

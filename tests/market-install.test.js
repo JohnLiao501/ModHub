@@ -922,6 +922,18 @@ module.exports = async function() {
         assert.ok(!profile.displayNames.includes('maplebirch') && !profile.displayNames.includes('秋枫白桦框架'), '简易框架的市场身份不能混入秋枫名称');
         assert.ok(!profile.repositoryKeys.includes('maplebirchleaf/scml-dol-maplebirchframework'), '简易框架不能携带秋枫仓库身份');
         const simpleMarket = { id: 'simple-framework', name: '简易框架', version: '2.0.6', githubUrl: simpleBoot.repository };
+        sb.StartConfig = { version: '0.5.12.13' };
+        sb.modSC2DataManager = { ...sb.modSC2DataManager, getDependenceChecker: () => ({ getInfiniteSemVerApi: () => ({
+            parseVersion: value => ({ version: { version: value.split('.').map(Number) } }),
+            parseRange: value => [{ range: value }],
+            satisfies: (version, ranges) => version.version.join('.') === ranges[0].range
+        }) }) };
+        sb.modHubMarketVersions.fetchReleases = async () => ({ page: 1, hasMore: false, releases: [{ tagName: 'v2.0.6',
+            htmlUrl: `${simpleBoot.repository}/releases/tag/v2.0.6`,
+            compatibility: { gameVersionRange: '0.5.12.13' },
+            assets: [{ name: 'SimpleFramework-v2.0.6.zip', size: 100, downloadUrl: `${simpleBoot.repository}/releases/download/v2.0.6/SimpleFramework-v2.0.6.zip` }] }] });
+        sb.modHubMarket.checkModInstallStatus(simpleMarket, sb.modHubMarket.getLocalInstalledProfiles());
+        await sb.modHubMarket.getModUpdateInfo(simpleMarket).promise;
         assert.equal(sb.modHubMarket.checkModInstallStatus(simpleMarket, sb.modHubMarket.getLocalInstalledProfiles()), 'update_available', '市场必须依据真实 2.0.5 识别 2.0.6 更新，不能被错误 5.0.4 压住');
         assert.equal(sb.modHubGetModInfo('maplebirch').bootJson.version, '5.0.4', '修复简易框架不能改写真实秋枫档案');
 

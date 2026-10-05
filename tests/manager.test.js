@@ -82,13 +82,13 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.2.3', 'boot.json 版本号必须为 1.2.3');
+    assert.equal(bootJson.version, '1.3.0', 'boot.json 版本号必须为 1.3.0');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
         'javascript/modhub-manager.js',
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
-        'javascript/modhub-log.js', 'javascript/modhub-market.js',
+        'javascript/modhub-log.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
     ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志与市场');
     assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '弹窗、面板与恢复引擎必须在业务脚本之前注入');
@@ -750,9 +750,25 @@ module.exports = async function() {
         assert.equal(typeof sb.modHubConfirm, 'function', '必须封装游戏原生暗黑确认框');
         assert.equal(typeof sb.modHubAlert, 'function', '必须封装游戏原生暗黑提示框');
         const css = readStyles();
+        const backdropStyle = css.match(/^\.modhub-modal-backdrop\s*\{([^}]+)\}/m)[1];
+        const dialogStyle = css.match(/^\.modhub-modal-dialog\s*\{([^}]+)\}/m)[1];
+        const headerStyle = css.match(/^\.modhub-modal-header\s*\{([^}]+)\}/m)[1];
+        const bodyStyle = css.match(/^\.modhub-modal-body\s*\{([^}]+)\}/m)[1];
         const footerStyle = css.match(/^\.modhub-modal-footer\s*\{([^}]+)\}/m)[1];
         const buttonStyle = css.match(/^\.modhub-modal-footer \.macro-button\s*\{([^}]+)\}/m)[1];
         assert.match(footerStyle, /flex-wrap:\s*wrap/, '公共弹窗按钮不足一行时必须换行');
+        assert.match(backdropStyle, /height:\s*100dvh/, '弹窗遮罩必须跟随手机浏览器可见视口高度');
+        assert.match(backdropStyle, /padding-bottom:\s*calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\)/, '所有公共弹窗必须保留底部状态栏及设备安全区边距');
+        assert.match(dialogStyle, /max-height:\s*calc\(100dvh - 76px - env\(safe-area-inset-bottom, 0px\)\)/, '长正文不能把公共弹窗撑出动态视口或底部安全边距');
+        assert.match(headerStyle, /flex-shrink:\s*0/, '长安装清单不能压缩标题栏');
+        assert.match(footerStyle, /flex-shrink:\s*0/, '长安装清单不能压缩确认和取消按钮');
+        for (const rule of [/min-height:\s*0/, /overflow-y:\s*auto/, /overscroll-behavior:\s*contain/, /-webkit-overflow-scrolling:\s*touch/]) {
+            assert.match(bodyStyle, rule, '长正文必须在剩余空间内独立滚动并支持触摸');
+        }
+        assert.match(css, /\.modhub-modal-backdrop:has\(> \.modhub-install-dialog\)\s*\{[^}]*padding-bottom:\s*calc\(60px \+ env\(safe-area-inset-bottom, 0px\)\)/, '安装弹窗底部必须避开游戏状态栏和设备安全区');
+        assert.match(css, /\.modhub-install-dialog\s*\{[^}]*max-height:\s*calc\(100dvh - 76px - env\(safe-area-inset-bottom, 0px\)\)/, '安装弹窗高度必须扣除实际外部安全边距');
+        assert.doesNotMatch(css.match(/^\.modhub-version-dialog\s*\{([^}]+)\}/m)[1], /max-height/, '选版弹窗不能覆盖安装弹窗的安全区高度限制');
+        assert.match(css, /@media\s*\(max-height:\s*480px\)\s*\{[^@]*\.modhub-modal-body,\s*\.modhub-install-dialog \.modhub-modal-body\s*\{\s*padding:\s*8px 12px/, '低高度和较大字号须缩减正文留白，让标题与按钮留在安全视口内');
         for (const rule of [/white-space:\s*normal\s*!important/, /width:\s*auto\s*!important/, /height:\s*auto\s*!important/, /max-width:\s*100%/, /overflow-wrap:\s*anywhere/]) {
             assert.match(buttonStyle, rule, '公共弹窗长标签必须在按钮内完整换行，不受原生固定高度限制');
         }
@@ -762,6 +778,7 @@ module.exports = async function() {
         const overlay = sb.document.body.children.find(el => el.id === 'modHubConfirmOverlay');
         assert.ok(overlay, '确认框遮罩必须挂载到 body');
         const dialog = overlay.children[0];
+        assert.match(dialog.innerHTML, /class="modhub-modal-body" tabindex="0" role="region" aria-label="提示内容"/, '长正文必须能通过键盘聚焦并滚动');
         dialog.querySelector('.modhub-modal-btn-confirm').click();
         assert.equal(await confirmPromise, true, '点击确认必须回传 true');
         // 9.2 取消按钮交互

@@ -917,8 +917,6 @@
 .modhub-version-dialog {
     width: 100%;
     min-width: 0;
-    max-height: calc(100vh - 32px);
-    max-height: calc(100dvh - 32px);
 }
 
 .modhub-version-dialog .modhub-modal-body {
@@ -928,7 +926,6 @@
 
 .modhub-version-dialog .modhub-modal-footer {
     flex-shrink: 0;
-    padding-bottom: max(60px, env(safe-area-inset-bottom, 0px));
 }
 
 .modhub-version-list {
@@ -1333,4 +1330,334 @@
     .modhub-market-search-row > button {
         width: 100% !important;
     }
+}
+/* 来源资料集中在独立面板，原文使用局部阅读区，不拉长市场卡片。 */
+.modhub-acquisition {
+    min-width: 0;
+    padding: 2px;
+    color: var(--200, #ccc);
+    font-size: 0.86em;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
+    user-select: text;
+}
+
+.modhub-acquisition p,
+.modhub-acquisition dl,
+.modhub-acquisition dt,
+.modhub-acquisition dd {
+    margin: 0 !important;
+    font-size: inherit !important;
+    line-height: inherit !important;
+    min-width: 0;
+    max-width: 100%;
+    text-align: left;
+    overflow-wrap: anywhere;
+}
+
+.modhub-acquisition p {
+    padding: 0;
+    color: inherit !important;
+}
+
+.modhub-acquisition .modhub-detail-section + .modhub-detail-section {
+    margin-top: 14px;
+}
+
+.modhub-acquisition .modhub-detail-heading,
+.modhub-acquisition .modhub-detail-package-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    min-width: 0;
+}
+
+.modhub-acquisition .modhub-detail-heading {
+    color: var(--gold, #d4af37);
+    margin-bottom: 6px;
+    font-weight: bold;
+}
+
+.modhub-acquisition .modhub-detail-heading > span,
+.modhub-acquisition .modhub-detail-version,
+.modhub-acquisition .modhub-detail-status,
+.modhub-acquisition .modhub-detail-hint,
+.modhub-acquisition .modhub-detail-label {
+    color: var(--300, #aaa);
+    font-weight: normal;
+}
+
+.modhub-acquisition .modhub-acquisition-source,
+.modhub-acquisition .modhub-acquisition-package {
+    display: grid;
+    gap: 7px;
+    min-width: 0;
+    padding: 10px;
+    background: var(--850, #181818);
+    border: 1px solid var(--750, #333);
+    border-radius: 3px;
+}
+
+.modhub-acquisition .modhub-acquisition-source + .modhub-acquisition-source,
+.modhub-acquisition .modhub-acquisition-package + .modhub-acquisition-package {
+    margin-top: 7px;
+}
+
+.modhub-acquisition .modhub-detail-package-heading > strong {
+    flex: 1 1 160px;
+    min-width: 0;
+    font-size: inherit;
+    color: var(--100, #ddd);
+    overflow-wrap: anywhere;
+}
+
+.modhub-acquisition .modhub-detail-status {
+    font-size: 0.9em;
+}
+
+.modhub-acquisition .modhub-detail-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    min-width: 0;
+}
+
+.modhub-acquisition .modhub-detail-links:empty {
+    display: none;
+}
+
+.modhub-acquisition .modhub-detail-links > a {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 32px;
+    max-width: 100%;
+    padding: 4px 9px;
+    margin: 0 !important;
+    box-sizing: border-box;
+    background: var(--800, #222);
+    border: 1px solid var(--650, #555);
+    border-radius: 3px;
+    color: var(--200, #ccc) !important;
+    font-size: inherit !important;
+    line-height: 1.4 !important;
+    text-decoration: none !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    transition: none;
+}
+
+.modhub-acquisition .modhub-detail-links > a:hover,
+.modhub-acquisition .modhub-detail-links > a:focus-visible {
+    border-color: var(--gold, #d4af37);
+    color: var(--gold, #d4af37) !important;
+}
+
+.modhub-acquisition .modhub-detail-facts {
+    display: grid;
+    gap: 3px;
+}
+
+.modhub-acquisition .modhub-detail-facts > div {
+    display: flex;
+    align-items: baseline;
+    min-width: 0;
+}
+
+.modhub-acquisition .modhub-detail-facts dt {
+    flex: 0 0 auto;
+    color: var(--300, #aaa);
+}
+
+.modhub-acquisition .modhub-detail-facts dd {
+    flex: 1 1 auto;
+    white-space: pre-wrap;
+}
+
+.modhub-acquisition .modhub-detail-note {
+    min-width: 0;
+}
+
+.modhub-acquisition p.modhub-detail-readme {
+    max-height: 9em;
+    overflow: auto;
+    padding: 6px 8px;
+    margin-top: 4px !important;
+    background: var(--900, #111);
+    border-left: 2px solid var(--650, #555);
+    white-space: pre-wrap;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+
+.modhub-acquisition .modhub-detail-footer {
+    padding: 9px 2px 2px;
+    margin-top: 10px;
+    color: var(--300, #aaa);
+    font-size: 0.9em;
+    border-top: 1px solid var(--750, #333);
+}
+
+.modhub-spell-detail p {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.modhub-spell-body {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-height: 38vh;
+    overflow: auto;
+    padding: 10px;
+    background: var(--900);
+    border: 1px solid var(--600);
+    color: var(--000);
+    user-select: text;
+}
+
+.modhub-acquisition-dialog .modhub-modal-body,
+.modhub-spell-dialog .modhub-modal-body {
+    min-height: 0;
+    max-height: 65vh;
+    overflow-y: auto;
+}
+
+.modhub-acquisition-dialog .modhub-acquisition {
+    max-height: 55vh;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+}
+
+.modhub-acquisition-dialog .modhub-modal-title {
+    color: var(--gold, #d4af37) !important;
+}
+
+.modhub-acquisition:focus-visible,
+.modhub-acquisition .modhub-detail-readme:focus-visible,
+.modhub-acquisition .modhub-detail-links > a:focus-visible {
+    outline: 2px solid var(--gold, #d4af37);
+    outline-offset: 2px;
+}
+
+#modHubMarketBatchToolbar[hidden] { display: none !important; }
+
+/* 内容板块始终可见；咒语不显示模组安装与状态工具。 */
+.modhub-market-sections {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+    min-width: 0;
+}
+
+.modhub-market-sections .modhub-market-section-button {
+    flex: 1 1 0;
+    min-width: 0 !important;
+    width: auto !important;
+    min-height: 36px !important;
+    padding: 6px 8px;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    background: var(--850, #181818);
+    color: var(--200, #ccc);
+    border: 1px solid var(--600, #666);
+}
+
+.modhub-market-section-button.is-selected {
+    color: var(--gold, #d4af37);
+    border-color: var(--gold, #d4af37);
+    background: var(--800, #222);
+}
+
+.modhub-market-section-note {
+    margin: 0 0 10px;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+#modHubMarketStats[hidden],
+#modHubMarketFilterFooter[hidden],
+#modHubMarketSpellNote[hidden],
+.modhub-market-selects select[hidden] {
+    display: none !important;
+}
+
+.modhub-market-source-bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0 6px;
+    min-width: 0;
+    min-height: 32px;
+    margin: 4px 0 8px;
+    padding: 0;
+    font-size: 0.82em;
+    line-height: 1.4;
+    color: var(--300, #aaa);
+    overflow-wrap: anywhere;
+}
+
+.modhub-market-source-summary {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-market-source-bar .modhub-market-source-link,
+.modhub-market-source-bar .modhub-market-acquisition-link {
+    display: inline-flex;
+    align-items: center;
+    flex: 0 1 auto;
+    min-width: 0;
+    min-height: 32px !important;
+    max-width: 100%;
+    padding: 4px 2px !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+    background: transparent !important;
+    border: 0 !important;
+    border-radius: 0;
+    color: var(--link, #5888dd) !important;
+    font: inherit !important;
+    line-height: 1.4 !important;
+    text-decoration: none !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    transition: none;
+}
+
+.modhub-market-source-bar .modhub-market-source-link:hover,
+.modhub-market-source-bar .modhub-market-source-link:focus-visible,
+.modhub-market-source-bar .modhub-market-acquisition-link:hover,
+.modhub-market-source-bar .modhub-market-acquisition-link:focus-visible {
+    color: var(--link-hover, #8af) !important;
+    text-decoration: underline !important;
+    text-underline-offset: 3px;
+}
+
+.modhub-market-versions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px 8px;
+    min-width: 0;
+}
+
+.modhub-market-versions > span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-market-source-bar .modhub-market-source-link:focus-visible,
+.modhub-market-source-bar .modhub-market-acquisition-link:focus-visible {
+    outline: 2px solid var(--link-hover, #8af);
+    outline-offset: 2px;
+}
+
+.modhub-market-section-button:focus-visible {
+    outline: 2px solid var(--gold, #d4af37);
+    outline-offset: 2px;
 }
