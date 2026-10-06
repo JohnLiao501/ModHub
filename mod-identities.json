@@ -53,13 +53,23 @@
         "AutoClean"
       ],
       "aliases": [
-        "自动清洁"
+        "自动清洁",
+        "自动清洗",
+        "自动清理",
+        "AutoClean"
       ],
-      "repositories": [],
+      "repositories": [
+        "DarkSoULs"
+      ],
       "category": "界面与便利",
       "tags": [
-        "自动化"
-      ]
+        "自动化",
+        "便利"
+      ],
+      "repositoryKeys": [
+        "3naka/DarkSoULs"
+      ],
+      "sharedRepository": true
     },
     {
       "id": "auto-school",
@@ -68,14 +78,23 @@
         "AutoSchool"
       ],
       "aliases": [
-        "自动上学"
+        "自动上学",
+        "自动上课",
+        "AutoSchool"
       ],
-      "repositories": [],
+      "repositories": [
+        "DarkSoULs"
+      ],
       "category": "界面与便利",
       "tags": [
         "自动化",
-        "学校"
-      ]
+        "学校",
+        "便利"
+      ],
+      "repositoryKeys": [
+        "3naka/DarkSoULs"
+      ],
+      "sharedRepository": true
     },
     {
       "id": "dol-optimization",
@@ -200,8 +219,18 @@
       "bootNames": [
         "GameOriginalImagePack"
       ],
-      "aliases": [],
-      "repositories": [],
+      "aliases": [
+        "Degrees-of-Lewdity-Chinese-Localization",
+        "原版图像包",
+        "原版图包"
+      ],
+      "repositories": [
+        "Degrees-of-Lewdity-Chinese-Localization"
+      ],
+      "repositoryKeys": [
+        "Eltirosto/Degrees-of-Lewdity-Chinese-Localization"
+      ],
+      "sharedRepository": true,
       "category": "外观与资源",
       "tags": [
         "图像"
@@ -321,6 +350,31 @@
         "社交",
         "剧情",
         "NPC"
+      ],
+      "sharedRepository": true
+    },
+    {
+      "id": "smartphone-omega",
+      "name": "万能的智能手机 OmegaΩ",
+      "bootNames": [
+        "SmartPhone Omega"
+      ],
+      "aliases": [
+        "万能的智能手机 Omega",
+        "万能的智能手机 OmegaΩ",
+        "万能的智能手机 简化版",
+        "SmartPhone Omega"
+      ],
+      "repositories": [
+        "Degrees-of-Lewdity-DolSmartPhone"
+      ],
+      "repositoryKeys": [
+        "ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone"
+      ],
+      "sharedRepository": true,
+      "category": "外观与资源",
+      "tags": [
+        "服装"
       ]
     },
     {
@@ -486,6 +540,14 @@
       "tags": [
         "成长",
         "互动"
+      ],
+      "releaseCompatibility": [
+        {
+          "releaseTag": "v1.8",
+          "assetName": "BabyHawk.mod.zip",
+          "gameVersionRange": "=0.5.12.13",
+          "evidenceUrl": "https://github.com/koooooiCarp/DOL-BabyHawk-Mod/releases/tag/v1.8"
+        }
       ]
     },
     {
@@ -508,7 +570,8 @@
         "AI",
         "剧情",
         "生成"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "dol-quest-assistant",
@@ -562,13 +625,24 @@
         "HonestMarkets"
       ],
       "aliases": [
-        "诚实市场"
+        "诚实市场",
+        "诚信小贩",
+        "诚信商贩",
+        "Honest Markets",
+        "HonestMarkets"
       ],
-      "repositories": [],
+      "repositories": [
+        "DarkSoULs"
+      ],
       "category": "界面与便利",
       "tags": [
-        "商店"
-      ]
+        "商店",
+        "便利"
+      ],
+      "repositoryKeys": [
+        "3naka/DarkSoULs"
+      ],
+      "sharedRepository": true
     },
     {
       "id": "sydney-bare-study",
@@ -635,7 +709,8 @@
         "AI",
         "料理",
         "剧情"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "whitney-expansion",
@@ -666,15 +741,20 @@
         "ModI18N"
       ],
       "aliases": [
+        "Degrees-of-Lewdity-Chinese-Localization",
         "游戏中文汉化补丁",
-        "I18N Mod"
+        "I18N Mod",
+        "汉化包"
       ],
       "repositories": [
+        "Degrees-of-Lewdity-Chinese-Localization",
         "Degrees-of-Lewdity-Mod-I18N-Mod"
       ],
       "repositoryKeys": [
+        "Eltirosto/Degrees-of-Lewdity-Chinese-Localization",
         "Lyoko-Jeremie/Degrees-of-Lewdity_Mod_i18nMod"
       ],
+      "sharedRepository": true,
       "category": "界面与便利",
       "tags": [
         "翻译"
@@ -713,7 +793,8 @@
       "tags": [
         "剧情",
         "NPC"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "dol-sims",
@@ -753,7 +834,8 @@
       "tags": [
         "规则",
         "对话"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "overfits-slots",
@@ -793,7 +875,8 @@
         "图像",
         "背景",
         "模板"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "eliminate-spaces",
@@ -922,7 +1005,8 @@
       "tags": [
         "规则",
         "事件"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "trauma-appearance",
@@ -1009,7 +1093,8 @@
         "hxdnshx/sugarcube-2-ModLoader"
       ],
       "category": "界面与便利",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "time-hourglass",
@@ -1023,7 +1108,8 @@
         "hxdnshx/sugarcube-2-ModLoader"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "cheat-extend-hsskyboy",
@@ -1093,7 +1179,8 @@
         "emicoto/DOLMods"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "candy-and-robot",
@@ -1109,7 +1196,8 @@
         "emicoto/DOLMods"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "fishing-life",
@@ -1137,7 +1225,8 @@
         "miyakoAki4828/Dol-Miyako-Mods"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "love-locket-text",
@@ -1383,7 +1472,8 @@
         "3naka/DarksOuLs"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "no-anal-ride-neo",
@@ -1397,7 +1487,8 @@
         "3naka/DarksOuLs"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "fallen-loop",
@@ -1411,7 +1502,8 @@
         "3naka/DarksOuLs"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "kitchen-plus",
@@ -1595,7 +1687,8 @@
         "chris81605/DOL-Compatibility-Mods"
       ],
       "category": "修复与兼容",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "head-mask-compatibility",
@@ -1611,7 +1704,8 @@
         "chris81605/DOL-Compatibility-Mods"
       ],
       "category": "修复与兼容",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "sydney-dialogue-events",
@@ -1681,7 +1775,8 @@
         "3naka/DarksOuLs"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "sharedRepository": true
     },
     {
       "id": "cheat-extended-chris",
@@ -1728,7 +1823,8 @@
       "tags": [
         "服装",
         "发型"
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "au-hair-optimization",
@@ -1747,7 +1843,8 @@
         {
           "id": "au-beautification"
         }
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "au-facial-expansion",
@@ -1771,7 +1868,8 @@
             "【AUandrogynous】model": ">=0.0.3"
           }
         }
-      ]
+      ],
+      "sharedRepository": true
     },
     {
       "id": "dol-mod-center",
@@ -2152,6 +2250,29 @@
           "size": 126498,
           "verifiedAt": "2026-10-04T17:58:11.884768+00:00"
         }
+      ]
+    },
+    {
+      "id": "eden-roll-back",
+      "name": "伊甸回滚",
+      "bootNames": [
+        "EdenRollBack"
+      ],
+      "aliases": [
+        "EdenRollBack",
+        "伊甸存档回滚"
+      ],
+      "repositories": [
+        "DarkSoULs"
+      ],
+      "repositoryKeys": [
+        "3naka/DarkSoULs"
+      ],
+      "sharedRepository": true,
+      "category": "规则与数值",
+      "tags": [
+        "存档",
+        "便利"
       ]
     }
   ]

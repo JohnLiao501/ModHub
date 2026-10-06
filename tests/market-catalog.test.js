@@ -141,8 +141,8 @@ module.exports = async function() {
         ] };
         const groupedBefore = JSON.stringify(grouped), groupedLinks = api.getSourceLinks(grouped);
         assert.deepEqual(Array.from(groupedLinks, item => [item.name, item.url]), [
-            ['Discord', 'https://discord.com/channels/1/2'], ['GitHub', 'https://github.com/Owner/Repo/']
-        ], 'Discord 保留首个原帖，GitHub 优先已提供的仓库主页，平台顺序稳定');
+            ['GitHub', 'https://github.com/Owner/Repo/'], ['Discord', 'https://discord.com/channels/1/2']
+        ], '平台来源统一按 GitHub -> Discord -> 百度贴吧排序，Discord 保留首个原帖，GitHub 优先已提供的仓库主页');
         const groupedRow = api.renderAcquisitionDetails(grouped, 0);
         assert.equal((groupedRow.match(/>Discord<\/a>/g) || []).length, 1);
         assert.equal((groupedRow.match(/>GitHub<\/a>/g) || []).length, 1);
@@ -161,8 +161,8 @@ module.exports = async function() {
             { url: 'https://github.com/Owner/Repo' }
         ] };
         assert.deepEqual(Array.from(api.getSourceLinks(aliases), item => [item.name, item.url]), [
-            ['Discord', aliases.sources[0].url], ['GitHub', aliases.sources[5].url]
-        ], 'Discord 官方域名和 GitHub www 入口仍按同一平台合并，与网站一致');
+            ['GitHub', aliases.sources[5].url], ['Discord', aliases.sources[0].url]
+        ], '平台按统一顺序展示，Discord 官方域名和 GitHub www 入口仍按同一平台合并，与网站一致');
         assert.equal(api.getSourceLinks({ sources: [aliases.sources[4]] })[0].url,
             'https://www.github.com/Owner/Repo/releases/tag/v1%2F2', 'www 附件只派生发布页，标签编码保持且不携带下载参数');
         const mixed = { sources: [{ url: 'https://github.com/Owner/Repo' }], sourceUrl: 'https://tieba.baidu.com/p/123',
@@ -343,6 +343,21 @@ module.exports = async function() {
         assert.equal(mod.githubUrl, url, '可信社区固定附件保留完整 GitHub 来源');
         assert.equal(market.hasCommunityReleaseSource(mod), true);
         assert.equal(market.isBatchInstallEligible(mod, []), true);
+        const communityGithubMod = {
+            id: 'community-0b975914-aba0-477e-9737-7a4e07eb1e9e',
+            identityId: 'community-0b975914-aba0-477e-9737-7a4e07eb1e9e',
+            name: 'BSA 美化切换器',
+            author: '隨風飄逸',
+            catalogSource: 'community',
+            sourcePlatform: 'github',
+            sourceUrl: 'https://github.com/chris81605/DoL-BSA-Beauty-Switcher.git',
+            githubUrl: 'https://github.com/chris81605/DoL-BSA-Beauty-Switcher/releases/latest',
+            autoInstall: true,
+            bootNames: ['BSA 美化切换器'],
+            repositoryKeys: ['chris81605/dol-bsa-beauty-switcher'],
+        };
+        assert.equal(market.hasCommunityReleaseSource(communityGithubMod), true, '审核通过的社区 GitHub 模组应当具备安装资格');
+        assert.equal(market.checkModInstallStatus(communityGithubMod, []), 'not_installed', '审核通过的社区 GitHub 模组未安装时应呈现下载安装');
         assert.equal(market.hasCommunityReleaseSource({ ...approved, autoInstall: false }), false, '关闭安装资格时不能因已知仓库或资产绕过');
         const [manual] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [{ ...approved, autoInstall: false,
             sourcePlatform: 'discord', sourceUrl: 'https://discord.com/channels/1/2', sources: [{ platform: 'github', url }] }] });
@@ -2449,4 +2464,178 @@ module.exports = async function() {
         );
     }
 
+    // 共享仓库多模组身份规范、防重名消歧与智能手机 Omega 隔离契约测试
+    {
+        const catalog = JSON.parse(fs.readFileSync(path.join(srcRoot, '..', 'mod-identities.json'), 'utf8'));
+        const repoMap = new Map();
+        for (const mod of catalog.mods) {
+            for (const repo of mod.repositoryKeys || []) {
+                const key = String(repo).toLowerCase();
+                if (!repoMap.has(key)) repoMap.set(key, []);
+                repoMap.get(key).push(mod);
+            }
+        }
+
+        // 契约 1：同一仓库若登记了多个模组，必须全部明确标记 sharedRepository: true，且技术名必须互斥
+        for (const [repoKey, mods] of repoMap.entries()) {
+            if (mods.length > 1) {
+                for (const mod of mods) {
+                    assert.equal(
+                        mod.sharedRepository,
+                        true,
+                        `共享仓库【${repoKey}】下的模组【${mod.name}】(${mod.id}) 必须声明 sharedRepository: true`
+                    );
+                }
+                const bootNameSet = new Set();
+                for (const mod of mods) {
+                    for (const bootName of mod.bootNames || []) {
+                        const bKey = String(bootName).toLowerCase();
+                        assert.ok(
+                            !bootNameSet.has(bKey),
+                            `共享仓库【${repoKey}】下的不同模组不能共享相同的 bootName:【${bootName}】`
+                        );
+                        bootNameSet.add(bKey);
+                    }
+                }
+            }
+        }
+
+        const market = loadMarket().modHubMarket;
+
+        // 契约 2：原始 release-index 中的万能的智能手机与 Omega 在经 normalizeReleaseIndex 规范化后绝不重名、绝不串号
+        const mockRawIndex = {
+            schemaVersion: 1,
+            identities: catalog.mods,
+            mods: [
+                {
+                    id: 'smartphone',
+                    name: '万能的智能手机',
+                    wikiName: '万能的智能手机',
+                    repo: 'anlinstudio/degrees-of-lewdity-dolsmartphone',
+                    githubUrl: 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone',
+                    sourceUrl: 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone',
+                    version: '0.3.85',
+                    category: '玩法与内容',
+                    tags: ['社交', '剧情', 'NPC']
+                },
+                {
+                    id: '万能的智能手机omega-degrees-of-lewdity-dolsmartphone',
+                    name: '万能的智能手机 OmegaΩ',
+                    wikiName: '万能的智能手机 OmegaΩ',
+                    repo: 'anlinstudio/degrees-of-lewdity-dolsmartphone',
+                    githubUrl: 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/releases/tag/v.omega.1.0',
+                    sourceUrl: 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/releases/tag/v.omega.1.0',
+                    version: '1.0',
+                    category: '外观与资源',
+                    tags: ['服装']
+                }
+            ]
+        };
+
+        const normalizedMods = market.normalizeReleaseIndex(mockRawIndex);
+        assert.equal(normalizedMods.length, 2, '必须保留两个独立模组');
+
+        const [normOriginal, normOmega] = normalizedMods;
+        assert.notEqual(normOriginal.name, normOmega.name, '本体与 Omega 绝不能被覆盖成相同名称');
+        assert.equal(normOriginal.name, '万能的智能手机', '本体模组名称必须保持为万能的智能手机');
+        assert.ok(
+            normOmega.name.includes('Omega'),
+            `Omega 模组名称必须包含 Omega 标识，实际为:【${normOmega.name}】`
+        );
+        assert.equal(normOriginal.sharedRepository, true, '本体必须标记为 sharedRepository');
+        assert.equal(normOmega.sharedRepository, true, 'Omega 必须标记为 sharedRepository');
+        assert.ok(
+            normOriginal.bootNames.includes('SmartPhone') || normOriginal.bootNames.includes('SmartPhone Alpha'),
+            '本体必须包含 SmartPhone bootNames'
+        );
+        assert.ok(
+            normOmega.bootNames.includes('SmartPhone Omega'),
+            'Omega 必须包含独立的 SmartPhone Omega bootNames'
+        );
+        assert.ok(
+            !normOmega.bootNames.includes('SmartPhone'),
+            'Omega 绝对不能包含本体的 SmartPhone 技术名'
+        );
+        assert.ok(
+            !normOriginal.bootNames.includes('SmartPhone Omega'),
+            '本体绝对不能包含 Omega 的 SmartPhone Omega 技术名'
+        );
+
+        // 契约 3：安装状态防串号匹配验证
+        // 情况 A: 本地仅安装本体 SmartPhone (v1.0.0)
+        const localOriginalOnly = [
+            {
+                name: 'SmartPhone',
+                version: '1.0.0',
+                displayNames: ['SmartPhone', '万能的智能手机'],
+                normalizedNames: ['smartphone', '万能的智能手机'],
+                repos: ['smartphone', 'degreesoflewditydolsmartphone'],
+                repositoryKeys: ['anlinstudio/degrees-of-lewdity-dolsmartphone']
+            }
+        ];
+        const statusOrigA = market.checkModInstallStatus(normOriginal, localOriginalOnly);
+        const statusOmegaA = market.checkModInstallStatus(normOmega, localOriginalOnly);
+        assert.ok(
+            ['up_to_date', 'update_available'].includes(statusOrigA),
+            '本地安装 SmartPhone 时，本体卡片必须正确匹配为已安装状态'
+        );
+        assert.equal(
+            statusOmegaA,
+            'not_installed',
+            '本地仅安装 SmartPhone 时，Omega 卡片必须严格为 not_installed，绝不能发生串号匹配'
+        );
+        assert.equal(normOmega._matchedLocal, null, 'Omega 卡片不能关联到本体的本地档案');
+
+        // 情况 B: 本地仅安装 SmartPhone Omega (v1.0)
+        const localOmegaOnly = [
+            {
+                name: 'SmartPhone Omega',
+                version: '1.0',
+                displayNames: ['SmartPhone Omega', '万能的智能手机 OmegaΩ', '万能的智能手机 简化版'],
+                normalizedNames: ['smartphoneomega', '万能的智能手机omega', '万能的智能手机omegaω'],
+                repos: ['smartphoneomega', 'degreesoflewditydolsmartphone'],
+                repositoryKeys: ['anlinstudio/degrees-of-lewdity-dolsmartphone']
+            }
+        ];
+        const statusOrigB = market.checkModInstallStatus(normOriginal, localOmegaOnly);
+        const statusOmegaB = market.checkModInstallStatus(normOmega, localOmegaOnly);
+        assert.equal(
+            statusOrigB,
+            'not_installed',
+            '本地仅安装 SmartPhone Omega 时，本体卡片必须严格为 not_installed，绝不能发生反向误匹配'
+        );
+        assert.ok(
+            ['up_to_date', 'update_available'].includes(statusOmegaB),
+            '本地安装 SmartPhone Omega 时，Omega 卡片必须正确匹配为已安装状态'
+        );
+        assert.equal(normOriginal._matchedLocal, null, '本体卡片不能关联到 Omega 的本地档案');
+
+        // 契约 4：同名自动消歧防御测试
+        const duplicateIndex = {
+            schemaVersion: 1,
+            identities: [],
+            mods: [
+                {
+                    id: 'sample-mod-main',
+                    name: '测试模组',
+                    wikiName: '测试模组',
+                    sourceUrl: 'https://github.com/Sample/Repo/releases/tag/v1.0'
+                },
+                {
+                    id: 'sample-mod-addon',
+                    name: '测试模组',
+                    wikiName: '测试模组 附加包',
+                    sourceUrl: 'https://github.com/Sample/Repo/releases/tag/v2.0'
+                }
+            ]
+        };
+        const disambiguated = market.normalizeReleaseIndex(duplicateIndex);
+        assert.notEqual(
+            disambiguated[0].name,
+            disambiguated[1].name,
+            '当不同条目出现同名冲突时，防重名防御安全网必须自动消解歧义，生成不重复的名称'
+        );
+    }
+
 };
+

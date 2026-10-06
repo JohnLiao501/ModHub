@@ -184,6 +184,8 @@ window.modHubUniqueModNames = function(list) {
 };
 
 window._modHubDisabledModInfo = window._modHubDisabledModInfo || new Map();
+window._modHubBatchMode = false;
+window._modHubSelectedMods = window._modHubSelectedMods || new Set();
 
 window.modHubIsManagerTabLabel = function(text) {
     const label = String(text || '').trim();
@@ -546,6 +548,7 @@ const MODHUB_KNOWN_MOD_ALIASES = {
     'Dol-Optimization': '原版优化与管理套件',
     'SmartPhone Alpha': '万能的智能手机',
     'SmartPhone': '万能的智能手机',
+    'SmartPhone Omega': '万能的智能手机 Omega',
     'Dynamicest': '极致动态数值提醒',
     'maplebirch': '秋枫白桦框架',
     'WovenRealmCookingAddon': '织境空间-料理扩展',
@@ -1859,6 +1862,27 @@ window.modHubRenderModManageUI = function() {
         <details class="modhub-collapsible-section" data-section="side"${isSectionOpen('side', true) ? ' open' : ''}>
             <summary class="modhub-section-summary">已安装模组 - 共 ${totalSideCount} 个</summary>
             <div class="modhub-section-content">
+                ${totalSideCount > 0 ? `
+                    <div class="modhub-list-toolbar">
+                        ${window._modHubBatchMode ? `
+                            <div id="modHubBatchToolbar" class="modhub-batch-toolbar">
+                                <div class="modhub-batch-info">
+                                    已选择 <span id="modHubBatchCount" class="gold">${window._modHubSelectedMods ? window._modHubSelectedMods.size : 0}</span> 个模组
+                                </div>
+                                <div class="modhub-batch-actions">
+                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchSelectAll()">全选</button>
+                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchInvertSelect()">反选</button>
+                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="enable" type="button" onclick="window.modHubBatchEnable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量启用</button>
+                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="disable" type="button" onclick="window.modHubBatchDisable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量禁用</button>
+                                    <button class="macro-button modhub-btn-delete modhub-batch-btn" data-batch-action="delete" type="button" onclick="window.modHubBatchDelete()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}><span class="red">批量删除</span></button>
+                                    <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-cancel modhub-batch-btn" type="button" onclick="window.modHubToggleBatchMode(false)">退出多选</button>
+                                </div>
+                            </div>
+                        ` : `
+                            <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-primary" type="button" title="进入批量多选模式，支持批量启用、禁用与删除" onclick="window.modHubToggleBatchMode(true)">多选操作</button>
+                        `}
+                    </div>
+                ` : ''}
     `;
 
     // 旁加载模组（启用与禁用归入同排序组，全量参与排序）
@@ -1893,11 +1917,17 @@ window.modHubRenderModManageUI = function() {
             }
             const descHtml = descParts.join(' | ') || '<span class="grey">外部模组</span>';
             const isHighlight = window._modHubHighlightMods && window._modHubHighlightMods.has(modName);
+            const isBatchMode = !!window._modHubBatchMode;
+            const isSelected = isBatchMode && window._modHubSelectedMods && window._modHubSelectedMods.has(modName);
 
             html += `
-                <li class="modhub-item ${isEnabled ? '' : 'item-disabled'} ${isHighlight ? 'modhub-item-highlight' : ''}" data-mod-name="${window.modHubEscapeHtml(modName)}" data-index="${index}" data-drag-type="side" draggable="${!isRecovery}">
+                <li class="modhub-item ${isEnabled ? '' : 'item-disabled'} ${isHighlight ? 'modhub-item-highlight' : ''} ${isBatchMode ? 'modhub-batch-active' : ''} ${isSelected ? 'modhub-item-selected' : ''}" data-mod-name="${window.modHubEscapeHtml(modName)}" data-index="${index}" data-drag-type="side" draggable="${!isRecovery && !isBatchMode}">
                     <div class="modhub-item-info">
-                        ${isRecovery ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>'}
+                        ${isBatchMode ? `
+                            <label class="modhub-batch-check-wrap" onclick="event.stopPropagation();">
+                                <input type="checkbox" class="macro-checkbox modhub-batch-checkbox" data-mod-name="${window.modHubEscapeHtml(modName)}" ${isSelected ? 'checked' : ''} ${isRecovery ? 'disabled title="系统保护模组，不可批量操作"' : ''} />
+                            </label>
+                        ` : (isRecovery ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>')}
                         <div class="modhub-item-main">
                             <div class="modhub-item-title ${isEnabled ? '' : 'grey'}">${window.modHubEscapeHtml(modName)}</div>
                             <div class="grey modhub-item-desc">${descHtml}${updateTagHtml}</div>
@@ -1962,10 +1992,37 @@ window.modHubRenderModManageUI = function() {
     container.onclick = async event => {
         const button = event.target?.closest?.('[data-mod-action]');
         const modName = button?.closest?.('li[data-mod-name]')?.dataset.modName;
-        if (!button || !modName) return;
-        if (button.dataset.modAction === 'update') await window.modHubUpdateModDirectly(modName);
-        else if (button.dataset.modAction === 'toggle') await window.modHubToggleSideMod(modName);
-        else if (button.dataset.modAction === 'delete') await window.modHubDeleteSideMod(modName);
+        if (button && modName) {
+            if (button.dataset.modAction === 'update') await window.modHubUpdateModDirectly(modName);
+            else if (button.dataset.modAction === 'toggle') await window.modHubToggleSideMod(modName);
+            else if (button.dataset.modAction === 'delete') await window.modHubDeleteSideMod(modName);
+            return;
+        }
+
+        // 批量多选模式下，点击条目空白或文本区域可直接切换选中状态
+        if (window._modHubBatchMode) {
+            if (event.target?.closest?.('.modhub-batch-check-wrap') || event.target?.closest?.('button')) {
+                return;
+            }
+            const li = event.target?.closest?.('li[data-mod-name][data-drag-type="side"]');
+            if (li && li.dataset.modName) {
+                const targetMod = li.dataset.modName;
+                const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
+                if (recoveryNames.has(targetMod.toLowerCase())) return;
+                const cb = li.querySelector('.modhub-batch-checkbox');
+                if (cb && !cb.disabled) {
+                    cb.checked = !cb.checked;
+                    window.modHubToggleSelectMod(targetMod, cb.checked);
+                }
+            }
+        }
+    };
+
+    container.onchange = event => {
+        const cb = event.target?.closest?.('.modhub-batch-checkbox');
+        if (cb && cb.dataset.modName) {
+            window.modHubToggleSelectMod(cb.dataset.modName, cb.checked);
+        }
     };
     window.modHubRenderBeautyUI();
 
@@ -2007,7 +2064,7 @@ window.modHubRenderModManageUI = function() {
 
     // 绑定旁加载模组拖拽排序
     const sideUl = container.querySelector ? container.querySelector('.modhub-collapsible-section[data-section="side"] ul.modhub-list') : null;
-    if (sideUl && typeof window.modHubBindDragSort === 'function') {
+    if (sideUl && !window._modHubBatchMode && typeof window.modHubBindDragSort === 'function') {
         window.modHubBindDragSort(sideUl, 'side');
     }
 
@@ -2713,6 +2770,15 @@ window.modHubFindDependentMods = async function(targetModName) {
 
         if (targetKeySet.has(norm) || (stripped && targetKeySet.has(stripped))) return true;
         for (const t of targetKeySet) {
+            const isAscii = !/[^\x00-\x7F]/.test(t);
+            if (isAscii) {
+                if (norm === t || stripped === t) return true;
+                if (t.length >= 8 && norm.length >= t.length && (norm.includes(t) || (stripped && stripped.includes(t)))) {
+                    const ratio = t.length / norm.length;
+                    if (ratio >= 0.8) return true;
+                }
+                continue;
+            }
             if (t.length >= 4 && (norm.includes(t) || (stripped && stripped.includes(t)))) return true;
         }
         return false;
@@ -3122,6 +3188,352 @@ window.modHubSaveModManageState = async function(showSuccess = true, options = {
         window.modHubShowToast('保存模组状态失败: ' + (e.message || e), 'warning');
         return false;
     }
+};
+
+
+// ========== 模组管理板块多选批量操作接口 ==========
+
+window.modHubToggleBatchMode = function(forceState) {
+    window._modHubBatchMode = typeof forceState === 'boolean' ? forceState : !window._modHubBatchMode;
+    if (!window._modHubBatchMode && window._modHubSelectedMods) {
+        window._modHubSelectedMods.clear();
+    }
+    window.modHubRenderModManageUI();
+};
+
+window.modHubToggleSelectMod = function(modName, checked) {
+    if (!modName) return;
+    if (!window._modHubSelectedMods) window._modHubSelectedMods = new Set();
+    if (checked) {
+        window._modHubSelectedMods.add(modName);
+    } else {
+        window._modHubSelectedMods.delete(modName);
+    }
+    window.modHubUpdateBatchToolbar();
+};
+
+window.modHubUpdateBatchToolbar = function() {
+    const selectedCount = window._modHubSelectedMods ? window._modHubSelectedMods.size : 0;
+    const countEl = document.getElementById('modHubBatchCount');
+    if (countEl) countEl.textContent = String(selectedCount);
+
+    const toolbar = document.getElementById('modHubBatchToolbar');
+    if (toolbar) {
+        const hasSelected = selectedCount > 0;
+        toolbar.querySelectorAll('button[data-batch-action]').forEach(btn => {
+            btn.disabled = !hasSelected;
+        });
+    }
+
+    const container = document.getElementById('modHubModManageContainer');
+    if (container) {
+        container.querySelectorAll('li[data-mod-name][data-drag-type="side"]').forEach(li => {
+            const modName = li.dataset.modName;
+            const isSelected = window._modHubSelectedMods && window._modHubSelectedMods.has(modName);
+            li.classList.toggle('modhub-item-selected', !!isSelected);
+            const cb = li.querySelector('.modhub-batch-checkbox');
+            if (cb && !cb.disabled) cb.checked = !!isSelected;
+        });
+    }
+};
+
+window.modHubBatchSelectAll = function() {
+    const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
+    const sideMods = window._modHubModState?.sideMods || [];
+    if (!window._modHubSelectedMods) window._modHubSelectedMods = new Set();
+    for (const item of sideMods) {
+        if (!recoveryNames.has(item.name.toLowerCase())) {
+            window._modHubSelectedMods.add(item.name);
+        }
+    }
+    window.modHubUpdateBatchToolbar();
+};
+
+window.modHubBatchInvertSelect = function() {
+    const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
+    const sideMods = window._modHubModState?.sideMods || [];
+    if (!window._modHubSelectedMods) window._modHubSelectedMods = new Set();
+    for (const item of sideMods) {
+        if (recoveryNames.has(item.name.toLowerCase())) continue;
+        if (window._modHubSelectedMods.has(item.name)) {
+            window._modHubSelectedMods.delete(item.name);
+        } else {
+            window._modHubSelectedMods.add(item.name);
+        }
+    }
+    window.modHubUpdateBatchToolbar();
+};
+
+window.modHubBatchEnable = async function() {
+    const selected = Array.from(window._modHubSelectedMods || []);
+    if (!selected.length) {
+        window.modHubShowToast('请先选择要启用的模组', 'info');
+        return false;
+    }
+    const state = window._modHubModState;
+    if (!state) return false;
+    const toEnable = selected.filter(name => {
+        const item = state.sideMods?.find(m => m.name === name);
+        return item && !item.enabled;
+    });
+    if (!toEnable.length) {
+        window.modHubShowToast('所选模组已全部处于启用状态', 'info');
+        return false;
+    }
+
+    const currentEnabled = state.sideMods.filter(m => m.enabled).map(m => m.name);
+    for (const name of toEnable) {
+        const otherToEnable = toEnable.filter(n => n !== name);
+        const activeGroup = [...currentEnabled, ...otherToEnable];
+        const conflict = window.modHubCheckEnableConflicts(name, activeGroup);
+        if (conflict) {
+            const proceed = await window.modHubConfirm({
+                title: '模组冲突风险确认',
+                message: `待启用的模组中包含互斥框架：【${conflict.targetDisplayName}】与【${conflict.conflictDisplayName}】。\n\n原因：${conflict.reason}\n\n是否确认继续批量启用？`,
+                confirmText: '继续启用',
+                cancelText: '取消',
+                confirmType: 'danger'
+            });
+            if (!proceed) return false;
+            break;
+        }
+    }
+
+    const saved = await window.modHubRunManagerAction(async () => {
+        const currentState = window._modHubModState;
+        window.modHubEnsureModStateSync(currentState);
+        for (const name of toEnable) {
+            const item = currentState.sideMods?.find(m => m.name === name);
+            if (item) item.enabled = true;
+        }
+        window.modHubEnsureModStateSync(currentState);
+        if (!await window.modHubSaveModManageState(false)) throw new Error('模组配置保存失败');
+        await window.modHubLoadBeautyState();
+        return true;
+    }, undefined, { trackReload: true, restoreLabel: `批量启用 ${toEnable.length} 个模组` });
+
+    if (saved) {
+        window._modHubSelectedMods.clear();
+        window.modHubShowToast(`已批量启用 ${toEnable.length} 个模组，重新载入后生效`, 'success');
+        const hasFramework = toEnable.some(name => window.modHubIsFrameworkMod(name));
+        if (hasFramework) {
+            await window.modHubOfferReload(`已批量启用 ${toEnable.length} 个模组（包含核心框架）。`, { isFramework: true });
+        }
+    }
+    return saved;
+};
+
+window.modHubBatchDisable = async function() {
+    const selected = Array.from(window._modHubSelectedMods || []);
+    if (!selected.length) {
+        window.modHubShowToast('请先选择要禁用的模组', 'info');
+        return false;
+    }
+    const state = window._modHubModState;
+    if (!state) return false;
+    const toDisable = selected.filter(name => {
+        const item = state.sideMods?.find(m => m.name === name);
+        return item && item.enabled;
+    });
+    if (!toDisable.length) {
+        window.modHubShowToast('所选模组已全部处于禁用状态', 'info');
+        return false;
+    }
+
+    const toDisableSet = new Set(toDisable.map(n => n.toLowerCase()));
+    const affectedMap = new Map();
+    for (const modName of toDisable) {
+        const deps = await window.modHubFindDependentMods(modName);
+        for (const d of deps) {
+            if (!toDisableSet.has(d.rawName?.toLowerCase())) {
+                if (!affectedMap.has(d.rawName)) {
+                    affectedMap.set(d.rawName, { ...d, dependOn: [modName] });
+                } else {
+                    affectedMap.get(d.rawName).dependOn.push(modName);
+                }
+            }
+        }
+    }
+
+    const isModHubIncluded = toDisable.some(name => name.toLowerCase() === 'modhub');
+    const selfNotice = isModHubIncluded ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。可通过加载器原生管理界面重新启用 ModHub。游戏存档和已有还原点保留。' : '';
+    const selfNoticeHtml = isModHubIncluded ? modHubSelfRemovalNoticeHtml(false) : '';
+
+    if (affectedMap.size > 0 || isModHubIncluded) {
+        const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
+        const affectedList = Array.from(affectedMap.values());
+        const modItemsHtml = affectedList.map(m => `
+            <div class="modhub-modal-affected-item">
+                · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''} <span class="grey">（依赖于 ${m.dependOn.map(escape).join('、')}）</span>
+            </div>
+        `).join('');
+        const modLinesText = affectedList.map(m => `· 【${m.name}】（依赖于 ${m.dependOn.join('、')}）`).join('\n');
+
+        const ok = await window.modHubConfirm({
+            title: `确认批量禁用 ${toDisable.length} 个模组？`,
+            message: `禁用选中的 ${toDisable.length} 个模组后，以下依赖它们的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}是否仍然确认禁用？`,
+            trustedMessageHtml: `
+                <div class="modhub-modal-intro">禁用选中的 <span class="gold">${toDisable.length}</span> 个模组后，以下依赖它们的模组可能会受到影响或无法正常运行：</div>
+                <div class="modhub-modal-affected-box" style="max-height: 140px; overflow-y: auto;">
+                    ${modItemsHtml}
+                </div>
+                ${selfNoticeHtml}
+                <div class="grey modhub-modal-question" style="margin-top:10px;">是否仍然确认批量禁用？</div>
+            `,
+            confirmText: '确认禁用',
+            cancelText: '取消',
+            confirmType: 'danger'
+        });
+        if (!ok) return false;
+    } else {
+        const ok = await window.modHubConfirm({
+            title: `确认批量禁用 ${toDisable.length} 个模组？`,
+            message: `确定要禁用选中的 ${toDisable.length} 个模组吗？\n禁用后相关模组将在下次游戏启动时暂停加载。\n\n是否确认禁用？`,
+            confirmText: '确认禁用',
+            cancelText: '取消',
+            confirmType: 'warning'
+        });
+        if (!ok) return false;
+    }
+
+    const saved = await window.modHubRunManagerAction(async () => {
+        const currentState = window._modHubModState;
+        window.modHubEnsureModStateSync(currentState);
+        for (const name of toDisable) {
+            const item = currentState.sideMods?.find(m => m.name === name);
+            if (item) item.enabled = false;
+        }
+        window.modHubEnsureModStateSync(currentState);
+        if (!await window.modHubSaveModManageState(false)) throw new Error('模组配置保存失败');
+        await window.modHubLoadBeautyState();
+        return true;
+    }, undefined, { trackReload: true, restoreLabel: `批量禁用 ${toDisable.length} 个模组` });
+
+    if (saved) {
+        window._modHubSelectedMods.clear();
+        window.modHubShowToast(`已批量禁用 ${toDisable.length} 个模组，重新载入后生效`, 'success');
+        const hasFramework = toDisable.some(name => window.modHubIsFrameworkMod(name));
+        if (hasFramework || isModHubIncluded) {
+            await window.modHubOfferReload(`已批量禁用 ${toDisable.length} 个模组。`, { isFramework: hasFramework });
+        }
+    }
+    return saved;
+};
+
+window.modHubBatchDelete = async function() {
+    const selected = Array.from(window._modHubSelectedMods || []);
+    if (!selected.length) {
+        window.modHubShowToast('请先选择要删除的模组', 'info');
+        return false;
+    }
+    const state = window._modHubModState;
+    if (!state) return false;
+    const toDelete = selected.filter(name => state.sideMods?.some(m => m.name === name));
+    if (!toDelete.length) return false;
+
+    const toDeleteSet = new Set(toDelete.map(n => n.toLowerCase()));
+    const affectedMap = new Map();
+    for (const modName of toDelete) {
+        const deps = await window.modHubFindDependentMods(modName);
+        for (const d of deps) {
+            if (!toDeleteSet.has(d.rawName?.toLowerCase())) {
+                if (!affectedMap.has(d.rawName)) {
+                    affectedMap.set(d.rawName, { ...d, dependOn: [modName] });
+                } else {
+                    affectedMap.get(d.rawName).dependOn.push(modName);
+                }
+            }
+        }
+    }
+
+    const isModHubIncluded = toDelete.some(name => name.toLowerCase() === 'modhub');
+    const selfNotice = isModHubIncluded ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。游戏存档和已有还原点保留；重新导入 ModHub 后可继续使用。' : '';
+    const selfNoticeHtml = isModHubIncluded ? modHubSelfRemovalNoticeHtml(true) : '';
+
+    const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
+    const deleteListHtml = toDelete.map(name => {
+        const modInfo = window.modHubGetModInfo(name);
+        const subtext = window.modHubGetModSubtext(name, modInfo, false, true);
+        const disp = subtext ? `${name}（${subtext}）` : name;
+        return `<div>· <span class="gold">${escape(disp)}</span></div>`;
+    }).join('');
+
+    let trustedMessageHtml = '';
+    if (affectedMap.size > 0) {
+        const affectedList = Array.from(affectedMap.values());
+        const affectedListHtml = affectedList.map(m => `
+            <div>· <span class="gold">${escape(m.name)}</span>${m.version ? ` (${escape(m.version)})` : ''} <span class="grey">（依赖于 ${m.dependOn.map(escape).join('、')}）</span></div>
+        `).join('');
+
+        trustedMessageHtml = `
+            <div class="modhub-modal-conflict-intro">确定要彻底删除选中的 <span class="gold">${toDelete.length}</span> 个模组吗？</div>
+            <div class="modhub-modal-conflict-alert-box" style="margin: 10px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
+                <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
+                    警告：检测到以下模组依赖于即将删除的模组，删除后可能无法正常运行：
+                </div>
+                <div style="max-height: 120px; overflow-y: auto; font-size: 0.9em; line-height: 1.6;">
+                    ${affectedListHtml}
+                </div>
+            </div>
+            <div class="grey" style="font-size: 0.9em; margin: 8px 0 4px 0;">即将删除的模组列表：</div>
+            <div style="max-height: 100px; overflow-y: auto; font-size: 0.88em; line-height: 1.5; padding: 6px 10px; background: rgba(0, 0, 0, 0.25); border-radius: 4px;">
+                ${deleteListHtml}
+            </div>
+            ${selfNoticeHtml}
+            <div class="grey" style="font-size: 0.9em; margin-top: 10px;">删除后这些模组将从浏览器存储中彻底移除，不可恢复。是否仍要删除？</div>
+        `;
+    } else {
+        trustedMessageHtml = `
+            <div class="modhub-modal-intro">确定要彻底删除选中的 <span class="gold">${toDelete.length}</span> 个模组吗？</div>
+            <div style="max-height: 120px; overflow-y: auto; font-size: 0.9em; line-height: 1.6; margin: 10px 0; padding: 6px 10px; background: rgba(0, 0, 0, 0.25); border-radius: 4px;">
+                ${deleteListHtml}
+            </div>
+            ${selfNoticeHtml}
+            <div class="grey" style="font-size: 0.9em; margin-top: 8px;">删除后这些模组将从浏览器存储中彻底移除，不可恢复。是否确认删除？</div>
+        `;
+    }
+
+    const ok = await window.modHubConfirm({
+        title: isModHubIncluded ? `确认批量删除 ${toDelete.length} 个模组（含 ModHub 卸载）` : `确认批量删除 ${toDelete.length} 个模组`,
+        message: `确定要批量删除选中的 ${toDelete.length} 个模组吗？\n${selfNotice ? selfNotice + '\n\n' : ''}删除后这些模组将从浏览器存储中彻底移除，不可恢复。\n\n是否确认删除？`,
+        trustedMessageHtml,
+        confirmText: isModHubIncluded ? '确认批量删除与卸载' : '确认批量删除',
+        cancelText: '取消',
+        confirmType: 'danger',
+        confirmDelay: 3
+    });
+    if (!ok) return false;
+
+    const saved = await window.modHubRunManagerAction(async () => {
+        const state = window._modHubModState;
+        if (!state) throw new Error('模组列表尚未读取完成');
+        const controller = window.modHubGetController();
+        if (typeof controller?.removeModIndexDB !== 'function') throw new Error('当前加载器未提供模组包删除接口，已停止删除');
+
+        window.modHubEnsureModStateSync(state);
+        state.sideMods = state.sideMods.filter(item => !toDeleteSet.has(item.name.toLowerCase()));
+        state.sideEnabled = state.sideEnabled.filter(name => !toDeleteSet.has(name.toLowerCase()));
+        state.sideDisabled = state.sideDisabled.filter(name => !toDeleteSet.has(name.toLowerCase()));
+
+        if (!await window.modHubSaveModManageState(false, { dropNames: toDelete })) throw new Error('删除模组配置失败');
+
+        for (const name of toDelete) {
+            await window.modHubLoadBeautyState(true, [name]);
+            window._modHubDisabledModInfo.delete(name.trim().toLowerCase());
+            await controller.removeModIndexDB(name);
+        }
+        return true;
+    }, undefined, { trackReload: true, restoreLabel: `批量删除 ${toDelete.length} 个模组` });
+
+    if (saved) {
+        window._modHubSelectedMods.clear();
+        window.modHubShowToast(`已批量删除 ${toDelete.length} 个模组，重新载入后生效`, 'warning');
+        const hasFramework = toDelete.some(name => window.modHubIsFrameworkMod(name));
+        if (hasFramework || isModHubIncluded) {
+            await window.modHubOfferReload(`已批量删除 ${toDelete.length} 个模组。`, { isFramework: hasFramework });
+        }
+    }
+    return saved;
 };
 
 // 游戏就绪后核验下一次启动的顺序；只有实际修正时才建立保护点。

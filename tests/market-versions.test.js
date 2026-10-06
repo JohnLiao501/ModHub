@@ -829,6 +829,40 @@ module.exports = async function() {
         community.sb.fetch = async () => { communityCalls++; throw new Error('模拟 Worker 连接失败'); };
         await assert.rejects(community.versions.fetchReleases({ ...baseMod, catalogSource: 'community', autoInstall: true }), /模拟 Worker 连接失败/);
         assert.equal(communityCalls, 1, '社区模组仍须经过 Worker 当前审核，不能直连绕过撤回');
+
+        // 社区模组已在目录核验过官方安装包时（如生育扩展），Worker 失败时回退到已核验目录发布快照
+        const verifiedCommunityMod = {
+            id: 'fertility-expansion',
+            name: '生育扩展',
+            bootNames: ['FertilityExpansion'],
+            catalogSource: 'community',
+            autoInstall: true,
+            githubUrl: 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/download/v1.5.12/FertilityExpansion.mod.zip',
+            verifiedReleaseAsset: {
+                sourceUrl: 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/download/v1.5.12/FertilityExpansion.mod.zip',
+                repositoryKey: 'liliths-legacy/dol-fertilityexpansion-mod',
+                tag: 'v1.5.12',
+                fileName: 'FertilityExpansion.mod.zip',
+                sha256: '660ef7c7fe64b30602a08703358595023de18d97d28c8e629130e890d613fb9a',
+                bootName: 'FertilityExpansion',
+                version: '1.5.12',
+                size: 126498,
+                verifiedAt: '2026-10-04T17:58:11.884768+00:00'
+            },
+            releaseCompatibility: [{
+                releaseTag: 'v1.5.12',
+                assetName: 'FertilityExpansion.mod.zip',
+                gameVersionRange: '=0.5.12.13',
+                evidenceUrl: 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/tag/v1.5.12'
+            }]
+        };
+        const fallbackRes = await community.versions.fetchReleases(verifiedCommunityMod);
+        assert.equal(fallbackRes.releases.length, 1, '已核验社区模组在Worker失败时须成功回退目录已核验快照');
+        assert.equal(fallbackRes.releases[0].tagName, 'v1.5.12');
+        assert.equal(fallbackRes.releases[0].assets[0].name, 'FertilityExpansion.mod.zip');
+        const candidates = community.versions.buildCandidates(verifiedCommunityMod, fallbackRes);
+        assert.equal(candidates.length, 1, '回退快照须成功构建候选版本供下载');
+        assert.equal(candidates[0].version, '1.5.12');
     }
 
     {
@@ -876,4 +910,23 @@ module.exports = async function() {
         sb.fetch = async () => ({ ok: true, json: async () => foreign });
         await assert.rejects(versions.fetchReleases(pinned, { useCache: false }), error => error.code === 'RELEASE_SOURCE_CHANGED', '固定渠道不能跳到未经声明的同仓库标签');
     }
+
+    {
+        const { sb, versions } = loadVersions();
+        const optimizationMod = { id: 'dol-optimization', name: '原版优化', githubUrl: 'https://github.com/Owner/Example',
+            aliases: ['Dol-Optimization', 'DolOptimization', '原版优化OPT'], bootNames: ['原版优化OPT'] };
+        const releases = [
+            release('1.1.1.4', [asset('Dol-Optimization-v1.1.1.4.zip')]),
+            release('1.0.9', [asset('Optimization-1.0.9-DolMod.zip')]),
+            release('1.0.7a', [asset('Dol-Optimization-v1.0.7a.zip')]),
+            release('1.0.0', [asset('Dol-Optimization-v1.0.0.zip')])
+        ];
+        const candidates = versions.buildCandidates(optimizationMod, releases);
+        assert.equal(candidates.length, 4, '全部历史资产必须正常解析为候选包');
+        assert.equal(new Set(candidates.map(c => c.seriesKey)).size, 1, '历史前后缀变化与字母小版本必须归一为单一系列');
+        const selection = versions.getDefaultSelection(optimizationMod, candidates);
+        assert.equal(selection.defaultKey, candidates[0].candidateKey, '缺少适配声明的单一模组必须自动默认选择最高可用版本');
+        assert.equal(selection.defaultRisk, true, '无声明版本默认选择仍保留适配风险提示');
+    }
 };
+

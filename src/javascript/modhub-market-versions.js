@@ -313,6 +313,65 @@
             fetchedAt: new Date().toISOString(), stale: false, fromGithub: true, releases };
     }
 
+
+    function buildDirectoryFallbackReleases(mod, source, page, communityRevision) {
+        if (!mod || page !== 1) return null;
+        const verified = mod.verifiedReleaseAsset;
+        const records = Array.isArray(mod.packageRecords) ? mod.packageRecords : [];
+        const targetRecord = records.find(r => r.downloadUrl || r.sourceUrl);
+        const rules = Array.isArray(mod.releaseCompatibility) ? mod.releaseCompatibility : [];
+
+        const downloadUrl = normalizeSource(verified?.sourceUrl || targetRecord?.downloadUrl || (typeof mod.downloadUrl === 'string' ? mod.downloadUrl : ''));
+        const assetName = verified?.fileName || targetRecord?.fileName || (downloadUrl ? downloadUrl.split('/').pop().split('?')[0] : '');
+        let tagName = verified?.tag || rules[0]?.releaseTag || source.tag || (mod.version ? ('v' + mod.version) : 'v1.0.0');
+
+        if (!downloadUrl || !assetName) return null;
+
+        const rule = rules.find(r => r.releaseTag === tagName && (!r.assetName || r.assetName === assetName)) || rules[0];
+        const gameVersionRange = rule?.gameVersionRange || targetRecord?.gameVersionRange || '';
+        const evidenceUrl = rule?.evidenceUrl || targetRecord?.evidenceUrl || downloadUrl;
+        const declaration = gameVersionRange ? { gameVersionRange, evidenceUrl } : undefined;
+
+        const asset = {
+            name: source.assetName || assetName,
+            size: Number(verified?.size || targetRecord?.size) || 100000,
+            downloadUrl,
+            digest: verified?.sha256 ? ('sha256:' + verified.sha256.toLowerCase()) : (targetRecord?.sha256 ? ('sha256:' + targetRecord.sha256.toLowerCase()) : ''),
+            bootName: verified?.bootName || targetRecord?.bootName || mod.bootNames?.[0] || '',
+            version: verified?.version || targetRecord?.version || mod.version || '',
+            versionSource: verified ? 'verified-boot' : 'catalog',
+            ...(declaration ? { compatibility: declaration } : {}),
+            dependencies: Array.isArray(targetRecord?.dependencies) ? targetRecord.dependencies : Array.isArray(mod.dependencies) ? mod.dependencies : []
+        };
+
+        if (source.tag) tagName = source.tag;
+
+        const release = {
+            tagName,
+            name: tagName,
+            htmlUrl: mod.releaseUrl || ('https://github.com/' + source.key + '/releases/tag/' + encodeURIComponent(tagName)),
+            publishedAt: verified?.verifiedAt || targetRecord?.verifiedAt || mod.updateDate || new Date().toISOString(),
+            assets: [asset],
+            ...(declaration ? { compatibility: declaration } : {}),
+            dependencies: asset.dependencies
+        };
+
+        if (!validHistoricalRelease(release, mod, source)) return null;
+
+        return {
+            schemaVersion: 1,
+            id: mod.id,
+            sourceUrl: normalizeSource(mod.githubUrl),
+            page: 1,
+            hasMore: false,
+            communityRevision,
+            fetchedAt: new Date().toISOString(),
+            stale: true,
+            fromCache: true,
+            releases: [release]
+        };
+    }
+
     async function fetchReleases(mod, { page = 1, signal, useCache = true } = {}) {
         const market = window.modHubMarket;
         if (!mod?.id || !Number.isSafeInteger(page) || page < 1) throw historyError('无法识别模组历史发布请求', 'INVALID_RELEASE_REQUEST');
@@ -366,7 +425,11 @@
             checkCurrent();
             if (unsafeHistoryError(error)) rejectUnsafe(error);
             if (cached) return { ...cached.data, fromCache: true, stale: true };
-            if (mod.catalogSource === 'community') throw error;
+            const fallback = buildDirectoryFallbackReleases(mod, source, page, communityRevision);
+            if (mod.catalogSource === 'community') {
+                if (fallback) return fallback;
+                throw error;
+            }
             try {
                 data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
                 checkCurrent();
@@ -374,6 +437,7 @@
             } catch (directError) {
                 if (signal?.aborted || directError?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
                 checkCurrent();
+                if (fallback) return fallback;
                 rejectUnsafe(directError);
             }
         }

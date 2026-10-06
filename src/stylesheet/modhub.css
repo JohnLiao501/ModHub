@@ -409,6 +409,195 @@ button.modhub-btn-primary:active,
     box-sizing: border-box;
 }
 
+.modhub-btn-active {
+    background-color: var(--700, #444) !important;
+    border-color: var(--gold, #d4af37) !important;
+    color: var(--gold, #d4af37) !important;
+    box-shadow: 0 0 6px rgba(212, 175, 55, 0.3) !important;
+}
+
+/* ========== 批量管理列表工具栏与复选框 ========== */
+.modhub-list-toolbar {
+    margin-bottom: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.modhub-list-toolbar > #modHubBatchToggleBtn {
+    align-self: flex-start;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: auto !important;
+    min-height: 28px !important;
+    height: 28px !important;
+    padding: 3px 14px !important;
+    font-size: 0.85em !important;
+    border-radius: 3px !important;
+    background-color: #2b2b32 !important;
+    border: 1px solid var(--600, #4a4a58) !important;
+    color: var(--000, #ffffff) !important;
+    cursor: pointer !important;
+    white-space: nowrap !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+    transition: all 0.12s ease !important;
+}
+
+.modhub-list-toolbar > #modHubBatchToggleBtn:hover {
+    background-color: var(--700, #383842) !important;
+    border-color: var(--gold, #d4af37) !important;
+    color: var(--gold, #d4af37) !important;
+}
+
+/* ========== 批量管理工具栏与复选框 ========== */
+.modhub-batch-toolbar {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+    flex-wrap: wrap !important;
+    gap: 8px 12px !important;
+    margin-top: 4px;
+    padding: 8px 12px !important;
+    background-color: var(--850, #1c1c22) !important;
+    border: 1px solid var(--650, #3e3e4a) !important;
+    border-radius: 4px !important;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35) !important;
+}
+
+.modhub-batch-info {
+    font-size: 0.9em !important;
+    font-weight: bold !important;
+    color: var(--200, #eee) !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+}
+
+.modhub-batch-actions {
+    display: flex !important;
+    flex-direction: row !important;
+    flex-wrap: wrap !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    gap: 6px !important;
+    flex: 1 1 auto !important;
+}
+
+#modHubModManageContainer .modhub-batch-actions button,
+.modhub-batch-actions button,
+.modhub-batch-btn {
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    flex: 0 0 auto !important;
+    width: auto !important;
+    min-width: 66px !important;
+    max-width: none !important;
+    min-height: 30px !important;
+    height: 30px !important;
+    margin: 0 !important;
+    padding: 2px 10px !important;
+    font-size: 0.85em !important;
+    font-weight: 500 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    box-sizing: border-box !important;
+    background-color: #2b2b32 !important;
+    border: 1px solid var(--600, #4a4a58) !important;
+    border-radius: 3px !important;
+    color: var(--000, #ffffff) !important;
+    cursor: pointer !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35) !important;
+    transition: all 0.12s ease !important;
+}
+
+#modHubModManageContainer .modhub-batch-actions button:hover:not(:disabled),
+.modhub-batch-actions button:hover:not(:disabled) {
+    background-color: var(--700, #383842) !important;
+    border-color: var(--gold, #d4af37) !important;
+    color: #fff !important;
+}
+
+#modHubModManageContainer .modhub-batch-actions button:disabled,
+.modhub-batch-actions button:disabled {
+    opacity: 0.38 !important;
+    cursor: not-allowed !important;
+    border-color: var(--750, #333) !important;
+    color: var(--500, #777) !important;
+    box-shadow: none !important;
+}
+
+.modhub-batch-actions button[data-batch-action="enable"]:not(:disabled) {
+    border-color: rgba(34, 197, 94, 0.55) !important;
+    color: var(--green, #22c55e) !important;
+}
+
+.modhub-batch-actions button[data-batch-action="enable"]:hover:not(:disabled) {
+    border-color: var(--green, #22c55e) !important;
+    background-color: rgba(34, 197, 94, 0.15) !important;
+}
+
+.modhub-batch-actions button[data-batch-action="disable"]:not(:disabled) {
+    border-color: rgba(212, 175, 55, 0.55) !important;
+    color: var(--gold, #d4af37) !important;
+}
+
+.modhub-batch-actions button[data-batch-action="disable"]:hover:not(:disabled) {
+    border-color: var(--gold, #d4af37) !important;
+    background-color: rgba(212, 175, 55, 0.15) !important;
+}
+
+.modhub-batch-actions button[data-batch-action="delete"]:not(:disabled) {
+    border-color: rgba(239, 68, 68, 0.55) !important;
+    background-color: rgba(239, 68, 68, 0.08) !important;
+}
+
+.modhub-batch-actions button[data-batch-action="delete"]:hover:not(:disabled) {
+    border-color: var(--red, #ef4444) !important;
+    background-color: rgba(239, 68, 68, 0.22) !important;
+    color: #fff !important;
+}
+
+.modhub-batch-actions button#modHubBatchToggleBtn {
+    border-color: var(--600, #4a4a58) !important;
+    color: var(--300, #bbb) !important;
+}
+
+.modhub-batch-actions button#modHubBatchToggleBtn:hover {
+    border-color: var(--400, #888) !important;
+    color: #fff !important;
+}
+
+.modhub-batch-check-wrap {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 28px;
+    min-height: 28px;
+    cursor: pointer;
+    margin-right: 4px;
+    flex-shrink: 0;
+}
+
+.modhub-batch-checkbox {
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    accent-color: var(--gold, #ffcc00);
+}
+
+.modhub-item.modhub-item-selected {
+    background-color: rgba(212, 175, 55, 0.12) !important;
+    border-left: 3px solid var(--gold, #d4af37);
+}
+
+.modhub-item.modhub-batch-active {
+    cursor: pointer;
+}
+
 /* ========== 拖拽排序与指示线 ========== */
 .modhub-drag-handle {
     cursor: grab;
@@ -2648,6 +2837,39 @@ button.modhub-btn-primary:active,
 
     #modHubModManageContainer .modhub-btn-group button {
         min-height: 32px !important;
+    }
+
+    #modHubModManageContainer .modhub-batch-toolbar {
+        flex-direction: column !important;
+        align-items: stretch !important;
+        gap: 8px !important;
+        padding: 8px 10px !important;
+    }
+
+    #modHubModManageContainer .modhub-batch-info {
+        text-align: center !important;
+        justify-content: center !important;
+        font-size: 0.85em !important;
+    }
+
+    #modHubModManageContainer .modhub-batch-actions {
+        display: grid !important;
+        grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+        gap: 6px !important;
+        width: 100% !important;
+        justify-content: stretch !important;
+    }
+
+    #modHubModManageContainer .modhub-batch-actions button {
+        width: 100% !important;
+        min-width: 0 !important;
+        min-height: 34px !important;
+        height: 34px !important;
+        padding: 4px 2px !important;
+        font-size: 0.82em !important;
+        text-align: center !important;
+        justify-content: center !important;
+        flex: 1 1 auto !important;
     }
 
     #modHubModManageContainer .modhub-stats-container {

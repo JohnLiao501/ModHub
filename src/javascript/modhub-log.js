@@ -28,7 +28,7 @@ window.modHubSetAutoOpenErrorLogEnabled = function(val) {
 
 window.modHubToggleAutoOpenLogSetting = function(checked) {
     window.modHubSetAutoOpenErrorLogEnabled(checked);
-    window.modHubShowToast(checked ? '已开启【加载出错时自动弹出错误窗口】' : '已关闭【加载出错时自动弹出错误窗口】', 'info');
+    window.modHubShowToast(checked ? '已开启【加载出错时自动打开日志窗口】' : '已关闭【加载出错时自动打开日志窗口】', 'info');
     const toggleInput = document.getElementById('toggleAutoOpenErrorLog');
     if (toggleInput) toggleInput.checked = checked;
 };
@@ -42,6 +42,18 @@ const modHubIsWeatherImageFailure = line => {
         (/drawImage/i.test(line) && /provided value is not of type/i.test(line));
 };
 
+// NPC 怀孕/生育系统或开局变量未初始化异常判定
+const modHubIsNpcPregnancyInitFailure = line => {
+    const lineLower = line.toLowerCase();
+    if (lineLower.includes('npcpregnancyupdater')) return true;
+    if (lineLower.includes('pregnancyavoidance') && (lineLower.includes('undefined') || lineLower.includes('typeerror'))) return true;
+    if (lineLower.includes('incompletepregnancyenabled')) return true;
+    if (lineLower.includes('setup.pregnancy') && (lineLower.includes('c.npc') || lineLower.includes('$_name'))) return true;
+    if (lineLower.includes("reading 'pregnancy'") && (lineLower.includes('c.npc') || lineLower.includes('$_name'))) return true;
+    if (lineLower.includes('c.npc[$_name].pregnancy')) return true;
+    return false;
+};
+
 // 常见模组加载错误通俗化诊断知识库 (0 Emoji)
 const MODHUB_ERROR_PATTERNS = [
     {
@@ -51,8 +63,8 @@ const MODHUB_ERROR_PATTERNS = [
         resolve: line => modHubIsWeatherImageFailure(line) ? {
             id: 'weather-image-error',
             title: '原版天气图像加载或渲染失败',
-            desc: '天气渲染收到了无效图像尺寸或图像类型。这组 randomInt / drawImage 报错可能是图片加载失败后的连锁异常，需要先核实原版图像资源。',
-            solution: '检查与当前 DoL 版本对应的原版 img 资源是否完整且可访问，或使用包含原版图片的完整整合包；ModHub 本身不提供原版图包。若使用 GameOriginalImagePack，请确认已启用并完整重载游戏。若日志包含【资源加载失败】，请按记录的目标路径检查缺失或损坏的图片。资源完整时再核查游戏与图像加载框架的版本兼容，并保留原始堆栈反馈。'
+            desc: '天气系统在渲染天空或背景效果时遇到无效图像数据。此错误可能是原版图像资源缺失或加载失败导致的连锁异常。',
+            solution: '建议：1. 确认原版 img 图像资源完整且与当前 DoL 版本匹配；2. 若使用 GameOriginalImagePack 图像包，确认其已启用并重新载入游戏；3. 若仍有异常，检查图像加载框架与游戏版本的兼容性。'
         } : null
     },
     {
@@ -65,8 +77,8 @@ const MODHUB_ERROR_PATTERNS = [
             return {
                 id: 'game-version-mismatch',
                 title: '游戏版本不满足模组要求',
-                desc: `模组【${match[1]}】要求 DoL ${match[2]}，当前游戏版本为 ${match[3]}。`,
-                solution: `将 DoL 更新或切换到满足 ${match[2]} 的版本；若要继续使用 DoL ${match[3]}，请改装【${match[1]}】的对应旧版兼容包。不要直接忽略此错误。`
+                desc: `模组【${match[1]}】需要 DoL ${match[2]}，当前游戏版本为 ${match[3]}。`,
+                solution: `建议：将游戏更新至 ${match[2]} 或更高版本；或更换为适用于 DoL ${match[3]} 的旧版模组包。`
             };
         }
     },
@@ -80,8 +92,8 @@ const MODHUB_ERROR_PATTERNS = [
             return {
                 id: 'modloader-version-mismatch',
                 title: 'ModLoader 版本不满足要求',
-                desc: `模组【${match[1]}】要求 ModLoader ${match[2]}，当前版本为 ${match[3]}。`,
-                solution: `升级 ModLoader 到满足 ${match[2]} 的版本；若当前游戏整合包无法升级，请改用【${match[1]}】的旧版兼容包。`
+                desc: `模组【${match[1]}】需要 ModLoader ${match[2]}，当前版本为 ${match[3]}。`,
+                solution: `建议：将 ModLoader 更新至 ${match[2]} 或更高版本；或安装与当前 ModLoader 兼容的模组版本。`
             };
         }
     },
@@ -95,8 +107,8 @@ const MODHUB_ERROR_PATTERNS = [
             return {
                 id: 'dependency-version-mismatch',
                 title: '前置模组版本不满足要求',
-                desc: `模组【${match[1]}】要求前置【${match[2]}】版本 ${match[3]}，当前检测到 ${match[4]}。`,
-                solution: `将【${match[2]}】更新或切换到满足 ${match[3]} 的版本，删除重复旧包并重新载入游戏。`
+                desc: `模组【${match[1]}】需要前置模组【${match[2]}】版本 ${match[3]}，当前检测到 ${match[4]}。`,
+                solution: `建议：将【${match[2]}】更新至满足要求的版本，清理重复旧包后重新载入游戏。`
             };
         }
     },
@@ -110,8 +122,8 @@ const MODHUB_ERROR_PATTERNS = [
             return {
                 id: 'dependency-order',
                 title: '前置模组加载顺序错误',
-                desc: `模组【${match[1]}】需要【${match[2]}】先完成加载。`,
-                solution: `在模组管理中把【${match[2]}】移动到【${match[1]}】之前，或使用智能整理，然后重新载入游戏。`
+                desc: `模组【${match[1]}】依赖【${match[2]}】，要求其优先加载。`,
+                solution: `建议：在模组管理中将【${match[2]}】移动至【${match[1]}】之前，或执行【智能整理模组与美化顺序】。`
             };
         }
     },
@@ -119,15 +131,15 @@ const MODHUB_ERROR_PATTERNS = [
         id: 'mod-name-lookup-miss',
         title: '模组名称或别名查询未命中',
         keywords: ['modordercontainer getbynameonewithalias() cannot find name/alias.'],
-        desc: 'ModLoader 按名称或别名查找模组时未找到匹配项。可能与目标未安装或未启用、名称不一致、兼容探测有关。仅凭这条日志，不能确认是否影响游戏。',
-        solution: '核对原始日志中的查询名称、安装和启用状态，以及相关调用上下文；若同时出现依赖校验失败或脚本异常，请结合对应错误继续排查。'
+        desc: 'ModLoader 按名称或别名查找模组时未找到匹配项。可能由于目标模组未安装、未启用或名称不匹配引起。仅凭此日志，不能确认是否影响游戏。',
+        solution: '建议：核对目标模组的安装与启用状态；若伴随脚本或依赖报错，请结合具体错误排查。'
     },
     {
         id: 'missing-dep',
         title: '前置依赖模组缺失',
         keywords: ['not found', 'cannot find mod', 'dependency', 'depends on', 'dependenceinfo', 'referror', '未找到前置'],
-        desc: '某个模组运行需要其他基础模组提供支持，但当前游戏中未安装或未启用对应的前置模组。',
-        solution: '请查看报错模组的说明文档（ReadMe），下载并启用对应的前置框架模组（如 Simple Framework 等）。'
+        desc: '当前模组缺少必要的前置依赖，或对应依赖项未启用。',
+        solution: '建议：查看模组说明文档，下载并启用所需的前置框架模组（例如 Simple Framework）。'
     },
     {
         id: 'twee-patch-mismatch',
@@ -145,17 +157,13 @@ const MODHUB_ERROR_PATTERNS = [
                     const modLabel = friendlyName && friendlyName !== rawModName ? `${friendlyName} (${rawModName})` : (rawModName || '模组');
                     const okCount = okMatch ? okMatch[1] : '';
 
-                    let desc = `模组【${modLabel}】在应用 TweeReplacer 补丁时有 ${countMatch[1]} 处未能匹配。`;
-                    if (okCount) {
-                        desc += `（该模组其余 ${okCount} 处补丁已成功匹配）。`;
-                    }
-                    desc += '通常因为与其他模组修改了同一处文本、或当前游戏本体/汉化版本的用词存在出入。';
+                    const desc = `模组【${modLabel}】有 ${countMatch[1]} 处补丁未能匹配${okCount ? `（其余 ${okCount} 处已匹配）` : ''}。原因可能是多个模组修改了同一文本，或文本与当前游戏/汉化版本存在差异。`;
 
                     return {
                         id: 'twee-patch-mismatch',
-                        title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
-                        desc: desc,
-                        solution: '请定位具体未匹配的段落与文本，核对模组版本及加载顺序。成功匹配数量不能证明失败补丁不影响功能；若近期安装后出现异常，可在【还原点】中恢复安装前的配置。',
+                        title: 'TweeReplacer 补丁文本未匹配',
+                        desc,
+                        solution: '建议：1. 执行【智能整理模组与美化顺序】调整加载次序；2. 若游戏功能异常，可在【还原点】中恢复安装前的配置。若大部分补丁已匹配，通常仅影响局部选项。',
                         isSummary: true
                     };
                 }
@@ -189,29 +197,65 @@ const MODHUB_ERROR_PATTERNS = [
                 /\$cheatsEnabled\s+is\s+true\s+or\s+\$debug\s+is\s+1/.test(findTarget);
 
             if (isWraithTemple) {
-                desc = `模组【${modLabel}】尝试对神庙段落【Temple Jordan】打补丁寻找选项文本时未能匹配。成因解析：该模组基于特定中文汉化环境制作，而当前游戏本体底层段落为英文原版（或当前汉化版本用词存在出入）。该处仅用于在神庙修士处添加询问银海螺的次要选项，模组绝大部分核心剧情（象牙怨灵恋爱、偷还项链、专属特质与约会等）均已正常加载生效。`;
-                solution = '①【不必担心】若游戏能正常进入，这完全不会影响怨灵恋爱核心剧情与存档安全，可放心继续游玩；② 若您安装了独立的汉化模组，可在【模组管理】中点击【智能整理模组与美化顺序】，确保汉化模组优先于剧情模组生效；③ 此提示属于第三方模组写死特定汉化用词引发的正常现象，通常无需处理。';
+                desc = `模组【${modLabel}】在神庙段落【Temple Jordan】中未匹配到选项文本。原因可能是模组针对特定中文汉化制作，而当前游戏文本存在词句差异。该补丁仅用于添加询问银海螺的次要选项。`;
+                solution = '建议：1. 不必担心，此项未匹配不影响怨灵恋爱核心剧情，可正常继续游玩；2. 若安装了独立汉化模组，可在模组管理中执行【智能整理模组与美化顺序】确保汉化优先加载。';
             } else if (isOriginalOptimizationUiEntry) {
-                desc = `模组【${modLabel}】对界面段落【${passageName}】的管理器入口补丁未能匹配，可能与 ModHub 等模组改写同处入口或游戏文本变化有关。已安装 ModHub 时，可使用 ModHub 的管理器入口。`;
-                solution = '若仅此管理器入口补丁失败，通常不影响核心剧情，可正常游玩；仍应核对原始日志与实际功能。可使用【智能整理模组与美化顺序】检查加载次序；如果启动或其他功能异常，请使用【还原点】恢复之前的配置。';
+                desc = `模组【${modLabel}】在段落【${passageName}】的管理器入口补丁未能匹配。原因可能是入口已被 ModHub 替代，或游戏界面文本存在差异。`;
+                solution = '建议：1. 此项不影响核心剧情，游戏可正常游玩；2. 可执行【智能整理模组与美化顺序】检查次序；3. 若遇到功能异常，可在【还原点】中恢复之前的配置。';
             } else if (isCheatLyraEntry) {
-                desc = `模组【${modLabel}】对【StoryCaption】中作弊按钮开放条件的补丁未能匹配。这不是 ModHub 管理器入口补丁；其他模组可能已修改该条件，也可能存在游戏版本差异，仅凭此日志不能确定冲突来源或功能影响。`;
-                solution = '请核对作弊入口是否正常显示，检查 Cheat-Lyra 与当前游戏版本及其他作弊模组的兼容情况。可查看完整日志与【智能整理模组与美化顺序】；如果安装后出现异常，在【还原点】中恢复安装前的配置。';
+                desc = `模组【${modLabel}】在【StoryCaption】中修改作弊按钮开放条件的补丁未能匹配。可能由于其他模组修改了相同位置或游戏版本差异引起，仅凭此日志不能确定冲突来源或功能影响。`;
+                solution = '建议：1. 确认作弊入口是否正常显示；2. 检查与当前游戏版本及其他作弊模组的兼容性；3. 可执行【智能整理模组与美化顺序】，或在【还原点】中恢复安装前的配置。';
             } else if (isChineseSnippet && passageName) {
                 const previewSnippet = findTarget.length > 24 ? findTarget.slice(0, 24) + '...' : findTarget;
-                desc = `模组【${modLabel}】在尝试对段落【${passageName}】打补丁时未能匹配成功。成因解析：模组在代码中硬编码了特定汉化版本的中文文本（如“${previewSnippet}”），因当前游戏本体或汉化版本的词句、空格或换行不同而未能匹配。`;
-                solution = '①【不必担心】若游戏能正常进入，通常仅影响该处的局部剧情分支，绝大部分功能已成功生效，可放心游玩；② 建议在【模组管理】中使用【智能整理模组与美化顺序】让汉化模组优先加载；③ 若遇到特定场景异常，可关注模组作者发布的最新适配版本。';
+                desc = `模组【${modLabel}】在段落【${passageName}】中未匹配到中文文本“${previewSnippet}”。原因可能是当前游戏或汉化版本的词句、空格或排版存在差异。`;
+                solution = '建议：1. 在模组管理中执行【智能整理模组与美化顺序】，确保汉化优先加载；2. 若游戏运行正常，通常仅影响局部剧情分支。';
             } else if (rawModName && passageName) {
-                desc = `模组【${modLabel}】尝试对游戏段落【${passageName}】打补丁时，未能找到指定的原版匹配文本。常见原因：① 补丁冲突：多个模组修改了同一处段落（排在前面的模组先改写了文本或换行，导致后加载模组匹配失败）；② 该模组版本未完全适配当前游戏本体文本。`;
-                solution = '请定位未匹配文本并核对实际功能，检查模组与游戏版本兼容情况。可使用【智能整理模组与美化顺序】检查加载次序；若近期安装后出现异常，在【还原点】中恢复安装前的配置。';
+                desc = `模组【${modLabel}】在段落【${passageName}】中未找到匹配目标。原因可能是多个模组修改了同一文本，或模组未适配当前游戏版本。`;
+                solution = '建议：1. 执行【智能整理模组与美化顺序】调整加载次序；2. 若出现异常，可在【还原点】中恢复配置。若大部分补丁已匹配，通常仅影响局部选项。';
             } else {
-                desc = 'TweeReplacer 补丁尝试改写游戏段落时未能找到指定的原版匹配文本。通常因为多个模组修改同一处文本产生冲突，或模组版本未适配当前游戏。';
-                solution = '① 若游戏能正常游玩，通常绝大部分功能已成功生效；② 尝试在【模组管理】中调整模组加载顺序（推荐使用【智能整理模组与美化顺序】）；③ 若持续影响游玩，请检查报错模组与当前游戏版本的兼容性。';
+                desc = '补丁未能找到匹配的文本目标。原因可能是多个模组修改了同一位置，或模组未适配当前游戏版本。';
+                solution = '建议：1. 执行【智能整理模组与美化顺序】；2. 若仍有异常，检查模组与当前游戏版本的兼容性。';
             }
 
             return {
                 id: 'twee-patch-mismatch',
-                title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
+                title: 'TweeReplacer 补丁文本未匹配',
+                desc,
+                solution
+            };
+        }
+    },
+    {
+        id: 'npc-pregnancy-init-error',
+        title: 'NPC 怀孕系统或开局变量未初始化',
+        keywords: ['npcpregnancyupdater', 'c.npc[$_name]', 'setup.pregnancy', 'pregnancyavoidance', 'incompletepregnancyenabled', "reading 'pregnancy'"],
+        resolve: line => {
+            if (!modHubIsNpcPregnancyInitFailure(line)) return null;
+
+            // 检查已安装模组中是否存在相关的机制模组
+            const knownMods = window.modHubGetAllKnownModNames ? Array.from(window.modHubGetAllKnownModNames()) : [];
+            const relatedKeywords = ['fertility', 'pregnancy', 'sims', '生育', '模拟人生', 'babyhawk', '育雏'];
+            const detectedRelatedMods = knownMods.filter(name => {
+                const lower = String(name).toLowerCase();
+                const alias = (window.modHubFindKnownAlias ? window.modHubFindKnownAlias(name) : '').toLowerCase();
+                return relatedKeywords.some(kw => lower.includes(kw) || alias.includes(kw));
+            }).map(name => {
+                const friendly = window.modHubFindKnownAlias ? window.modHubFindKnownAlias(name) : '';
+                return friendly && friendly !== name ? `${friendly} (${name})` : name;
+            });
+
+            const desc = '游戏在段落【Start】执行宏【<<npcPregnancyUpdater>>】时，因相关变量未初始化导致读取失败。原因可能是多个修改 NPC 或生育机制的模组同时存在，导致初始化时序冲突或代码被覆盖。';
+
+            let solution = '';
+            if (detectedRelatedMods.length > 0) {
+                solution = `已检测到相关模组：【${detectedRelatedMods.join('】、【')}】。建议：1. 禁用其中一个机制模组（如生育拓展或模拟人生）以排查冲突；2. 尝试新建游戏开档，确认是否为旧存档字段不兼容；3. 在【还原点】中恢复之前的配置。`;
+            } else {
+                solution = '建议：1. 禁用近期添加的机制类模组以排查冲突；2. 尝试新建游戏开档，确认是否为旧存档字段不兼容；3. 在【还原点】中恢复之前的配置。';
+            }
+
+            return {
+                id: 'npc-pregnancy-init-error',
+                title: 'NPC 怀孕系统或开局变量未初始化',
                 desc,
                 solution
             };
@@ -219,45 +263,45 @@ const MODHUB_ERROR_PATTERNS = [
     },
     {
         id: 'patch-conflict',
-        title: '模组补丁冲突或文本不匹配',
+        title: '模组补丁冲突或目标未找到',
         keywords: ['patchmodtogame', 'replacepatcher', 'replace target', 'replace error', 'patch failed', 'duplicate', 'already exists'],
-        desc: '补丁尝试修改游戏原版段落或代码时失败。通常因为多个模组修改了同一处文本产生冲突，或模组版本过旧未适配当前游戏。',
-        solution: '在模组管理中调整模组加载顺序（建议尝试【智能整理模组与美化顺序】）；若仍报错，请检查模组版本是否与当前游戏兼容。'
+        desc: '补丁未能成功应用到游戏段落或脚本。原因可能是多个模组修改了同一内容，或模组版本与当前游戏不兼容。',
+        solution: '建议：1. 执行【智能整理模组与美化顺序】优化加载次序；2. 若仍有错误，检查模组与当前游戏版本的兼容性。'
     },
     {
         id: 'syntax-error',
         title: '代码语法错误 / 压缩包损坏',
         keywords: ['syntaxerror', 'unexpected token', 'unexpected identifier', 'invalid or unexpected token'],
-        desc: '模组脚本解析失败。模组的代码本身存在语法疏漏，或者压缩包在下载或解压过程中损坏。',
-        solution: '排查最近添加或更新的模组文件，尝试重新下载完整 Mod Zip 压缩包，或向模组作者反馈语法错误。'
+        desc: '模组脚本语法解析失败。原因可能是脚本本身存在语法错误，或文件在下载解压过程中损坏。',
+        solution: '建议：1. 重新下载并安装最近添加的模组；2. 若问题仍存在，请向模组作者反馈。'
     },
     {
         id: 'type-error',
-        title: '空指针未定义异常 (TypeError)',
+        title: '脚本未定义异常 (TypeError)',
         keywords: ['typeerror', 'cannot read properties of', 'cannot read property', 'is not a function', 'is undefined'],
-        desc: '模组试图调用未定义的对象或方法。常因前置模组加载过晚，或新版游戏官方重构调整了内部变量名。',
-        solution: '尝试将基础框架模组拖至模组管理顶部优先加载；若无法解决，可能是模组尚未适配当前游戏版本。'
+        desc: '脚本尝试访问未定义的对象或方法。原因可能是前置依赖缺失、加载顺序不当，或模组未适配当前游戏版本。',
+        solution: '建议：1. 检查并将基础前置模组移至前面优先加载；2. 确认相关模组是否与当前游戏版本兼容。'
     },
     {
         id: 'boot-json-error',
         title: '模组清单配置 (boot.json) 异常',
         keywords: ['boot.json', 'invalid json', 'json.parse', 'missing name in boot.json', 'format error'],
-        desc: '模组核心清单文件损坏、缺少必要字段或不是合法的 JSON 格式。',
-        solution: '重新下载原版 Mod Zip 文件；若自行修改过模组，请确保 boot.json 遵循规范 JSON 格式。'
+        desc: '模组清单文件 (boot.json) 损坏、缺失关键字段或 JSON 格式无效。',
+        solution: '建议：1. 重新下载该模组的安装包；2. 若曾手动修改过模组，请检查 boot.json 是否符合标准 JSON 格式。'
     },
     {
         id: 'storage-quota',
         title: '本地存储空间超限 (QuotaExceeded)',
         keywords: ['quotaexceedederror', 'indexeddb', 'storage quota', 'database error'],
-        desc: '旁加载模组体积过大或图片过多，超出了浏览器允许的本地 IndexedDB 存储空间上限。',
-        solution: '在通用或模组管理界面删除不常用的大型旁加载模组，或使用整合版微端运行游戏。'
+        desc: '旁加载模组数据超出了浏览器 IndexedDB 存储配额上限。',
+        solution: '建议：在模组管理中删除未使用的大型旁加载模组，或改用独立微端运行游戏。'
     },
     {
         id: 'asset-missing',
         title: '图片或多媒体资源加载失败',
         keywords: ['404', 'failed to load resource', 'img/', 'image pack'],
-        desc: '原版或模组资源可能缺失、损坏或暂时不可访问；仅凭此日志不能断定是 404，也不能确定来自某个美化包。',
-        solution: '先检查日志中的目标资源路径、原版图片包是否完整，以及资源与当前游戏版本是否匹配；若路径属于模组或美化，再检查对应包体和启用状态。'
+        desc: '资源文件无法加载。可能由于文件缺失、路径无效或未正确解压引起。',
+        solution: '建议：1. 根据日志中记录的路径检查对应资源文件是否存在；2. 检查所用美化或图片包是否已正确启用且与当前游戏版本匹配。'
     }
 ];
 
@@ -587,15 +631,41 @@ window.modHubAnalyzeLogs = function(rawContent) {
             }
         }
 
+        // 提取 SugarCube 报错段落名，如 (:: Start)
+        const sugarCubePassageRegex = /\(\s*::\s*([^):]+?)\s*\)/g;
+        let scpm;
+        while ((scpm = sugarCubePassageRegex.exec(cleanMsg)) !== null) {
+            const passageName = scpm[1].trim();
+            if (passageName && !['info', 'warn', 'error'].includes(passageName.toLowerCase())) {
+                foundFilesInLine.add(passageName);
+            }
+        }
+
+        // 提取 Widget/宏报错名称，如 <<npcPregnancyUpdater>>: error within widget code
+        if (cleanMsg.includes('error within widget code') || cleanMsg.includes('<<widget')) {
+            const widgetErrorRegex = /<<([a-zA-Z0-9_\-]+)>>/gi;
+            let wem;
+            while ((wem = widgetErrorRegex.exec(cleanMsg)) !== null) {
+                const widgetName = wem[1].trim();
+                const builtInMacros = ['if', 'else', 'elseif', 'endif', 'set', 'unset', 'switch', 'case', 'default', 'for', 'break', 'continue', 'link', 'button'];
+                if (widgetName && !builtInMacros.includes(widgetName.toLowerCase())) {
+                    foundFilesInLine.add(`<<${widgetName}>>`);
+                }
+            }
+        }
+
         // 如果是错误行，归纳并匹配知识库
         if (level === 'error') {
             foundModsInLine.forEach(m => errorMods.add(m));
             foundFilesInLine.forEach(f => errorFiles.add(f));
 
             const isWeatherImageFailure = modHubIsWeatherImageFailure(cleanMsg);
+            const isPregnancyInitFailure = modHubIsNpcPregnancyInitFailure(cleanMsg);
             MODHUB_ERROR_PATTERNS.forEach(pattern => {
                 // 特定天气行使用图像诊断，独立的其他 TypeError 和资源错误仍照常保留。
                 if (isWeatherImageFailure && ['type-error', 'asset-missing'].includes(pattern.id)) return;
+                // NPC 怀孕系统初始化异常使用专项诊断，避免混入宽泛的普通 TypeError。
+                if (isPregnancyInitFailure && pattern.id === 'type-error') return;
                 if (pattern.keywords.some(kw => lineLower.includes(kw.toLowerCase()))) {
                     const issue = typeof pattern.resolve === 'function' ? pattern.resolve(cleanMsg) : pattern;
                     if (issue && (!matchedIssuesMap.has(issue.id) ||
@@ -692,9 +762,11 @@ window.modHubRenderLogDiagnosis = function(analysis) {
                 <div class="diag-badges">
                     ${analysis.errorFiles.map(fileName => {
                         const isFile = /\.(?:js|twee|json|png|gif|css|zip|html)$/i.test(fileName);
-                        const tag = isFile ? '[文件]' : '[段落]';
+                        const isWidget = /^<<.*>>$/.test(fileName);
+                        const tag = isFile ? '[文件]' : (isWidget ? '[宏]' : '[段落]');
+                        const searchTerm = isWidget ? fileName.slice(2, -2) : fileName;
                         return `
-                            <button type="button" class="modhub-diag-badge file-badge" data-log-search="${window.modHubEscapeHtml(fileName)}" title="点击在日志中筛选此${isFile ? '文件' : '段落'}">
+                            <button type="button" class="modhub-diag-badge file-badge" data-log-search="${window.modHubEscapeHtml(searchTerm)}" title="点击在日志中筛选此${isFile ? '文件' : (isWidget ? '宏' : '段落')}">
                                 ${tag} ${window.modHubEscapeHtml(fileName)}
                             </button>
                         `;
@@ -704,11 +776,11 @@ window.modHubRenderLogDiagnosis = function(analysis) {
         `;
     }
 
-    // 通俗原因分析与排查建议
+    // 原因分析与排查建议
     if (analysis.matchedIssues.length > 0) {
         html += `
             <div class="modhub-diag-issues">
-                <div class="grey diag-label" style="margin-bottom: 6px;">可能原因分析与排查指引：</div>
+                <div class="grey diag-label" style="margin-bottom: 6px;">原因分析与排查建议：</div>
                 ${analysis.matchedIssues.map(issue => `
                     <div class="modhub-issue-item">
                         <div class="issue-title gold">【${window.modHubEscapeHtml(issue.title)}】</div>
@@ -733,9 +805,9 @@ window.modHubRenderLogDiagnosis = function(analysis) {
     // 底部控制开关
     html += `
             <div class="modhub-diag-footer">
-                <label class="modhub-checkbox-label" title="开启后，若下次游戏启动加载模组发生错误将自动弹出本日志窗口并定位错误">
+                <label class="modhub-checkbox-label" title="开启后，若下次游戏启动检测到加载错误将自动打开日志窗口并定位">
                     <input type="checkbox" id="toggleAutoOpenErrorLog" class="macro-checkbox" ${autoOpenEnabled ? 'checked' : ''} onchange="window.modHubToggleAutoOpenLogSetting(this.checked)" />
-                    游戏启动检测到加载错误时直接打开错误窗口并定位 <span class="gold">(默认开启，可在此关闭)</span>
+                    游戏启动检测到加载错误时自动打开日志窗口并定位 <span class="gold">(默认开启，可在此关闭)</span>
                 </label>
             </div>
         </div>

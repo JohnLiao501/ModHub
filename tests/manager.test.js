@@ -82,7 +82,7 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.3.1', 'boot.json 版本号必须为 1.3.1');
+    assert.equal(bootJson.version, '1.3.2', 'boot.json 版本号必须为 1.3.2');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
@@ -1155,4 +1155,116 @@ module.exports = async function() {
         assert.equal(sb._modHubReloadPromptedRevision, sb._modHubReloadRevision, '框架稍后重载后不得再重复提醒已确认批次');
     }
 
+    // 批量多选管理：渲染契约、模式切换、全选/反选、批量启用、批量禁用与批量删除
+    {
+        // 1. UI 渲染契约测试
+        const renderSb = createBaseSandbox();
+        loadScripts(renderSb, [...bootJson.scriptFileList_inject_early, 'javascript/modhub-manager.js']);
+        const container = createStubElement();
+        renderSb.document.getElementById = id => id === 'modHubModManageContainer' ? container : null;
+        renderSb.modHubGetGui = () => ({ gModUtils: { version: '2.3.4', getModListNameNoAlias: () => [] }, listSideLoadModNameOnly: () => [] });
+        renderSb.modHubGetModInfo = () => ({ bootJson: { version: '1.0.0' } });
+        renderSb.modHubGetModSubtext = () => '';
+        renderSb.modHubProtectedRecoveryNames = () => ['ModHub'];
+        renderSb.modHubEnsureModStateSync = renderSb.modHubUpdateManagerStatus = renderSb.modHubRenderBeautyUI = renderSb.modHubUpdateGeneralInfo = () => {};
+        renderSb._modHubModState = {
+            sideMods: [
+                { name: 'ModHub', enabled: true },
+                { name: 'ModA', enabled: true }
+            ],
+            builtInMods: []
+        };
+
+        // 默认非批量模式
+        renderSb.modHubRenderModManageUI();
+        assert.ok(container.innerHTML.includes('modHubBatchToggleBtn'), '已安装模组顶部必须提供多选操作按钮');
+        assert.ok(!container.innerHTML.includes('modHubBatchToolbar'), '默认不得展示批量工具栏');
+        assert.ok(!container.innerHTML.includes('modhub-batch-checkbox'), '默认不得展示复选框');
+
+        // 切换进入批量模式
+        renderSb._modHubBatchMode = true;
+        renderSb._modHubSelectedMods = new Set(['ModA']);
+        renderSb.modHubRenderModManageUI();
+        assert.ok(container.innerHTML.includes('modHubBatchToolbar'), '批量模式下必须渲染批量工具栏');
+        assert.ok(container.innerHTML.includes('modhub-batch-checkbox'), '批量模式下必须渲染复选框');
+        assert.ok(container.innerHTML.includes('disabled title="系统保护模组，不可批量操作"'), '受保护模组复选框必须被禁用保护');
+        assert.ok(container.innerHTML.includes('退出多选'), '批量模式下按钮文本应变为退出多选');
+
+        // 2. 状态变迁与业务逻辑测试
+        const controller = createMockController({
+            enabled: ['ModHub', 'ModA', 'ModB'],
+            disabled: ['ModC'],
+            zips: ['ModHub', 'ModA', 'ModB', 'ModC']
+        });
+        const sb = loadManager({ modModLoadController: controller });
+        sb.modHubProtectedRecoveryNames = () => ['ModHub'];
+        sb.modHubGetModInfo = name => ({ bootJson: { name, version: '1.0.0' } });
+        sb.modHubGetModSubtext = () => '';
+        sb.modHubEnsureRecoveryPlacement = async () => true;
+        sb.modHubLoadBeautyState = async () => true;
+
+        await sb.modHubLoadModManageState();
+        assert.equal(sb._modHubBatchMode, false, '默认初始状态不得处于批量模式');
+        assert.equal(sb._modHubSelectedMods.size, 0, '默认初始选中集合为空');
+
+        // 模式切换
+        sb.modHubToggleBatchMode(true);
+        assert.equal(sb._modHubBatchMode, true, '切换后进入批量模式');
+
+        // 全选与反选（系统保护模组 ModHub 必须被排除）
+        sb.modHubBatchSelectAll();
+        assert.ok(!sb._modHubSelectedMods.has('ModHub'), '系统保护模组 ModHub 严禁被全选选中');
+        assert.ok(sb._modHubSelectedMods.has('ModA') && sb._modHubSelectedMods.has('ModB') && sb._modHubSelectedMods.has('ModC'), '其余旁加载模组必须全部被选中');
+        assert.equal(sb._modHubSelectedMods.size, 3);
+
+        sb.modHubBatchInvertSelect();
+        assert.equal(sb._modHubSelectedMods.size, 0, '全选后反选应清空非保护模组选中');
+
+        // 单独选择
+        sb.modHubToggleSelectMod('ModC', true);
+        assert.equal(sb._modHubSelectedMods.size, 1);
+        assert.ok(sb._modHubSelectedMods.has('ModC'));
+
+        // 批量启用 ModC
+        const toasts = [];
+        sb.modHubShowToast = (msg, type) => toasts.push({ msg, type });
+        await sb.modHubBatchEnable();
+        assert.equal(sb._modHubModState.sideMods.find(m => m.name === 'ModC').enabled, true, 'ModC 必须已被批量启用');
+        assert.equal(sb._modHubSelectedMods.size, 0, '批量操作完成后必须清空选中集合');
+
+        // 批量禁用 ModA 与 ModB（带依赖提示）
+        sb.modHubToggleSelectMod('ModA', true);
+        sb.modHubToggleSelectMod('ModB', true);
+        sb.modHubFindDependentMods = async name => name === 'ModA' ? [{ name: 'DependentMod', rawName: 'DependentMod', version: '1.0' }] : [];
+        let confirmOptions = null;
+        sb.modHubConfirm = async opts => {
+            confirmOptions = opts;
+            return true;
+        };
+        await sb.modHubBatchDisable();
+        assert.ok(confirmOptions, '存在下游依赖时批量禁用必须弹出确认提示');
+        assert.ok(confirmOptions.trustedMessageHtml.includes('DependentMod'), '批量禁用提示中必须列出受影响模组');
+        assert.equal(sb._modHubModState.sideMods.find(m => m.name === 'ModA').enabled, false, 'ModA 必须已被批量禁用');
+        assert.equal(sb._modHubModState.sideMods.find(m => m.name === 'ModB').enabled, false, 'ModB 必须已被批量禁用');
+        assert.equal(sb._modHubSelectedMods.size, 0, '操作完成后清空选择');
+
+        // 批量删除 ModA 与 ModB
+        sb.modHubToggleSelectMod('ModA', true);
+        sb.modHubToggleSelectMod('ModB', true);
+        let deleteConfirmOptions = null;
+        sb.modHubConfirm = async opts => {
+            deleteConfirmOptions = opts;
+            return true;
+        };
+        await sb.modHubBatchDelete();
+        assert.ok(deleteConfirmOptions, '批量删除必须弹出暗黑确认提示');
+        assert.equal(deleteConfirmOptions.confirmType, 'danger', '批量删除必须使用 danger 确认类型');
+        assert.equal(sb._modHubModState.sideMods.some(m => m.name === 'ModA' || m.name === 'ModB'), false, '列表必须已移除 ModA 与 ModB');
+        assert.equal(controller.store.zips.has('ModA') || controller.store.zips.has('ModB'), false, '包体必须已从存储中删除');
+        assert.equal(sb._modHubSelectedMods.size, 0, '删除完成后清空选择');
+
+        // 退出多选模式
+        sb.modHubToggleBatchMode(false);
+        assert.equal(sb._modHubBatchMode, false, '退出多选模式');
+    }
 };

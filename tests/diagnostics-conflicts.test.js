@@ -1103,6 +1103,39 @@ module.exports = async function() {
         assert.ok(marketAffectedNames.includes('MapleMod'), '市场端冲突检测中 MapleMod 属于 maplebirch 下游');
         assert.ok(!marketAffectedNames.includes('CustomHair'), '市场端冲突检测中 CustomHair 绝不能误归 maplebirch 下游');
 
+        // 验证删除 DOLI 时不误判依赖 ImageLoaderHook 的模组
+        const doliTestMap = new Map([
+            ['doli', { name: 'DOLI', bootJson: { name: 'DOLI', version: '1.0.0' } }],
+            ['游戏中文化补丁', { name: '游戏中文化补丁', bootJson: { name: '游戏中文化补丁', version: '1.0.1a',
+                addonPlugin: [{ modName: 'ModLoader DoL ImageLoaderHook', addonName: 'ImageLoaderHook' }] } }],
+            ['realdolidep', { name: 'RealDoliDep', bootJson: { name: 'RealDoliDep', version: '1.0.0',
+                dependenceInfo: [{ modName: 'DOLI', minVersion: '1.0.0' }] } }]
+        ]);
+        manager.modHubGetModInfo = name => doliTestMap.get(String(name).toLowerCase()) || null;
+        manager._modHubModState = {
+            sideMods: [
+                { name: 'DOLI', enabled: true },
+                { name: '游戏中文化补丁', enabled: true },
+                { name: 'RealDoliDep', enabled: true }
+            ],
+            sideEnabled: ['DOLI', '游戏中文化补丁', 'RealDoliDep'],
+            sideDisabled: []
+        };
+        const doliDeps = await manager.modHubFindDependentMods('DOLI');
+        const doliDepNames = doliDeps.map(m => m.name || m.rawName);
+        assert.ok(doliDepNames.includes('RealDoliDep'), '真正依赖 DOLI 的模组必须被找出');
+        assert.ok(!doliDepNames.includes('游戏中文化补丁'), '依赖 ImageLoaderHook 的模组绝不能因字母拼接被误判为依赖 DOLI！');
+
+        const doliProfiles = [
+            { name: 'DOLI', rawName: 'DOLI', bootJson: doliTestMap.get('doli').bootJson },
+            { name: '游戏中文化补丁', rawName: '游戏中文化补丁', bootJson: doliTestMap.get('游戏中文化补丁').bootJson },
+            { name: 'RealDoliDep', rawName: 'RealDoliDep', bootJson: doliTestMap.get('realdolidep').bootJson }
+        ];
+        const marketDoliDeps = market.findDependentModsForConflict('DOLI', doliProfiles, new Set());
+        const marketDoliDepNames = marketDoliDeps.map(m => m.name || m.rawName);
+        assert.ok(marketDoliDepNames.includes('RealDoliDep'), '市场端：真正依赖 DOLI 的模组必须被找出');
+        assert.ok(!marketDoliDepNames.includes('游戏中文化补丁'), '市场端：依赖 ImageLoaderHook 的模组绝不能误判为依赖 DOLI！');
+
         manager.modHubGetModInfo = oldGetModInfo;
 
         // 16.3 契约 3：核心框架判断与重启建议强化
@@ -1297,5 +1330,57 @@ module.exports = async function() {
             '管理启用调用同一真实别名提供者检查；取消不得启用第二个框架');
         assert.equal(enableConfirmations, 1);
         assert.equal(env._modHubModState.sideMods[1].enabled, false);
+    }
+
+    // 15. SugarCube 段落 (:: Start)、Widget 宏与 NPC 怀孕系统/开局变量未初始化专项诊断测试
+    {
+        const manager = loadManager({
+            modLoaderGui: {
+                gModUtils: {
+                    getModListNameNoAlias: () => ['FertilityExpansion', 'DoLSims', 'DomRobin']
+                }
+            }
+        });
+        const pregnancyLogLines = [
+            "[错误] [sugarcube] (:: Start): <<if>>: bad conditional expression in <<if>> clause: TypeError: Cannot read properties of undefined (reading 'pregnancy') <<if C.npc[$_name].pregnancy is undefined>> <<set C.npc[$_name].pregnancy to {}>> <</if>>",
+            "[错误] [sugarcube] (:: Start): <<set>>: bad evaluation: TypeError: Cannot read properties of undefined (reading 'pregnancy') <<set $_pregnancy to C.npc[$_name].pregnancy>>",
+            "[错误] [sugarcube] (:: Start): <<if>>: bad conditional expression in <<if>> clause: TypeError: Cannot read properties of undefined (reading 'type') <<if !setup.pregnancy.infertile.includes($_name) and setup.pregnancy.typesEnabled.includes(C.npc[$_name].type) and ...",
+            "[错误] [sugarcube] (:: Start): <<if>>: bad conditional expression in <<if>> clause: TypeError: Cannot read properties of undefined (reading 'pregnancyAvoidance') <<if !C.npc[$_name].pregnancyAvoidance or $objectVersion.pregnancyAvoidance is undefined>>",
+            "[错误] [sugarcube] (:: Start): <<if>>: bad conditional expression in <<elseif>> clause (#1): TypeError: Cannot read properties of undefined (reading 'incompletePregnancyEnabled') <<if ... $settings.incompletePregnancyEnabled ...",
+            "[错误] [sugarcube] (:: Start): <<set>>: bad evaluation: TypeError: Cannot set properties of undefined (setting 'pregnancyAvoidance') <<set $objectVersion.pregnancyAvoidance to 1>>",
+            "[错误] [sugarcube] (:: Start): <<npcPregnancyUpdater>>: error within widget code (0.5.12.13 Error (:: Start) ... <<npcPregnancyUpdater>>)"
+        ];
+
+        const analysis = manager.modHubAnalyzeLogs(pregnancyLogLines);
+        assert.equal(analysis.errorCount, 7, '7 行错误日志必须精确计数');
+        assert.ok(analysis.errorFiles.includes('Start'), '必须从 (:: Start) 中精准提取段落【Start】');
+        assert.ok(analysis.errorFiles.includes('<<npcPregnancyUpdater>>'), '必须精准提取出错宏【<<npcPregnancyUpdater>>】');
+
+        assert.equal(analysis.matchedIssues.length, 1, 'NPC 怀孕变量未定义连锁报错必须归纳为 1 项专项诊断');
+        const issue = analysis.matchedIssues[0];
+        assert.equal(issue.id, 'npc-pregnancy-init-error', '必须精准命中 npc-pregnancy-init-error 专项诊断，绝不能退化为普通 TypeError');
+        assert.ok(issue.desc.includes('npcPregnancyUpdater'), '描述中必须指明出错宏 npcPregnancyUpdater');
+        assert.ok(issue.desc.includes('Start'), '描述中必须指明出错段落 Start');
+        assert.ok(issue.solution.includes('FertilityExpansion') || issue.solution.includes('生育拓展'), '建议中必须动态包含环境中检测到的机制模组');
+        assert.ok(issue.solution.includes('DoLSims') || issue.solution.includes('模拟人生'), '建议中必须动态包含环境中检测到的机制模组');
+        assert.ok(issue.solution.includes('还原点'), '建议中必须指导使用还原点');
+
+        // 测试渲染出的卡片
+        const diagnosis = createStubElement();
+        manager.document.getElementById = id => id === 'modHubLogDiagnosisContainer' ? diagnosis : null;
+        manager.modHubRenderLogDiagnosis(analysis);
+        assert.ok(diagnosis.innerHTML.includes('[段落] Start'), '界面必须渲染 [段落] Start 徽章');
+        assert.ok(diagnosis.innerHTML.includes('[宏] &lt;&lt;npcPregnancyUpdater&gt;&gt;'), '界面必须渲染 [宏] 徽章');
+        assert.ok(diagnosis.innerHTML.includes('data-log-search="npcPregnancyUpdater"'), '宏徽章点击搜索词必须智能去除尖括号');
+
+        // 验证混合日志：当存在独立的其他 TypeError 时，两者必须同时保留
+        const mixedLogs = [
+            ...pregnancyLogLines,
+            "[错误] NPCPetSlot TypeError: Cannot read properties of undefined (reading 'isTrusted')"
+        ];
+        const mixedAnalysis = manager.modHubAnalyzeLogs(mixedLogs);
+        assert.equal(mixedAnalysis.errorCount, 8, '8 行错误必须全部计数');
+        assert.ok(mixedAnalysis.matchedIssues.some(i => i.id === 'npc-pregnancy-init-error'), '混合日志必须包含 NPC 怀孕专项诊断');
+        assert.ok(mixedAnalysis.matchedIssues.some(i => i.id === 'type-error'), '混合日志中独立的不相干 TypeError 必须继续保留独立诊断');
     }
 };

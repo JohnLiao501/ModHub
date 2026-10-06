@@ -1,65 +1,65 @@
 {
-    "name": "ModHub",
-    "version": "1.3.1",
-    "nickName": "模组管理器与市场套件",
-    "description": "DoL 原生暗黑风格模组管理与市场套件",
-    "styleFileList": [
-        "stylesheet/modhub.css",
-        "stylesheet/modhub-market.css",
-        "stylesheet/modhub-overrides.css"
-    ],
-    "scriptFileList_inject_early": [
-        "javascript/modhub-dialog.js",
-        "javascript/modhub-restore-panel.js",
-        "javascript/modhub-restore.js"
-    ],
-    "scriptFileList": [
-        "javascript/modhub-manager.js",
-        "javascript/modhub-drag.js",
-        "javascript/modhub-beauty.js",
-        "javascript/modhub-readme.js",
-        "javascript/modhub-log.js",
-        "javascript/modhub-market.js",
-        "javascript/modhub-market-spells.js",
-        "javascript/modhub-market-versions.js",
-        "javascript/modhub-market-install.js"
-    ],
-    "tweeFileList": [
-        "twee/modloader/modloader.twee"
-    ],
-    "imgFileList": [],
-    "addonPlugin": [
+  "name": "ModHub",
+  "version": "1.3.2",
+  "nickName": "模组管理器与市场套件",
+  "description": "DoL 原生暗黑风格模组管理与市场套件",
+  "styleFileList": [
+    "stylesheet/modhub.css",
+    "stylesheet/modhub-market.css",
+    "stylesheet/modhub-overrides.css"
+  ],
+  "scriptFileList_inject_early": [
+    "javascript/modhub-dialog.js",
+    "javascript/modhub-restore-panel.js",
+    "javascript/modhub-restore.js"
+  ],
+  "scriptFileList": [
+    "javascript/modhub-manager.js",
+    "javascript/modhub-drag.js",
+    "javascript/modhub-beauty.js",
+    "javascript/modhub-readme.js",
+    "javascript/modhub-log.js",
+    "javascript/modhub-market.js",
+    "javascript/modhub-market-spells.js",
+    "javascript/modhub-market-versions.js",
+    "javascript/modhub-market-install.js"
+  ],
+  "tweeFileList": [
+    "twee/modloader/modloader.twee"
+  ],
+  "imgFileList": [],
+  "addonPlugin": [
+    {
+      "modName": "TweeReplacer",
+      "addonName": "TweeReplacerAddon",
+      "modVersion": "^1.0.0",
+      "params": [
         {
-            "modName": "TweeReplacer",
-            "addonName": "TweeReplacerAddon",
-            "modVersion": "^1.0.0",
-            "params": [
-                {
-                    "tip": "【ModHub】模组管理器主入口",
-                    "passage": "overlayReplace",
-                    "findString": "<<case \"characteristics\">>",
-                    "replaceFile": "twee/modloader/modloader-patch-base.twee"
-                },
-                {
-                    "tip": "【ModHub】模组管理器顶栏按钮",
-                    "passage": "Widgets Clothing Caption",
-                    "findString": "\t\t\t<<overlayReplace \"startFeats\">>\n\t\t<</button>>\n\t</div>",
-                    "replaceFile": "twee/modloader/modloader-patch-caption.twee"
-                },
-                {
-                    "tip": "【ModHub】侧栏 Mod管理器 按钮",
-                    "passage": "StoryCaption",
-                    "findRegex": "<<overlayReplace \\\"saves\\\">>\\r?\\n\\s*<</button>>\\r?\\n\\s*</div>",
-                    "regexFlag": "g",
-                    "replaceFile": "twee/modloader/modloader-patch-story-caption.twee"
-                }
-            ]
-        }
-    ],
-    "dependenceInfo": [
+          "tip": "【ModHub】模组管理器主入口",
+          "passage": "overlayReplace",
+          "findString": "<<case \"characteristics\">>",
+          "replaceFile": "twee/modloader/modloader-patch-base.twee"
+        },
         {
-            "modName": "TweeReplacer",
-            "version": "^1.0.0"
+          "tip": "【ModHub】模组管理器顶栏按钮",
+          "passage": "Widgets Clothing Caption",
+          "findString": "\t\t\t<<overlayReplace \"startFeats\">>\n\t\t<</button>>\n\t</div>",
+          "replaceFile": "twee/modloader/modloader-patch-caption.twee"
+        },
+        {
+          "tip": "【ModHub】侧栏 Mod管理器 按钮",
+          "passage": "StoryCaption",
+          "findRegex": "<<overlayReplace \\\"saves\\\">>\\r?\\n\\s*<</button>>\\r?\\n\\s*</div>",
+          "regexFlag": "g",
+          "replaceFile": "twee/modloader/modloader-patch-story-caption.twee"
         }
-    ]
+      ]
+    }
+  ],
+  "dependenceInfo": [
+    {
+      "modName": "TweeReplacer",
+      "version": "^1.0.0"
+    }
+  ]
 }

@@ -157,7 +157,14 @@
                 links.set(name, { priority, link: { url: displayUrl, name, title: source.label || source.url } });
             }
         }
-        return [...links.values()].map(source => source.link);
+        const platformOrder = { 'github': 1, 'discord': 2, '百度贴吧': 3 };
+        const result = [...links.values()].map(source => source.link);
+        result.sort((a, b) => {
+            const orderA = platformOrder[String(a.name || '').toLowerCase()] || 99;
+            const orderB = platformOrder[String(b.name || '').toLowerCase()] || 99;
+            return orderA - orderB;
+        });
+        return result;
     }
 
     function renderAcquisitionDetails(entry) {

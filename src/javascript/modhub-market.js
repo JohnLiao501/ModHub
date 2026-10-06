@@ -40,6 +40,7 @@
     const IGNORE_STORAGE_KEY = 'modhub_market_ignored_updates_v1';
     const CONFIRMED_STORAGE_KEY = 'modhub_market_confirmed_updates_v1';
     const HIDE_DEAD_SOURCES_KEY = 'modhub_market_hide_dead_sources_v1';
+    const PACKAGE_DIGEST_CACHE_KEY = 'modhub_package_digest_cache_v1';
     const MAX_DOWNLOAD_BYTES = 256 * 1024 * 1024;
     // 准备结果只在本次安装内复用，不能把换版后的包或外部构造的对象直接导入。
     const preparedMarketPackages = new WeakMap();
@@ -47,6 +48,41 @@
     const installedPackageRecords = new Map();
     const downloadedPackageDigests = new Map();
     let officialPackageMetadataQueue = Promise.resolve();
+
+    function loadInstalledPackageRecordsFromStorage() {
+        try {
+            const raw = localStorage.getItem(PACKAGE_DIGEST_CACHE_KEY);
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (parsed && typeof parsed === 'object') {
+                for (const [key, value] of Object.entries(parsed)) {
+                    if (key && value && typeof value.digest === 'string' && value.digest) {
+                        installedPackageRecords.set(key.toLowerCase(), {
+                            bootJson: value.bootJson || { name: key },
+                            digest: value.digest
+                        });
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    function saveInstalledPackageRecordsToStorage() {
+        try {
+            const obj = {};
+            for (const [k, v] of installedPackageRecords.entries()) {
+                if (k && v?.digest) {
+                    obj[k] = {
+                        bootJson: v.bootJson ? { name: v.bootJson.name, version: v.bootJson.version } : { name: k },
+                        digest: v.digest
+                    };
+                }
+            }
+            localStorage.setItem(PACKAGE_DIGEST_CACHE_KEY, JSON.stringify(obj));
+        } catch (_) {}
+    }
+
+    loadInstalledPackageRecordsFromStorage();
     const COMPANION_ASSET_PATTERN = /(?:photo|image|resource|asset)[\s._-]*pack|图包|图片包|资源包|素材包/i;
     const MODHUB_OPTIONAL_AUDIO_PATTERN = /(?:^|[\s._-])(?:audio(?:[\s._-]*pack)?|(?:sound|music|bgm)[\s._-]*pack)(?=[\s._-]|$)|音频包|音乐包|音效包/i;
 
@@ -127,6 +163,10 @@
         'smartphone': ['万能的智能手机', '智能手机', 'smartphone', 'degreesoflewditydolsmartphone'],
         '万能的智能手机': ['smartphonealpha', 'smartphone', '智能手机', 'degreesoflewditydolsmartphone'],
         '智能手机': ['smartphonealpha', 'smartphone', '万能的智能手机', 'degreesoflewditydolsmartphone'],
+        'smartphoneomega': ['万能的智能手机 Omega', '万能的智能手机 OmegaΩ', '万能的智能手机 简化版', 'SmartPhone Omega'],
+        '万能的智能手机omega': ['smartphoneomega', '万能的智能手机 Omega', '万能的智能手机 OmegaΩ', '万能的智能手机 简化版', 'SmartPhone Omega'],
+        '万能的智能手机omegaω': ['smartphoneomega', '万能的智能手机 Omega', '万能的智能手机 OmegaΩ', '万能的智能手机 简化版', 'SmartPhone Omega'],
+        '万能的智能手机简化版': ['smartphoneomega', '万能的智能手机 Omega', '万能的智能手机 OmegaΩ', 'SmartPhone Omega'],
         'phonemod': ['手机', 'dolphonemod'],
         'dolphonemod': ['手机', 'phonemod'],
         '手机': ['phonemod', 'dolphonemod'],
@@ -198,6 +238,10 @@
         smartphone: ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
         '万能的智能手机': ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
         '智能手机': ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
+        smartphoneomega: ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
+        '万能的智能手机omega': ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
+        '万能的智能手机omegaω': ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
+        '万能的智能手机简化版': ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'],
         phonemod: ['HCPTangHY/DOL-PhoneMod'],
         '手机': ['HCPTangHY/DOL-PhoneMod'],
         maplebirch: ['MaplebirchLeaf/SCML-DOL-maplebirchframework'],
@@ -454,6 +498,14 @@
         return candidates.map(safeHttpsUrl).find(Boolean) || null;
     }
 
+    function sameGithubRepoOrSource(sourceA, sourceB) {
+        if (!sourceA || !sourceB) return false;
+        if (sourceUrlKey(sourceA) === sourceUrlKey(sourceB)) return true;
+        const repoA = parseGithubRepo(sourceA);
+        const repoB = parseGithubRepo(sourceB);
+        return Boolean(repoA && repoB && repoA.key === repoB.key);
+    }
+
     function hasCommunityReleaseSource(mod) {
         const githubUrl = safeHttpsUrl(mod?.githubUrl);
         const repo = parseGithubRepo(githubUrl);
@@ -462,9 +514,9 @@
             && Array.isArray(mod.bootNames) && mod.bootNames.length > 0
             && !!repo && repositoryKeys.some(key => String(key).toLowerCase() === repo.key)
             && /^\/[^/]+\/[^/]+\/releases\/(?:latest|tag\/[^/]+|download\/[^/]+\/[^/]+)\/?$/.test(new URL(githubUrl).pathname)
-            && (sourceUrlKey(mod.sourceUrl) === sourceUrlKey(githubUrl)
+            && (sameGithubRepoOrSource(mod.sourceUrl, githubUrl)
                 || (Array.isArray(mod.sources) && mod.sources.some(source => source?.platform === 'github'
-                    && sourceUrlKey(source.url) === sourceUrlKey(githubUrl))));
+                    && sameGithubRepoOrSource(source.url, githubUrl))));
     }
 
     function sourceUrlKey(value) {
@@ -1849,16 +1901,17 @@
     }
 
     function getAssetSeries(name) {
-        return String(name || '').replace(/\.(?:zip|mod|modpack(?:\.crypt)?)$/ig, '')
-            .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+/ig, '')
-            .replace(/(?:version|ver|v)?\d+(?:\.\d+)+/ig, '')
+        const stripped = String(name || '').replace(/\.(?:zip|mod|modpack(?:\.crypt)?)$/ig, '')
+            .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+[a-z]?(?=[\s._-]|$)/ig, '')
+            .replace(/(?:version|ver|v)?\d+(?:\.\d+)+[a-z]?(?=[\s._-]|$)/ig, '')
             .replace(/(?:^|[\s._-])build[\s._-]*\d+/ig, '')
-            .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '').replace(/(?:mod)+$/, '');
+            .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+        return stripped.replace(/^(?:dol|mod)+/, '').replace(/(?:dol|mod)+$/, '') || stripped;
     }
 
     function matchesAssetIdentity(asset, mod) {
         const series = getAssetSeries(String(asset.name || '').replace(/(?:^|[\s._-])(?:desktop|windows|pc|mobile|android|english|chinese|chs|cht|cn|en|zh)(?=[\s._-]|$)/ig, ''));
-        return [...(mod?.bootNames || []), ...(mod?.aliases || []), mod?.name].some(name => {
+        return [...(mod?.bootNames || []), ...(mod?.aliases || []), ...(mod?.repositories || []), mod?.name].some(name => {
             const identity = getAssetSeries(name);
             return identity.length >= 3 && identity === series;
         });
@@ -2538,11 +2591,16 @@
         for (const identity of identities) {
             if (!identity || typeof identity !== 'object' || identity.identityId === null) continue;
 
-            // 净化异常数据：强行切断万能的智能手机与唐百玎HY手机模组的历史混淆关联
+            // 净化异常数据：强行切断万能的智能手机、Omega 简化版与唐百玎HY手机模组的历史混淆关联
             if (identity.id === 'smartphone' || identity.name === '万能的智能手机') {
-                identity.aliases = (identity.aliases || []).filter(a => a !== '手机');
+                identity.aliases = (identity.aliases || []).filter(a => a !== '手机' && !/omega|简化/i.test(a));
+                identity.bootNames = (identity.bootNames || []).filter(b => !/omega|简化/i.test(b));
                 identity.repositories = (identity.repositories || []).filter(r => !/dolphonemod/i.test(r));
                 identity.repositoryKeys = (identity.repositoryKeys || []).filter(k => !/hcptanghy/i.test(k));
+            }
+            if (identity.id === 'smartphone-omega' || /omega/i.test(identity.id || '') || /omega/i.test(identity.name || '')) {
+                identity.bootNames = (identity.bootNames || []).filter(b => !/alpha/i.test(b) && b.toLowerCase() !== 'smartphone');
+                identity.aliases = (identity.aliases || []).filter(a => a !== '智能手机' && a !== '手机');
             }
             if (identity.id === 'dol-phone-mod' || identity.name === '手机' || (identity.repositoryKeys || []).some(k => /hcptanghy/i.test(k))) {
                 identity.bootNames = (identity.bootNames || []).filter(b => !/smartphone/i.test(b));
@@ -2620,25 +2678,63 @@
             if (repoKey === 'hcptanghy/dol-phonemod') {
                 mod.id = 'dol-phone-mod';
                 mod.identityId = 'dol-phone-mod';
-                mod.name = '手机';
-                mod.wikiName = '手机';
+                mod.name = mod.name || '手机';
+                mod.wikiName = mod.wikiName || '手机';
                 mod.bootNames = ['PhoneMod', 'DOL-PhoneMod'];
                 mod.aliases = ['手机', 'DOL-PhoneMod'];
                 mod.repositories = ['DOL-PhoneMod'];
                 mod.repositoryKeys = ['HCPTangHY/DOL-PhoneMod'];
             } else if (repoKey === 'anlinstudio/degrees-of-lewdity-dolsmartphone') {
-                mod.id = 'smartphone';
-                mod.identityId = 'smartphone';
-                mod.name = '万能的智能手机';
-                mod.wikiName = '万能的智能手机';
-                mod.bootNames = ['SmartPhone Alpha', 'SmartPhone'];
-                mod.aliases = ['万能的智能手机', '智能手机'];
-                mod.repositories = ['Degrees-of-Lewdity-DolSmartPhone'];
-                mod.repositoryKeys = ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'];
+                const isOmega = /omega|简化/i.test(`${mod.id || ''} ${mod.name || ''} ${mod.wikiName || ''} ${mod.githubUrl || ''} ${mod.sourceUrl || ''}`);
+                if (isOmega) {
+                    mod.id = (mod.id && mod.id !== 'smartphone') ? mod.id : 'smartphone-omega';
+                    mod.identityId = 'smartphone-omega';
+                    mod.name = mod.name || '万能的智能手机 OmegaΩ';
+                    mod.wikiName = mod.wikiName || '万能的智能手机 OmegaΩ';
+                    mod.bootNames = ['SmartPhone Omega'];
+                    mod.aliases = ['万能的智能手机 Omega', '万能的智能手机 OmegaΩ', '万能的智能手机 简化版', 'SmartPhone Omega'];
+                    mod.repositories = ['Degrees-of-Lewdity-DolSmartPhone'];
+                    mod.repositoryKeys = ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'];
+                    mod.sharedRepository = true;
+                } else {
+                    mod.id = 'smartphone';
+                    mod.identityId = 'smartphone';
+                    mod.name = mod.name || '万能的智能手机';
+                    mod.wikiName = mod.wikiName || '万能的智能手机';
+                    mod.bootNames = ['SmartPhone Alpha', 'SmartPhone'];
+                    mod.aliases = ['万能的智能手机', '智能手机'];
+                    mod.repositories = ['Degrees-of-Lewdity-DolSmartPhone'];
+                    mod.repositoryKeys = ['ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone'];
+                    mod.sharedRepository = true;
+                }
             }
         }
 
         const visibleMods = activeMods.filter(mod => !isWithdrawn(mod));
+        // 模组同名防御安全网：同仓库或不同条目间绝不允许产生完全重名的卡片
+        const seenDisplayNames = new Map();
+        for (const mod of visibleMods) {
+            const rawName = mod.name || mod.wikiName || '';
+            const key = normalizeKey(rawName);
+            if (!key) continue;
+            if (seenDisplayNames.has(key)) {
+                const prev = seenDisplayNames.get(key);
+                if (prev.id !== mod.id || prev.sourceUrl !== mod.sourceUrl) {
+                    console.warn(`[ModHub] 检测到同名模组冲突:【${rawName}】(id: ${prev.id} vs ${mod.id})，执行自动歧义消解`);
+                    if (mod.wikiName && mod.wikiName !== rawName && normalizeKey(mod.wikiName) !== key) {
+                        mod.name = mod.wikiName;
+                    } else if (prev.wikiName && prev.wikiName !== rawName && normalizeKey(prev.wikiName) !== key) {
+                        prev.name = prev.wikiName;
+                    } else {
+                        const modTag = parseGithubRepo(mod.githubUrl)?.releaseTag || mod.id.split('-').pop();
+                        if (modTag) mod.name = `${rawName} (${modTag})`;
+                    }
+                }
+            } else {
+                seenDisplayNames.set(key, mod);
+            }
+        }
+
         applyIdentityCatalog(index.identities);
         applyIdentityCatalog(visibleMods.filter(mod => mod.catalogSource !== 'community' || mod.identityId));
         return markSharedRepositories(visibleMods).map(mod => {
@@ -2931,9 +3027,16 @@
             const cleanNames = Array.from(displayNames).map(cleanText).filter(Boolean);
             const normalizedNames = cleanNames.map(normalizeKey).filter(Boolean);
 
+            const matchesBoot = packageRecord && (
+                packageRecord.bootJson === boot ||
+                !boot.name ||
+                String(packageRecord.bootJson?.name || '').trim().toLowerCase() === String(boot.name || '').trim().toLowerCase()
+            );
+            const packageDigest = matchesBoot && packageRecord.digest ? packageRecord.digest : '';
+
             profiles.push({
                 name: modName,
-                packageDigest: packageRecord?.bootJson === boot ? packageRecord.digest : '',
+                packageDigest,
                 version,
                 // 原生依赖别名与递归前置仅取同名 boot 声明，展示别名不能替代身份。
                 ...(boot.name ? { bootJson: boot } : {}),
@@ -4002,7 +4105,15 @@
             }
 
             for (const t of targetKeyList) {
-                if (norm === t || stripped === t) return true;
+                const isAscii = !/[^\x00-\x7F]/.test(t);
+                if (isAscii) {
+                    if (norm === t || stripped === t) return true;
+                    if (t.length >= 8 && norm.length >= t.length && (norm.includes(t) || (stripped && stripped.includes(t)))) {
+                        const ratio = t.length / norm.length;
+                        if (ratio >= 0.8) return true;
+                    }
+                    continue;
+                }
                 if (t.length >= 4 && (norm.includes(t) || (stripped && stripped.includes(t)))) return true;
             }
             return false;
@@ -4576,6 +4687,7 @@
                 window._modHubDisabledModInfo?.set?.(key, { name: bootJson.name, bootJson });
             } catch (_) { /* 无法回读时不推断已安装的发布版本。 */ }
         }
+        saveInstalledPackageRecordsToStorage();
     }
 
     function getAssetPackageDigest(asset) {
@@ -5376,9 +5488,15 @@
             if (aUp !== bUp) return bUp - aUp;
 
             if (currentSortBy === 'date') {
-                const da = a.updateDate || '1970-01-01';
-                const db = b.updateDate || '1970-01-01';
-                return db.localeCompare(da);
+                const getEffectiveDate = (m) => {
+                    const releaseDate = m._updateCheck?.release?.updateDate;
+                    return releaseDate || m.updateDate || '1970-01-01';
+                };
+                const da = getEffectiveDate(a);
+                const db = getEffectiveDate(b);
+                const cmp = db.localeCompare(da);
+                if (cmp !== 0) return cmp;
+                return (a.name || '').localeCompare(b.name || '', 'zh-CN');
             } else if (currentSortBy === 'name') {
                 return (a.name || '').localeCompare(b.name || '', 'zh-CN');
             }
@@ -5541,6 +5659,8 @@
             || packageMatch !== false && !unpublishedDifference && localVersion && latestVersion && isSameVersion(localVersion, latestVersion)) {
             label = '已是最新';
             title = '与当前目录最新版本相同';
+        } else if (localVersion && latestVersion && compareVersions(localVersion, latestVersion) > 0) {
+            title = `当前已安装版本 (${formatVersionDisplay(localVersion)}) 高于市场目录收录版本 (${formatVersionDisplay(latestVersion)})。`;
         } else if (localVersion && latestVersion && updateInfo.release && isSameVersion(localVersion, updateInfo.version)
             && ['declaration', 'filename'].includes(updateInfo.release.compatibility?.evidence)
             && compareVersions(latestVersion, localVersion) > 0) {
@@ -5548,11 +5668,19 @@
             title = `当前游戏推荐版本与已安装版本相同；目录最新版本 ${formatVersionDisplay(latestVersion)} 更高。`
                 + (updateInfo.release.compatibility?.evidence === 'filename' ? '推荐依据安装包名称参考，不代表游戏实测。' : '推荐依据作者声明，不代表游戏实测。');
         } else if (localVersion && latestVersion && mod._updateCheck && !updateInfo.version && !updateInfo.pending && !updateInfo.error) {
-            details.push(window.modHubMarketVersions?.getGameVersion?.()
-                ? '未找到适配当前游戏的版本' : '无法识别当前游戏版本，尚未检查适配更新');
+            if (compareVersions(localVersion, latestVersion) < 0) {
+                details.push(window.modHubMarketVersions?.getGameVersion?.()
+                    ? '未找到适配当前游戏的版本' : '无法识别当前游戏版本，尚未检查适配更新');
+            }
         }
         if (updateInfo.pending) details.push('正在检查更新，请稍候。');
-        if (updateInfo.error) details.push(`更新检查失败：${updateInfo.error}。可刷新市场后重试。`);
+        if (updateInfo.error) {
+            if (localVersion && latestVersion && compareVersions(localVersion, latestVersion) >= 0) {
+                // 本地已是高版本或最新版本时，远端更新检查临时失败不作为阻断性错误呈现
+            } else {
+                details.push(`更新检查失败：${updateInfo.error}。可刷新市场后重试。`);
+            }
+        }
         const detail = details.join('；');
         return { label, title: [title, detail].filter(Boolean).join('；'), detail };
     }
@@ -5662,7 +5790,7 @@
                     actionBtnHtml = `<button type="button" class="macro-button modhub-btn-secondary" disabled>已安装</button>`;
                 } else actionBtnHtml = '';
             } else if (isUpdatable) {
-                badgeHtml = `<span class="modhub-market-badge badge-update">${isReferenceUpdate ? '发现新版，依据文件名' : isUnknownUpdate ? '发现新版，适配待核对' : '发现新版'}</span>`;
+                badgeHtml = `<span class="modhub-market-badge badge-update"${isReferenceUpdate ? ' title="依据文件名识别"' : ''}>${isUnknownUpdate ? '发现新版，适配待核对' : '发现新版'}</span>`;
                 const updateLabel = isReferenceUpdate || isUnknownUpdate ? '选择更新版本' : '一键更新';
                 if (isUnknownUpdate) installedStatusDetail = updateInfo.release.compatibility?.reason || '适用的游戏版本尚未确定，下一步会核对安装包中的说明';
                 actionBtnHtml = `<button type="button" class="macro-button modhub-btn-primary btn-market-update" data-mod-index="${modIndex}" data-idle-text="${updateLabel}">${updateLabel}</button>`;
@@ -5699,6 +5827,7 @@
             const installedVersionText = installedRelease && !isSameVersion(installedRelease, mod._matchedLocal?.version)
                 ? `${formatVersionDisplay(installedRelease)}（包内 ${formatVersionDisplay(mod._matchedLocal.version)}）`
                 : mod._matchedLocal?.version ? formatVersionDisplay(mod._matchedLocal.version) : '未知';
+            const isLocalHigher = Boolean(mod._matchedLocal?.version && latestVersionInfo.version && compareVersions(mod._matchedLocal.version, latestVersionInfo.version) > 0);
             const localVerText = mod._matchedLocal
                 ? `<span class="${installedBadge.label === '已是最新' ? 'green' : 'gold'}">已安装版本：${escapeHtml(mod._matchedLocal.version
                     ? installedVersionText : '未知')}</span>` : '';
