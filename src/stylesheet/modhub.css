@@ -2882,3 +2882,6 @@ button.modhub-btn-primary:active,
     #modHubModManageContainer .modhub-stat-num { font-size: 1.1em; }
     #modHubModManageContainer .modhub-stat-label { font-size: 0.72em; line-height: 1.3; }
 }
+
+/* 样式守卫用此标记确认本文件已实际生效。 */
+:root { --modhub-base-styles: 1; }

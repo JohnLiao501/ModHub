@@ -554,11 +554,13 @@ function pickDownloadAsset(assets) {
 
 // 与 Mod 端保持一致，只按完整产品系列匹配，避免主包、扩展与依赖之间的子串误认。
 function getAssetSeries(name) {
-  return String(name || '').replace(/\.(?:zip|mod|modpack(?:\.crypt)?)$/ig, '')
-    .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+/ig, '')
-    .replace(/(?:version|ver|v)?\d+(?:\.\d+)+/ig, '')
+  const stripped = String(name || '').replace(/\.(?:zip|mod|modpack(?:\.crypt)?)$/ig, '')
+    .replace(/(^|[\s._-])v(?=(?:alpha|beta|omega)[\s._-]*\d)/ig, '$1')
+    .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+[a-z]?(?=[\s._+-]|$)/ig, '')
+    .replace(/(?:version|ver|v)?\d+(?:\.\d+)+[a-z]?(?:[._-](?:fix|hotfix)\d*)?(?=[\s._+-]|$)/ig, '')
     .replace(/(?:^|[\s._-])build[\s._-]*\d+/ig, '')
-    .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '').replace(/(?:mod)+$/, '');
+    .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
+  return stripped.replace(/^(?:dol|mod)+/, '').replace(/(?:dol|mod)+$/, '') || stripped;
 }
 
 function matchesAssetIdentity(asset, mod) {
@@ -594,7 +596,7 @@ export async function fetchModRelease(mod, options = {}) {
 
   const sharedRepository = !!mod.sharedRepository && !parsed.tag;
   const releasePath = parsed.tag ? `tags/${encodeURIComponent(parsed.tag)}` : 'latest';
-  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], 'modpack-v1', 'asset-version-v1']))}`;
+  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], 'modpack-v1', 'asset-version-v1', 'asset-series-v2']))}`;
 
   if (useCache) {
     const cached = readCache(cacheKey);

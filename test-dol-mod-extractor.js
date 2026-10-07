@@ -334,6 +334,32 @@ async function main() {
     assert.equal(second.version, '2.3');
     assert.equal(first.assets.length, 1, '网站不得给当前产品展示同仓库的其他模组作为下载');
     await assert.rejects(fetchModRelease({ githubUrl: repoUrl, name: '未知产品', sharedRepository: true }), /未找到当前模组/);
+    const seriesCases = [
+      ['SmartPhone Omega', 'SmartPhone-vOmega.1.0.mod.zip'],
+      ['SmartPhone Alpha', 'SmartPhone-vAlpha.1.0.mod.zip'],
+      ['SmartPhone Beta', 'SmartPhone-vBeta.1.0.mod.zip'],
+      ['LegacyHeadMaskCompat', 'LegacyHeadMaskCompat.0.5.10.12+.zip'],
+      ['i Candy and Robot', 'i.Candy.and.Robot.ver2.4.5.1.fix.zip'],
+      ['HotfixExample', 'HotfixExample-v2.1.hotfix2.zip'],
+      ['DoLExample', 'DoLExample-DoL-v0.5.12.13+-v2.1.zip'],
+      ['Violet', 'Violet-2.0.zip'],
+      ['Valkyrie', 'Valkyrie-2.0.zip'],
+    ];
+    responses.set(`${apiUrl}?per_page=100`, [{ tag_name: 'series-rules', assets: seriesCases.map(([, name]) => ({
+      name, browser_download_url: `https://example.test/${name}`,
+    })) }]);
+    const oldSeriesKey = `dol_mod_release_v2_AOKIUTAGE/UTAGEsDOL3.0/latest//${encodeURIComponent(JSON.stringify(['SmartPhone Omega', true, ['SmartPhone Omega'], [], 'modpack-v1', 'asset-version-v1']))}`;
+    cache.set(oldSeriesKey, JSON.stringify({ data: { assets: [], assetName: null }, timestamp: Date.now() }));
+    for (const [bootName, fileName] of seriesCases) {
+      const release = await fetchModRelease({ githubUrl: repoUrl, name: bootName, sharedRepository: true, bootNames: [bootName] });
+      assert.deepEqual(release.assets.map(asset => asset.name), [fileName], '版别、修复后缀与加号不得破坏共享仓库的完整产品身份');
+      assert.equal(release.fromCache, undefined, '新系列规则不得复用旧空候选缓存');
+    }
+    assert.ok([...cache.keys()].some(key => decodeURIComponent(key).includes('asset-series-v2')), '新系列规则必须使用独立缓存签名');
+    for (const bootName of ['SmartPhone', 'iolet', 'alkyrie']) {
+      await assert.rejects(fetchModRelease({ githubUrl: repoUrl, name: bootName, sharedRepository: true, bootNames: [bootName] }, { useCache: false }),
+        /未找到当前模组/, '不能将独立版别或原名首字母当作可删除的通用版本前缀');
+    }
     responses.set(`${apiUrl}/tags/native`, { tag_name: 'native', assets: [
       { name: 'First-v1.0.modpack', browser_download_url: 'https://example.test/first.modpack' },
       { name: 'Second-v2.0.modpack.crypt', browser_download_url: 'https://example.test/second.modpack.crypt' },

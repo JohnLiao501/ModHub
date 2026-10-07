@@ -474,14 +474,14 @@ module.exports = async function() {
         const [currentKey, storedHistory] = historyWrites.find(([key]) => key.startsWith('modhub_market_history_v1_'));
         const oldHistory = JSON.parse(storedHistory);
         const oldSignature = JSON.parse(oldHistory.signature);
-        assert.equal(oldSignature.pop(), 'modpack-v1', '历史缓存签名须隔离旧附件筛选规则');
+        assert.equal(oldSignature.pop(), 'asset-series-v2', '历史缓存签名须隔离旧附件身份筛选规则');
         oldHistory.signature = JSON.stringify(oldSignature);
         oldHistory.data.releases = [];
         const oldKey = 'modhub_market_history_v1_' + encodeURIComponent(oldHistory.signature);
         sb.localStorage.setItem(oldKey, JSON.stringify(oldHistory));
         sb.localStorage.removeItem(currentKey);
         const beforeRefresh = calls;
-        assert.equal((await versions.fetchReleases(baseMod)).releases.length, 1, '历史旧规则的成功空缓存不能屏蔽新增 ModPack');
+        assert.equal((await versions.fetchReleases(baseMod)).releases.length, 1, '历史旧规则的成功空缓存不能屏蔽可识别安装包');
         assert.equal(calls, beforeRefresh + 1);
         assert.ok(sb.localStorage.getItem(oldKey), '缓存迁移只使用新签名，不删除其他存储');
         fail = true;

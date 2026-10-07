@@ -1645,3 +1645,6 @@
     outline: 2px solid var(--gold, #d4af37);
     outline-offset: 2px;
 }
+
+/* 样式守卫用此标记确认本文件已实际生效。 */
+:root { --modhub-market-styles: 1; }

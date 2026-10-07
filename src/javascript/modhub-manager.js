@@ -210,6 +210,7 @@ window.modHubIsCloseButton = function(elementOrText) {
 
 // 模组管理器顶栏标签初始化（过滤并保留管理 Tab 及移动端左侧关闭按钮）
 window.modHubInitOverlayTabs = function() {
+    window.modHubEnsureStyles?.({ active: true });
     window.modHubBindReloadReminder();
     if (typeof $ === 'undefined') return;
     var tabs = $("#overlayTabs.modhub-modloader-tabs");
@@ -1278,7 +1279,10 @@ window.modHubTriggerImport = function() {
 };
 
 window.modHubFormatReloadMessage = function(message) {
-    return window.modHubEscapeHtml(message).replace(/((?:模组|核心框架)【)([^】]+)】/g, '$1<strong class="gold">$2</strong>】').replace(/\n/g, '<br>');
+    return window.modHubEscapeHtml(message)
+        .replace(/((?:模组|核心框架)【)([^】]+)】/g, '$1<strong class="gold">$2</strong>】')
+        .replace('重新载入可能丢失尚未存档的游戏进度，请先存档。', '重新载入<strong class="red">可能丢失尚未存档的游戏进度</strong>，<strong class="gold" style="white-space: nowrap;">请先存档</strong>。')
+        .replace(/\n/g, '<br>');
 };
 
 window.modHubHandleAddMod = async function(fileInput, options = {}) {
@@ -1398,7 +1402,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             }
 
             const reloadRevision = window._modHubReloadRevision;
-            const message = `${label}已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`;
+            const message = `${label}已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？\n\n重新载入可能丢失尚未存档的游戏进度，请先存档。`;
             const ok = await window.modHubConfirm({
                 title: '重新载入游戏',
                 message,
@@ -2278,7 +2282,7 @@ window.modHubOfferReload = async function(message = '配置已更新。', option
     }
     const saveNotice = '重新载入可能丢失尚未存档的游戏进度，请先存档。';
     promptMsg += `\n\n${saveNotice}`;
-    if (trustedMessageHtml) trustedMessageHtml += `<div class="grey" style="margin-top: 10px;">${saveNotice}</div>`;
+    if (trustedMessageHtml) trustedMessageHtml += `<div class="grey" style="margin-top: 10px;">${window.modHubFormatReloadMessage(saveNotice)}</div>`;
 
     window._modHubReloadDialogPending = true;
     let ok;

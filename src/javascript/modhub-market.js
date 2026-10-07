@@ -1903,8 +1903,9 @@
 
     function getAssetSeries(name) {
         const stripped = String(name || '').replace(/\.(?:zip|mod|modpack(?:\.crypt)?)$/ig, '')
-            .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+[a-z]?(?=[\s._-]|$)/ig, '')
-            .replace(/(?:version|ver|v)?\d+(?:\.\d+)+[a-z]?(?=[\s._-]|$)/ig, '')
+            .replace(/(^|[\s._-])v(?=(?:alpha|beta|omega)[\s._-]*\d)/ig, '$1')
+            .replace(/(?:for[\s._-]*)?dol[\s._-]*v?\d+(?:\.\d+)+[a-z]?(?=[\s._+-]|$)/ig, '')
+            .replace(/(?:version|ver|v)?\d+(?:\.\d+)+[a-z]?(?:[._-](?:fix|hotfix)\d*)?(?=[\s._+-]|$)/ig, '')
             .replace(/(?:^|[\s._-])build[\s._-]*\d+/ig, '')
             .toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]/g, '');
         return stripped.replace(/^(?:dol|mod)+/, '').replace(/(?:dol|mod)+$/, '') || stripped;
@@ -2039,7 +2040,7 @@
         const platform = (typeof window.modHubIsMobile === 'function' ? window.modHubIsMobile() : window.modHubIsMobile) ? 'mobile' : 'desktop';
         const source = JSON.stringify([repo.key, repo.releaseTag, repo.assetName, entryKey, mod.bootNames || [], mod.aliases || [],
             (mod.identityId || mod.id) === 'au-beautification' ? mod._matchedLocal?.name || '' : '']);
-        const isUsableCache = cached => cached?.assetPlanVersion === 5 && cached.assetPlanGameVersion === gameVersion
+        const isUsableCache = cached => cached?.assetPlanVersion === 6 && cached.assetPlanGameVersion === gameVersion
             && cached.assetPlanPlatform === platform && cached.assetPlanSource === source
             && (!mod.version || compareVersions(cached.version, mod.version) >= 0);
         if (useCache) {
@@ -2178,7 +2179,7 @@
             availableAssets: assetPlan.availableAssets,
             requiresManualSelection: assetPlan.needsChoice,
             selectionReason: assetPlan.reason,
-            assetPlanVersion: 5,
+            assetPlanVersion: 6,
             assetPlanGameVersion: gameVersion,
             assetPlanPlatform: platform,
             assetPlanSource: source,
@@ -5700,10 +5701,8 @@
         }
         const label = typeof mod.versionLabel === 'string' && mod.versionLabel.trim()
             ? mod.versionLabel.trim() : !indexedVersion && latestRelease ? latestRelease.versionLabel || latestRelease.tagName || '' : '';
-        const publishedLabel = !indexedVersion && label && (mod.versionSource === 'github' || latestRelease)
-            ? `${label}（发布标签，版号未标注）` : label;
         return { version: indexedVersion, text: indexedVersion ? formatVersionDisplay(indexedVersion)
-            : publishedLabel || '未知', updateDate: !indexedVersion && latestRelease?.updateDate || indexDate,
+            : label || '未知', updateDate: !indexedVersion && latestRelease?.updateDate || indexDate,
             updateDateSource: !indexedVersion && latestRelease?.updateDate ? latestRelease.updateDateSource || 'github' : mod.updateDateSource };
     }
 

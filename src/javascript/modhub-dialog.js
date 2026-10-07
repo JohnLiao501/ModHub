@@ -34,6 +34,7 @@ window.modHubShowToast = function(message, type = '', duration = 2500) {
 const modHubModalStack = [];
 
 window.modHubConfirm = function(options) {
+    window.modHubEnsureStyles?.({ active: true });
     let title = '提示';
     let message = '';
     let confirmText = '确定';

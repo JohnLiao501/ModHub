@@ -12,6 +12,7 @@ process.on('beforeExit', () => {
 });
 
 (async () => {
+    await require('../tests/style.test')();
     await require('../tests/manager.test')();
     await require('../tests/restore.test')();
     await require('../tests/restore-panel.test')();
@@ -25,7 +26,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.3.3 全部测试通过');
+    console.log('ModHub v1.3.4 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

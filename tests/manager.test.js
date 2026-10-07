@@ -82,7 +82,7 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.3.3', 'boot.json 版本号必须为 1.3.3');
+    assert.equal(bootJson.version, '1.3.4', 'boot.json 版本号必须为 1.3.4');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
@@ -91,7 +91,7 @@ module.exports = async function() {
         'javascript/modhub-log.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
     ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志与市场');
-    assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '弹窗、面板与恢复引擎必须在业务脚本之前注入');
+    assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-style.js', 'javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '样式守卫必须先于弹窗、面板与恢复引擎注入，早期模块必须先于业务脚本');
     for (const file of [...bootJson.scriptFileList_inject_early, ...bootJson.scriptFileList]) {
         assert.ok(fs.existsSync(path.join(srcRoot, file)), `${file} 必须存在于 src`);
     }
@@ -518,8 +518,9 @@ module.exports = async function() {
             f.sb.modHubConfirm = async options => { prompt = options; return false; };
             assert.equal(await f.sb.modHubHandleAddMod({ files: [file('native.modpack', 1)] },
                 { askRestart: true, keepCurrentTab: true, displayName }), true);
-            assert.equal(prompt.message, `模组【${displayName}】已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？`, '名称高亮不得改写原有重载文案');
+            assert.equal(prompt.message, `模组【${displayName}】已成功添加并完成配置！\n\n是否立即重新载入游戏以使模组生效？\n\n重新载入可能丢失尚未存档的游戏进度，请先存档。`, '导入重载提示必须保留原文并补齐存档提醒');
             assert.ok(prompt.trustedMessageHtml.includes(`模组【<strong class="gold">${f.sb.modHubEscapeHtml(displayName)}</strong>】`), '普通安装重载提示必须完整显示并金色加粗模组名');
+            assert.ok(prompt.trustedMessageHtml.includes('<strong class="red">可能丢失尚未存档的游戏进度</strong>，<strong class="gold" style="white-space: nowrap;">请先存档</strong>'), '导入重载提示必须突出未存档进度风险与存档建议');
             assert.ok(!prompt.trustedMessageHtml.includes('<img'), '模组显示名不得作为 HTML 执行');
             assert.equal(prompt.cancelText, '稍后重载');
             assert.deepEqual(f.tabs, [], '市场安装选择稍后重载后必须停留当前页签');
@@ -972,7 +973,8 @@ module.exports = async function() {
         assert.ok(html.includes(`<strong class="gold">${sb.modHubEscapeHtml(name)}</strong>`), '共用与延期重载提示必须完整高亮长模组名');
         assert.ok(html.includes('&lt;img src=x onerror=&quot;bad()&quot;&gt; &amp; &quot;测试&quot;') && !html.includes('<img'), '重载提示中的模组名必须先转义再高亮');
         assert.ok(html.includes('<br>请确认。'), '高亮后必须保留原有换行');
-        assert.ok(html.includes('重新载入可能丢失尚未存档的游戏进度，请先存档。'), '高亮后必须保留存档提醒');
+        assert.ok(html.replace(/<[^>]*>/g, '').includes('重新载入可能丢失尚未存档的游戏进度，请先存档。'), '高亮后必须保留存档提醒原文');
+        assert.ok(html.includes('<strong class="red">可能丢失尚未存档的游戏进度</strong>，<strong class="gold" style="white-space: nowrap;">请先存档</strong>'), '普通与框架重载提示必须突出未存档进度风险与存档建议');
         if (isFramework) assert.ok(html.includes('强烈建议立即重新载入') && html.includes('检测到底层核心框架状态发生变更。'), '延期框架提示必须保留原有强提醒');
         assert.equal(prompt.cancelText, '稍后重载');
     }

@@ -176,6 +176,11 @@
 4. **GitHub 发布**：
    - 源码提交并推送 `main` 后，新版本使用 `gh release create v<version>` 创建 Release 并上传安装包附件；本地同版本重打包不自动创建或更新 GitHub Release。GitHub Releases 中的历史版本与安装包永久保留，本地清理不得删除远端历史。
 
+5. **网站源码与 Sites 发布**：
+   - `dolmod-site/` 是由 Sites 管理的独立源码仓库。网站源码同步及 Sites 入口发布使用 Sites 插件的原生工作流，项目身份以该仓库 `.openai/hosting.json` 中的 `project_id` 为准。
+   - 不直接对 `git.chatgpt-team.site` 执行需要交互认证的普通 Git 推送，也不要求用户在 Git Credential Manager 中填写 GitHub 账号或密码。通过 Sites 的 `create_source_repository_write_credential` 获取临时授权，再按 `sites-hosting` 技能运行 `site-workflow.mjs`；凭据仅保留在会话内并通过标准输入传入，不写入文件、命令参数、日志或提交。
+   - 发布前保留无关未提交改动，必要时使用独立检出仅应用本次修复。Sites 源码同步、Sites 入口部署与既有 Cloudflare Worker/Pages 部署分别核验，不能把其中一项成功表述为全部发布完成；保持当前入口、访问权限与主站关系。
+
 ---
 
 ## 六、 更新日志维护规范

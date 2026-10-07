@@ -120,4 +120,118 @@ module.exports = async function() {
         assert.equal(versions.buildCandidates(mod, history(mod, definition.tag,
             ['SyntheticShared.zip', 'SyntheticShared-v99.zip', 'mod.zip', 'package.zip'].map(name => asset(syntheticRepository, definition.tag, name)))).length, 0);
     }
+    // 正式附件中的版别前缀、最低版本加号和修订后缀不能造成共享产品失配。
+    const realPackages = [
+        ['smartphone-omega', 'ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone', 'v.omega.1.0', 'SmartPhone-vOmega.1.0.mod.zip'],
+        ['head-mask-compatibility', 'chris81605/DOL-Compatibility-Mods', 'Compatibility', 'LegacyHeadMaskCompat.0.5.10.12+.zip'],
+        ['candy-and-robot', 'emicoto/DOLMods', 'sf1.15', 'i.Candy.and.Robot.ver2.4.5.1.fix.zip'],
+    ];
+    for (const [id, repo, tag, fileName] of realPackages) {
+        const identity = identities.find(item => item.id === id);
+        const repoUrl = `https://github.com/${repo}`;
+        const mod = { ...identity, identityId: id, githubUrl: `${repoUrl}/releases/tag/${tag}` };
+        const ownAsset = asset(repoUrl, tag, fileName);
+        const foreign = asset(repoUrl, tag, 'ForeignFeature-v99.0.zip');
+        const plan = market.buildReleaseAssetPlan([ownAsset, foreign], '', mod);
+        assert.deepEqual(Array.from(plan.assets, item => item.name), [fileName], `正式附件 ${fileName} 必须精确匹配本品`);
+        assert.deepEqual(Array.from(versions.buildCandidates(mod, history(mod, tag, [ownAsset, foreign])), item => item.assetName), [fileName],
+            '历史选版必须复用相同识别规则，且不能混入同仓库其它产品');
+        assert.equal(versions.buildCandidates(mod, history(mod, tag, [foreign])).length, 0);
+    }
+    const phoneRepo = 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone';
+    const omega = { ...identities.find(item => item.id === 'smartphone-omega'), identityId: 'smartphone-omega',
+        githubUrl: `${phoneRepo}/releases/tag/v.omega.1.0` };
+    const phones = ['SmartPhone-vOmega.1.0.mod.zip', 'SmartPhone-vAlpha.0.3.85.mod.zip']
+        .map(name => asset(phoneRepo, 'v.omega.1.0', name));
+    assert.deepEqual(Array.from(market.buildReleaseAssetPlan(phones, '', omega).assets, item => item.name), [phones[0].name]);
+    const alpha = { ...identities.find(item => item.id === 'smartphone'), githubUrl: phoneRepo, sharedRepository: true };
+    assert.deepEqual(Array.from(market.buildReleaseAssetPlan(phones, '', alpha).assets, item => item.name), [phones[1].name],
+        '去掉版别的 v 标记后，Alpha 与 Omega 仍必须隔离');
+    for (const [name, expected] of [['Feature-vBeta.1.0.zip', 'featurebeta'], ['Feature-vOmega.1.0.hotfix2.zip', 'featureomega'],
+        ['Violet-v2.0.zip', 'violet'], ['Valkyrie-2.0.zip', 'valkyrie']]) {
+        assert.equal(market.getAssetSeries(name), expected, '已知版本标记不能误删合法产品名');
+    }
+    sb.fetch = async url => String(url).includes('/mod-releases?')
+        ? { ok: false, status: 502, json: async () => ({ code: 'RELEASE_UPSTREAM_FAILED', error: '模拟历史服务离线' }) }
+        : { ok: true, json: async () => ({ tag_name: 'v.omega.1.0', name: 'OmegaΩ v1.0 | 万能的智能手机 简化版',
+            published_at: '2026-10-05T10:04:08Z', assets: phones.map(item => ({ name: item.name, size: item.size,
+                browser_download_url: item.downloadUrl })) }) };
+    const fallback = await versions.fetchReleases(omega, { useCache: false });
+    assert.equal(fallback.fromGithub, true);
+    assert.deepEqual(Array.from(versions.buildCandidates(omega, fallback), item => item.assetName), [phones[0].name],
+        '历史服务离线时，GitHub 直连也必须识别真实 Omega 包并保持身份隔离');
+
+    // 健康空响应可能来自旧筛选规则；补偿仅核对原仓库，不能绕过社区审核或启动守卫。
+    const headMaskRepo = 'https://github.com/chris81605/DOL-Compatibility-Mods';
+    const headMaskTag = 'Compatibility', headMaskName = 'LegacyHeadMaskCompat.0.5.10.12+.zip';
+    const headMask = { ...identities.find(item => item.id === 'head-mask-compatibility'),
+        identityId: 'head-mask-compatibility', githubUrl: `${headMaskRepo}/releases/tag/${headMaskTag}` };
+    const headMaskAsset = asset(headMaskRepo, headMaskTag, headMaskName);
+    const rawHeadMask = { tag_name: headMaskTag, published_at: '2026-10-07T00:00:00Z', assets: [
+        headMaskAsset, asset(headMaskRepo, headMaskTag, 'ForeignFeature-v99.0.zip'),
+        asset('https://github.com/AnotherAuthor/DOL-Compatibility-Mods', headMaskTag, headMaskName),
+    ].map(item => ({ name: item.name, size: item.size, browser_download_url: item.downloadUrl })) };
+    for (const mode of ['empty', 'nonempty', 'community']) {
+        const run = sandbox(), api = run.modHubMarketVersions;
+        const mod = mode === 'community' ? { ...headMask, catalogSource: 'community', autoInstall: true } : headMask;
+        run.modHubMarket.hasCommunityReleaseSource = () => true;
+        let workerRequests = 0, directRequests = 0;
+        run.fetch = async url => {
+            if (String(url).includes('/mod-releases?')) {
+                workerRequests++;
+                return { ok: true, json: async () => ({ ...history(mod, headMaskTag, [headMaskAsset]),
+                    communityRevision: run.modHubMarket.getCommunityRevision(),
+                    ...(mode !== 'nonempty' ? { releases: [] } : {}) }) };
+            }
+            directRequests++;
+            assert.equal(String(url), 'https://api.github.com/repos/chris81605/dol-compatibility-mods/releases/tags/Compatibility',
+                '空历史补偿只能查询目录指定的原作者、原仓库和原标签');
+            return { ok: true, json: async () => rawHeadMask };
+        };
+        const result = await api.fetchReleases(mod);
+        assert.equal(workerRequests, 1);
+        assert.equal(directRequests, mode === 'empty' ? 1 : 0, '非空历史或社区健康空响应不得额外直连');
+        if (mode === 'empty') assert.equal(result.fromGithub, true, '旧服务健康空响应须能由原仓库核验补回');
+        assert.deepEqual(Array.from(api.buildCandidates(mod, result), item => item.assetName),
+            mode === 'community' ? [] : [headMaskName], '补偿仍须排除同仓库其他产品及其他作者同名附件');
+    }
+    for (const failure of ['403', '404', 'network']) {
+        const run = sandbox(), api = run.modHubMarketVersions;
+        let workerRequests = 0, directRequests = 0;
+        run.fetch = async url => {
+            if (String(url).includes('/mod-releases?')) {
+                workerRequests++;
+                return { ok: true, json: async () => ({ ...history(headMask, headMaskTag, []), releases: [],
+                    communityRevision: run.modHubMarket.getCommunityRevision() }) };
+            }
+            directRequests++;
+            if (directRequests > 1) return { ok: true, json: async () => rawHeadMask };
+            if (failure === 'network') throw new Error('模拟 GitHub 连接失败');
+            return { ok: false, status: Number(failure), json: async () => ({ message: failure === '403' ? 'API rate limit exceeded' : 'Not Found' }) };
+        };
+        const empty = await api.fetchReleases(headMask);
+        assert.equal(empty.releases.length, 0, '可选直连失败应保留已核验的 Worker 空响应');
+        assert.equal(empty.fromGithub, undefined);
+        const retry = await api.fetchReleases(headMask);
+        assert.equal(retry.fromGithub, true);
+        assert.equal(workerRequests, 2);
+        assert.equal(directRequests, 2, '暂时无法核验的空历史不得长期缓存阻止后续重试');
+    }
+    for (const stop of ['cancel', 'source', 'withdrawn']) {
+        const run = sandbox(), api = run.modHubMarketVersions, controller = new AbortController();
+        let withdrawn = false, directRequests = 0;
+        run.modHubMarket.isWithdrawn = () => withdrawn;
+        run.fetch = async url => {
+            if (String(url).includes('/mod-releases?')) return { ok: true, json: async () => ({
+                ...history(headMask, headMaskTag, []), releases: [], communityRevision: run.modHubMarket.getCommunityRevision() }) };
+            directRequests++;
+            if (stop === 'cancel') controller.abort();
+            if (stop === 'withdrawn') withdrawn = true;
+            return { ok: true, json: async () => stop === 'source' ? { ...rawHeadMask, tag_name: 'another-tag' } : rawHeadMask };
+        };
+        const code = stop === 'cancel' ? 'ABORT_ERR' : stop === 'source' ? 'RELEASE_SOURCE_CHANGED' : 'MOD_RELEASES_UNAVAILABLE';
+        await assert.rejects(api.fetchReleases(headMask, { signal: controller.signal }), error => error.code === code,
+            '空响应补偿不得吞掉取消、来源变化或撤回状态');
+        assert.equal(directRequests, 1);
+    }
 };

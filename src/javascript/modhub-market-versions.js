@@ -390,7 +390,7 @@
         const signatureFields = [base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
             mod.autoInstallScope || '', mod.revision, communityRevision, mod.identityId, mod.name,
             mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
-            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, page, 'modpack-v1'];
+            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, page, 'modpack-v1', 'asset-series-v2'];
         // 登记证据变化时废弃旧候选缓存；普通来源沿用原有缓存签名。
         if (mod.verifiedReleaseAsset) signatureFields.push(mod.verifiedReleaseAsset);
         const signature = JSON.stringify(signatureFields);
@@ -406,6 +406,7 @@
             if (unsafeHistoryError(error)) invalidateHistoryFamily(family, cacheKey);
             throw error;
         };
+        const verifyEmptyHistory = Boolean(mod.sharedRepository && mod.catalogSource !== 'community');
         if (market?.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
         if (mod.autoInstall === false || mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) rejectUnsafe(historyError('该模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE'));
         let cached = null;
@@ -416,6 +417,7 @@
             && (!Number.isSafeInteger(communityRevision) || data.communityRevision === communityRevision)
             && Array.isArray(data.releases) && data.releases.every(release => validHistoricalRelease(release, mod, source));
         if (cached?.signature !== signature || !Number.isFinite(cached?.timestamp) || !validResponse(cached?.data)) cached = null;
+        if (verifyEmptyHistory && !cached?.data.releases.length) cached = null;
         if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
         if (useCache && cached && !cached.data.stale && Date.now() - cached.timestamp < MODHUB_HISTORY_CACHE_TTL) return { ...cached.data, fromCache: true };
         const url = new URL('/mod-releases', base.origin);
@@ -447,12 +449,28 @@
                 rejectUnsafe(directError);
             }
         }
+        // 旧服务可能按旧文件名规则漏筛；只核对已获准的原仓库，不绕过社区审核。
+        if (verifyEmptyHistory && !data.fromGithub && !data.releases.length) {
+            checkCurrent();
+            try {
+                const direct = await fetchGithubHistory(mod, source, page, signal, communityRevision);
+                checkCurrent();
+                if (!validResponse(direct)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
+                if (direct.releases.length) data = direct;
+            } catch (error) {
+                if (signal?.aborted || error?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+                checkCurrent();
+                if (['RELEASE_SOURCE_CHANGED', 'MOD_RELEASES_UNAVAILABLE'].includes(error?.code)) rejectUnsafe(error);
+            }
+        }
         if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
         checkCurrent();
         if (market.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
         const fetchedAt = Math.min(Date.now(), Date.parse(data.fetchedAt));
         data = { ...data, stale: Boolean(data.stale || Date.now() - fetchedAt >= MODHUB_HISTORY_CACHE_TTL) };
-        try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
+        if (!verifyEmptyHistory || data.releases.length) {
+            try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
+        }
         return data;
     }
 

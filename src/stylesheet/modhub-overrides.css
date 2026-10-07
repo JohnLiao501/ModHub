@@ -194,3 +194,6 @@
     .modhub-restore-notice .modhub-modal-body { padding: 10px 12px; line-height: 1.45; }
     .modhub-restore-notice .modhub-modal-message { gap: 8px; }
 }
+
+/* 样式守卫用此标记确认本文件已实际生效。 */
+:root { --modhub-overrides-styles: 1; }

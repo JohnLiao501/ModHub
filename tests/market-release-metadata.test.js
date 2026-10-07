@@ -32,7 +32,7 @@ module.exports = async function () {
         sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, communityRevision: 8, mods }) });
         await sb.modHubInitMarket(true);
         const alpha = cards.innerHTML.split('data-mod-name="future-alpha"')[1].split('data-mod-name=')[0];
-        assert.ok(alpha.includes('最新版本：alpha-channel（发布标签，版号未标注）'));
+        assert.ok(alpha.includes('最新版本：alpha-channel') && !alpha.includes('（发布标签，版号未标注）'));
         assert.ok(alpha.includes('发布: 2026-07-14'), '非数字发布仍显示真实发布日期');
         const beta = cards.innerHTML.split('data-mod-name="future-beta"')[1].split('data-mod-name=')[0];
         assert.ok(beta.includes('最新版本：v0.1.5') && beta.includes('发布: 2026-07-20'));
@@ -105,7 +105,7 @@ module.exports = async function () {
         const mod = sb.modHubMarket.getMarketMods()[0];
         await sb.modHubMarket.getModUpdateInfo(mod).promise;
         sb.modHubMarket.renderMarketCards();
-        assert.ok(cards.innerHTML.includes('最新版本：stable-channel（发布标签，版号未标注）'));
+        assert.ok(cards.innerHTML.includes('最新版本：stable-channel') && !cards.innerHTML.includes('（发布标签，版号未标注）'));
         assert.ok(cards.innerHTML.includes('发布: 2026-07-22'));
         assert.equal(mod.version, '', '显示发布标签不能修改数字版本或冒充包内版本');
         mod._updateCheck = { signature: '过期身份签名', latestRelease: { version: '99.0', updateDate: '2099-12-31' } };
