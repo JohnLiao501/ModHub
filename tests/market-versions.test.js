@@ -394,8 +394,11 @@ module.exports = async function() {
 
     {
         const { sb, versions } = loadVersions();
-        const candidate = (version, name = `Example-v${version}.zip`, compatibility = { status: 'unknown', evidence: 'unknown' }, seriesKey = 'Example') => ({
-            candidateKey: `${name}:${version}`, version, assetName: name, seriesKey, compatibility, updateDate: '2026-10-01' });
+        const candidate = (version, name = `Example-v${version}.zip`, compatibility = { status: 'unknown', evidence: 'unknown' }, seriesKey = 'Example', tagName = `v${version || 'unknown'}`) => {
+            const assetUrl = `https://github.com/Owner/Example/releases/download/${tagName}/${name}`;
+            return { candidateKey: JSON.stringify(['example', tagName, assetUrl]), tagName, version, assetName: name,
+                assetUrl, assets: [{ name, size: 100, downloadUrl: assetUrl }], seriesKey, compatibility, updateDate: '2026-10-01' };
+        };
         const compatible = { status: 'compatible', evidence: 'declaration' };
         const latest = candidate('2.10', undefined, compatible), previous = candidate('2.9', undefined, compatible);
         const unknownOlder = candidate('3.9'), unknownNewer = candidate('3.10');
@@ -412,7 +415,9 @@ module.exports = async function() {
         assert.equal(versions.getDefaultSelection(baseMod, [candidate('3.0')], { updateOnly: true, localVersion: '1.0' }).defaultKey,
             candidate('3.0').candidateKey, '全部更新与多选安装共用无歧义最新版默认选择');
         const unknownVersion = candidate('', 'Example.zip');
-        assert.equal(versions.getDefaultSelection(baseMod, [unknownVersion]).defaultKey, '', '缺少可比较模组版本时不能猜测最新');
+        assert.equal(versions.getDefaultSelection(baseMod, [unknownVersion]).defaultKey, unknownVersion.candidateKey, '唯一合法发布可以预选，不将标签伪造成数字版号');
+        assert.equal(versions.getDefaultSelection(baseMod, [unknownVersion]).defaultRisk, true, '无数字版号的唯一发布仍须确认适配风险');
+        assert.equal(versions.getDefaultSelection(baseMod, [unknownVersion], { updateOnly: true, localVersion: '1.0' }).defaultKey, '', '未知版号不能自动认定高于已安装版本');
         assert.equal(versions.getDefaultSelection(baseMod, [latest, candidate('3.0', 'Example-EN-v3.0.zip', undefined, 'Example-EN')]).defaultKey, '', '不同主包语言或型号不得默认跨系列');
         const otherFormat = candidate('2.10', 'Example-v2.10.modpack', compatible);
         assert.equal(versions.getDefaultSelection(baseMod, [latest, otherFormat]).defaultKey, '', '相同版本不同主资产格式不得擅自选择');
@@ -421,7 +426,7 @@ module.exports = async function() {
         assert.equal(versions.getLatestUpdateCandidate(baseMod, [latest, otherFormat, unknownNewer]), null, '当前游戏适配主包有歧义时不得借未知适配新版绕过人工选择');
         assert.equal(versions.getDefaultSelection(baseMod, [{ ...latest, compatibility: compatible }, { ...otherFormat, compatibility: compatible }, candidate('3.0')]).defaultKey,
             '', '匹配版本的主资产存在歧义时，不得借未知适配的新版绕过人工选择');
-        const olderRelease = { ...latest, candidateKey: 'older-tag', updateDate: '2026-09-30' };
+        const olderRelease = { ...candidate('2.10', undefined, compatible, 'Example', 'older-tag'), updateDate: '2026-09-30' };
         assert.equal(versions.getDefaultSelection(baseMod, [olderRelease, latest]).defaultKey, latest.candidateKey, '同名同版本主包重复发布按实际日期消歧');
         const unsupported = candidate('3.0', undefined, { status: 'incompatible', evidence: 'declaration', gameVersionRange: '>=0.5.11.0' });
         assert.equal(versions.getDefaultSelection(baseMod, [unsupported]).defaultKey, '');

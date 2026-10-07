@@ -45,6 +45,7 @@
     // 准备结果只在本次安装内复用，不能把换版后的包或外部构造的对象直接导入。
     const preparedMarketPackages = new WeakMap();
     const modUpdateChecks = new Map();
+    let marketHistoryRefresh = 0;
     const installedPackageRecords = new Map();
     const downloadedPackageDigests = new Map();
     let officialPackageMetadataQueue = Promise.resolve();
@@ -2038,7 +2039,7 @@
         const platform = (typeof window.modHubIsMobile === 'function' ? window.modHubIsMobile() : window.modHubIsMobile) ? 'mobile' : 'desktop';
         const source = JSON.stringify([repo.key, repo.releaseTag, repo.assetName, entryKey, mod.bootNames || [], mod.aliases || [],
             (mod.identityId || mod.id) === 'au-beautification' ? mod._matchedLocal?.name || '' : '']);
-        const isUsableCache = cached => cached?.assetPlanVersion === 4 && cached.assetPlanGameVersion === gameVersion
+        const isUsableCache = cached => cached?.assetPlanVersion === 5 && cached.assetPlanGameVersion === gameVersion
             && cached.assetPlanPlatform === platform && cached.assetPlanSource === source
             && (!mod.version || compareVersions(cached.version, mod.version) >= 0);
         if (useCache) {
@@ -2145,9 +2146,24 @@
         const tagName = String(releaseData.tag_name || '');
         const tagVersion = /^(?:v?\d)|(?:^|[^a-z0-9])(?:v\d|\d+\.\d+)/i.test(tagName) ? tagName : '';
         const prefixedTitleVersion = releaseTitle.match(/^v(\d+(?:\.\d+){1,3})(?=$|[\s(（-])/i)?.[1];
-        const version = sharedRepository ? (getAssetVersionParts(bestAsset?.name).join('.') || mod.wikiVersion || '')
+        let version = sharedRepository ? (getAssetVersionParts(bestAsset?.name).join('.') || mod.wikiVersion || '')
             : (getAssetVersionParts(bestAsset?.name).join('.') || explicitTitleVersion || tagVersion || prefixedTitleVersion || mod.version || '');
-        const updateDate = releaseData.published_at ? releaseData.published_at.slice(0, 10) : mod.updateDate || '';
+        // 直连回退复用选版的来源与身份校验，不能借用同仓库其它产品的版号。
+        if (window.modHubMarketVersions?.buildCandidates) {
+            const candidates = window.modHubMarketVersions.buildCandidates({ ...mod,
+                sharedRepository: Boolean(mod.sharedRepository || sharedRepository) }, {
+                sourceUrl: mod.githubUrl,
+                releases: [{ tagName, name: releaseTitle, htmlUrl: releaseData.html_url,
+                    publishedAt: releaseData.published_at, draft: releaseData.draft,
+                    prerelease: releaseData.prerelease, assets }]
+            });
+            const metadata = candidates.find(candidate => candidate.assetUrl === bestAsset?.downloadUrl);
+            version = metadata?.version || '';
+        }
+        const publishedTime = Date.parse(releaseData.published_at || '');
+        const updateDate = window.modHubMarketVersions?.formatReleaseDate
+            ? window.modHubMarketVersions.formatReleaseDate(releaseData.published_at) || mod.updateDate || ''
+            : Number.isFinite(publishedTime) ? new Date(publishedTime + 8 * 60 * 60 * 1000).toISOString().slice(0, 10) : mod.updateDate || '';
 
         const result = {
             tagName: releaseData.tag_name || '',
@@ -2162,12 +2178,15 @@
             availableAssets: assetPlan.availableAssets,
             requiresManualSelection: assetPlan.needsChoice,
             selectionReason: assetPlan.reason,
-            assetPlanVersion: 4,
+            assetPlanVersion: 5,
             assetPlanGameVersion: gameVersion,
             assetPlanPlatform: platform,
             assetPlanSource: source,
             version,
-            updateDate
+            versionLabel: version ? '' : tagName,
+            publishedAt: releaseData.published_at || null,
+            updateDate,
+            updateDateSource: Number.isFinite(publishedTime) ? 'github' : mod.updateDateSource || null
         };
 
         if (useCache) {
@@ -2878,17 +2897,44 @@
         }
     }
 
+    function getModUpdateSignature(mod, gameVersion) {
+        return JSON.stringify([gameVersion, RELEASE_WORKER_API_BASE, mod.id, mod.githubUrl, mod.version,
+            mod.releaseUrl, mod.catalogSource, mod.autoInstall, mod.autoInstallScope, mod.revision, withdrawnRevision,
+            mod.identityId, mod.name, mod.sourceUrl, mod.repositoryKeys, mod.bootNames, mod.aliases,
+            mod.sharedRepository, mod.releaseCompatibility, mod.dependencies, mod.verifiedReleaseAsset,
+            (mod.identityId || mod.id) === 'au-beautification' ? mod._matchedLocal?.name || '' : '', marketHistoryRefresh]);
+    }
+
+    function getReleaseHistoryContext(mod) {
+        return { signature: getModUpdateSignature(mod, window.modHubMarketVersions?.getGameVersion?.()),
+            refresh: marketHistoryRefresh, useCache: marketHistoryRefresh === 0 };
+    }
+
+    /** 只接收已完成分页的历史候选；目录版号和当前游戏更新目标各自保留。 */
+    function rememberMarketCandidates(mod, candidates, { state, context = getReleaseHistoryContext(mod) } = {}) {
+        const versions = window.modHubMarketVersions, gameVersion = versions?.getGameVersion?.();
+        if (!mod?.id || !versions || isWithdrawn(mod) || mod._isDeadRepo || isDeadRepo(mod.githubUrl, mod)
+            || mod.autoInstall === false || mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod)) return null;
+        const signature = getModUpdateSignature(mod, gameVersion);
+        if (context.signature !== signature || context.refresh !== marketHistoryRefresh) return null;
+        if (state && modUpdateChecks.get(signature) !== state) return null;
+        const latestRelease = versions.getLatestReleaseCandidate?.(mod, candidates) || null;
+        const release = gameVersion ? (versions.getLatestUpdateCandidate || versions.getLatestGameCandidate)(mod, candidates) : null;
+        if (!state) {
+            state = mod._updateCheck = { signature, checkedAt: Date.now(), pending: false, error: '' };
+            modUpdateChecks.set(signature, state);
+        }
+        Object.assign(state, { latestRelease, release, version: release?.version || '' });
+        if (!state.pending) renderMarketCards();
+        return state;
+    }
+
     /** 更新状态复用历史包体身份与版号，适配推荐和未知适配新版分别处理。 */
     function getModUpdateInfo(mod) {
         const versions = window.modHubMarketVersions;
         const gameVersion = versions?.getGameVersion?.();
         if (!mod?.id || !versions?.getLatestGameCandidate) return { version: mod?.version || '' };
-        if (!gameVersion) return mod._updateCheck = { pending: false, version: '', release: null, error: '' };
-        const signature = JSON.stringify([gameVersion, RELEASE_WORKER_API_BASE, mod.id, mod.githubUrl, mod.version,
-            mod.releaseUrl, mod.catalogSource, mod.autoInstall, mod.autoInstallScope, mod.revision, withdrawnRevision,
-            mod.identityId, mod.name, mod.sourceUrl, mod.repositoryKeys, mod.bootNames, mod.aliases,
-            mod.sharedRepository, mod.releaseCompatibility, mod.dependencies,
-            (mod.identityId || mod.id) === 'au-beautification' ? mod._matchedLocal?.name || '' : '']);
+        const signature = getModUpdateSignature(mod, gameVersion);
         const cached = modUpdateChecks.get(signature);
         if (cached && (cached.pending || Date.now() - cached.checkedAt < RELEASE_CACHE_TTL)) {
             mod._updateCheck = cached;
@@ -2896,16 +2942,16 @@
         }
         const state = mod._updateCheck = { signature, checkedAt: Date.now(), pending: true, version: '', release: null, error: '' };
         modUpdateChecks.set(signature, state);
+        const context = getReleaseHistoryContext(mod), refresh = context.refresh;
         state.promise = Promise.resolve().then(async () => {
             const candidates = [];
             let history;
             do {
-                history = await versions.fetchReleases(mod, { page: history ? history.page + 1 : 1 });
-                if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion || isWithdrawn(mod)) return;
+                history = await versions.fetchReleases(mod, { page: history ? history.page + 1 : 1, useCache: context.useCache });
+                if (refresh !== marketHistoryRefresh || mod._updateCheck !== state || versions.getGameVersion() !== gameVersion || isWithdrawn(mod)) return;
                 candidates.push(...versions.buildCandidates(mod, history));
             } while (history.hasMore);
-            state.release = (versions.getLatestUpdateCandidate || versions.getLatestGameCandidate)(mod, candidates);
-            state.version = state.release?.version || '';
+            if (!rememberMarketCandidates(mod, candidates, { state, context })) return;
             const asset = getReleaseInstallAssets(state.release)[0];
             const repository = parseGithubRepo(mod.githubUrl);
             if (mod._matchedLocal?.packageDigest && asset && !getAssetPackageDigest(asset) && repository && state.release.tagName) {
@@ -2925,7 +2971,7 @@
             }
         }).catch(error => { state.error = error.message || '更新版本暂时无法核对'; }).finally(() => {
             state.pending = false;
-            if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion) return;
+            if (refresh !== marketHistoryRefresh || mod._updateCheck !== state || versions.getGameVersion() !== gameVersion) return;
             const updates = getUpdatableMods();
             window.modHubNotifyUpdateState?.(updates.length, updates);
             renderMarketCards();
@@ -5375,7 +5421,10 @@
     // ==================== 界面渲染逻辑 ====================
 
     async function loadMarketData(forceRefresh = false) {
-        if (forceRefresh) modUpdateChecks.clear();
+        if (forceRefresh) {
+            marketHistoryRefresh++;
+            modUpdateChecks.clear();
+        }
         if (!forceRefresh && marketModList.length > 0) return marketModList;
 
         if (!forceRefresh) {
@@ -5489,8 +5538,8 @@
 
             if (currentSortBy === 'date') {
                 const getEffectiveDate = (m) => {
-                    const releaseDate = m._updateCheck?.release?.updateDate;
-                    return releaseDate || m.updateDate || '1970-01-01';
+                    // 列表按当前产品的最新发布排序，不使用适配推荐的旧版本日期。
+                    return getLatestMarketVersionInfo(m).updateDate || m.updateDate || '1970-01-01';
                 };
                 const da = getEffectiveDate(a);
                 const db = getEffectiveDate(b);
@@ -5629,18 +5678,33 @@
         const indexedVersionSource = ['github', 'wiki'].includes(mod.versionSource)
             || safeHttpsUrl(mod.releaseUrl) || safeHttpsUrl(mod.downloadUrl)
             || mod.assets?.some(asset => safeHttpsUrl(asset.downloadUrl));
-        if (!indexedVersionSource) return { version: '', text: '未知' };
-        const indexedVersion = typeof mod.releaseAssetVersion === 'string' && mod.releaseAssetVersion.trim()
+        const indexedVersion = !indexedVersionSource ? '' : typeof mod.releaseAssetVersion === 'string' && mod.releaseAssetVersion.trim()
             ? mod.releaseAssetVersion.trim() : typeof mod.version === 'string' ? mod.version.trim() : '';
-        const release = mod._updateCheck?.release;
+        const currentUpdate = mod._updateCheck?.signature === getModUpdateSignature(mod, window.modHubMarketVersions?.getGameVersion?.())
+            && !isWithdrawn(mod) && !mod._isDeadRepo && !isDeadRepo(mod.githubUrl, mod) ? mod._updateCheck : null;
+        const latestRelease = currentUpdate?.latestRelease;
+        const indexDate = mod.updateDate || '';
+        if (latestRelease?.version && compareVersions(latestRelease.version, indexedVersion) > 0) {
+            return { version: latestRelease.version, text: formatVersionDisplay(latestRelease.version),
+                updateDate: latestRelease.updateDate || indexDate,
+                updateDateSource: latestRelease.updateDate ? latestRelease.updateDateSource || 'github' : mod.updateDateSource };
+        }
+        if (!indexedVersionSource) return { version: '', text: '未知' };
+        const release = currentUpdate?.release;
         const published = getPublishedVersion(release);
         const latestPublished = getPublishedVersion(mod) || mod.version;
         if (mod._matchedLocal?.packageDigest && published && getAssetPackageDigest(getReleaseInstallAssets(release)[0])
             && isSameVersion(published, latestPublished)) {
-            return { version: published, text: formatVersionDisplay(published) };
+            return { version: published, text: formatVersionDisplay(published), updateDate: indexDate,
+                updateDateSource: mod.updateDateSource };
         }
+        const label = typeof mod.versionLabel === 'string' && mod.versionLabel.trim()
+            ? mod.versionLabel.trim() : !indexedVersion && latestRelease ? latestRelease.versionLabel || latestRelease.tagName || '' : '';
+        const publishedLabel = !indexedVersion && label && (mod.versionSource === 'github' || latestRelease)
+            ? `${label}（发布标签，版号未标注）` : label;
         return { version: indexedVersion, text: indexedVersion ? formatVersionDisplay(indexedVersion)
-            : typeof mod.versionLabel === 'string' && mod.versionLabel.trim() ? mod.versionLabel.trim() : '未知' };
+            : publishedLabel || '未知', updateDate: !indexedVersion && latestRelease?.updateDate || indexDate,
+            updateDateSource: !indexedVersion && latestRelease?.updateDate ? latestRelease.updateDateSource || 'github' : mod.updateDateSource };
     }
 
     /** 安装事实与适配检查独立显示，未知结果不能覆盖已核实的相同版本。 */
@@ -5667,7 +5731,8 @@
             label = '已是推荐版本';
             title = `当前游戏推荐版本与已安装版本相同；目录最新版本 ${formatVersionDisplay(latestVersion)} 更高。`
                 + (updateInfo.release.compatibility?.evidence === 'filename' ? '推荐依据安装包名称参考，不代表游戏实测。' : '推荐依据作者声明，不代表游戏实测。');
-        } else if (localVersion && latestVersion && mod._updateCheck && !updateInfo.version && !updateInfo.pending && !updateInfo.error) {
+        } else if (localVersion && latestVersion && mod._updateCheck && !updateInfo.version && !updateInfo.error
+            && (!updateInfo.pending || !window.modHubMarketVersions?.getGameVersion?.())) {
             if (compareVersions(localVersion, latestVersion) < 0) {
                 details.push(window.modHubMarketVersions?.getGameVersion?.()
                     ? '未找到适配当前游戏的版本' : '无法识别当前游戏版本，尚未检查适配更新');
@@ -5853,7 +5918,7 @@
                     </div>
                     <div class="modhub-market-meta grey">
                         <span>作者: ${escapeHtml(mod.author)}</span>
-                        ${updateInfo.release?.updateDate || mod.updateDate ? `<span>更新: ${escapeHtml(updateInfo.release?.updateDate || mod.updateDate)}</span>` : ''}
+                        ${latestVersionInfo.updateDate ? `<span>${latestVersionInfo.updateDateSource === 'github' ? '发布' : '更新'}: ${escapeHtml(latestVersionInfo.updateDate)}</span>` : ''}
                     </div>
                     <div class="modhub-market-meta modhub-market-versions grey">
                         ${localVerText}
@@ -6754,6 +6819,7 @@
         fetchRecentCompanionAssets,
         buildReleaseAssetPlan,
         getAssetGameVersion,
+        matchesAssetIdentity,
         getAssetSeries,
         getAssetVersionParts,
         getMatchingCompanionAssets,
@@ -6786,6 +6852,8 @@
         isPreparedComponentInstalled,
         getLocalInstalledProfiles,
         getModUpdateInfo,
+        rememberMarketCandidates,
+        getReleaseHistoryContext,
         checkModInstallStatus,
         findMarketModByLocalName,
         cancelDownload,

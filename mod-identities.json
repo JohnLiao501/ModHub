@@ -37,13 +37,37 @@
         "AutoClothesRepair"
       ],
       "aliases": [
-        "自动修衣"
+        "自动修衣",
+        "原地补衣"
       ],
       "repositories": [],
       "category": "界面与便利",
       "tags": [
         "自动化",
         "服装"
+      ],
+      "repositoryKeys": [
+        "3naka/DarksOuLs"
+      ],
+      "sharedRepository": true
+    },
+    {
+      "id": "combat-terminator",
+      "name": "战斗终结者",
+      "bootNames": [
+        "CombatTerminator"
+      ],
+      "aliases": [
+        "战斗终结者"
+      ],
+      "repositories": [],
+      "repositoryKeys": [
+        "3naka/DarksOuLs"
+      ],
+      "sharedRepository": true,
+      "category": "玩法与内容",
+      "tags": [
+        "战斗"
       ]
     },
     {
@@ -56,11 +80,10 @@
         "自动清洁",
         "自动清洗",
         "自动清理",
-        "AutoClean"
+        "AutoClean",
+        "自动清理V0.1.5"
       ],
-      "repositories": [
-        "DarkSoULs"
-      ],
+      "repositories": [],
       "category": "界面与便利",
       "tags": [
         "自动化",

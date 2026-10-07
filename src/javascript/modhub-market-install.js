@@ -114,17 +114,21 @@
 
     async function loadChoices(mod, options = {}) {
         const candidates = new Map();
+        const historyContext = market().getReleaseHistoryContext?.(mod);
         let history, staleHistory;
         do {
             const page = history ? Number(history.page) + 1 : 1;
-            history = await versions().fetchReleases(mod, { page, signal: options.signal });
+            history = await versions().fetchReleases(mod, { page, signal: options.signal, useCache: historyContext?.useCache });
             if (history.page !== page) throw new Error('历史版本分页未能继续，请重试版本列表');
             if (history.stale && !staleHistory) staleHistory = history;
             versions().buildCandidates(mod, history).forEach(candidate => candidates.set(candidate.candidateKey, candidate));
-            const choices = { ...versions().rankCandidates(mod, [...candidates.values()], options), history: { ...history,
+            const choices = { ...versions().rankCandidates(mod, [...candidates.values()], options), historyContext, history: { ...history,
                 stale: Boolean(staleHistory), fetchedAt: staleHistory?.fetchedAt || history.fetchedAt } };
             options.onProgress?.(choices);
-            if (!history.hasMore) return choices;
+            if (!history.hasMore) {
+                market().rememberMarketCandidates?.(mod, [...candidates.values()], { context: historyContext });
+                return choices;
+            }
         } while (!options.signal?.aborted);
         throw Object.assign(new Error('已取消获取历史版本'), { name: 'AbortError' });
     }
@@ -134,7 +138,7 @@
         let candidates = [], selectedKey = '', initialKey = '', manuallySelected = false;
         let defaults = {}, selectedOptional = new Set();
         let closed = false, loading = true, slow = false, errorMessage = '', errorDetails = [], slowTimer;
-        let history = null, staleFetchedAt = '', gameVersion = versions().getGameVersion();
+        let history = null, historyContext, staleFetchedAt = '', gameVersion = versions().getGameVersion();
         const local = options.localBoot || getLocal(mod), localVersion = String(options.localVersion || local?.version || '');
         const selectedInstalled = () => releaseInstalled(candidates.find(candidate => candidate.candidateKey === selectedKey), local) && !selectedOptional.size;
         const openGroups = new Map(), renderedGroups = new Map();
@@ -253,7 +257,7 @@
                             if (first) {
                                 const applyChoices = choices => {
                                     if (closed) return;
-                                    candidates = choices.candidates; history = choices.history; gameVersion = choices.gameVersion;
+                                    candidates = choices.candidates; history = choices.history; historyContext = choices.historyContext; gameVersion = choices.gameVersion;
                                     defaults = requires.length ? versions().rankCandidates(mod, candidates.filter(candidateMeetsRequirements), options) : choices;
                                     if (!manuallySelected) {
                                         selectedKey = selectedKey === '__skip__' ? selectedKey : defaults.defaultKey ?? defaults.recommendedKey ?? '';
@@ -272,11 +276,12 @@
                                     initialKey = selectedKey;
                                 } else if (selectedKey !== '__skip__' && !candidates.some(candidate => candidate.candidateKey === selectedKey)) selectedKey = '';
                             } else {
-                                const page = await versions().fetchReleases(mod, { page: history.nextPage || Number(history.page || 1) + 1, signal: controller.signal });
+                                const page = await versions().fetchReleases(mod, { page: history.nextPage || Number(history.page || 1) + 1, signal: controller.signal, useCache: historyContext?.useCache });
                                 if (closed) return;
                                 history = page;
                                 const joined = [...new Map([...candidates, ...versions().buildCandidates(mod, history)].map(candidate => [candidate.candidateKey, candidate])).values()];
                                 candidates = versions().rankCandidates(mod, joined, options).candidates;
+                                if (!history.hasMore) market().rememberMarketCandidates?.(mod, candidates, { context: historyContext });
                             }
                             if (history.stale) staleFetchedAt = history.fetchedAt || '未知';
                         } catch (error) { if (!closed) { const failure = historyFailure(error); errorMessage = `版本列表读取失败：${failure.message}`; errorDetails = failure.details; } }
@@ -364,7 +369,7 @@
                             await loadChoices(row.mod, { updateOnly, localVersion: local?.version || '', signal: controller.signal, onProgress: applyChoices });
                             return;
                         }
-                        const history = await versions().fetchReleases(row.mod, { page: row.history.page + 1, signal: controller.signal });
+                        const history = await versions().fetchReleases(row.mod, { page: row.history.page + 1, signal: controller.signal, useCache: row.historyContext?.useCache });
                         if (closed || controller.signal.aborted) return;
                         const merged = new Map([...row.candidates, ...versions().buildCandidates(row.mod, history)].map(candidate => [candidate.candidateKey, candidate]));
                         const choices = versions().rankCandidates(row.mod, [...merged.values()], { updateOnly, localVersion: local?.version || '' });
@@ -372,6 +377,7 @@
                         const staleHistory = row.history?.stale ? row.history : history;
                         Object.assign(row, choices, { local, selectedKey, defaultKey: initial && !row.manual ? selectedKey : row.defaultKey, history: { ...history,
                             stale: Boolean(row.history?.stale || history.stale), fetchedAt: staleHistory.fetchedAt } });
+                        if (!history.hasMore) market().rememberMarketCandidates?.(row.mod, [...merged.values()], { context: row.historyContext });
                     } catch (error) { if (!closed && !controller.signal.aborted) { const failure = historyFailure(error); row.error = failure.message; row.errorDetails = failure.details; } }
                 };
                 // 初次读取、分页及逐行重试共用两路队列，其他已完成行仍可操作。

@@ -5,6 +5,8 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    await require('./reviewed-install-identities.test')();
+    await require('./market-release-metadata.test')();
     // 发行标签与包内版本不同时，卡片必须用真实仓库包及官方摘要确认发行身份。
     for (const { currentPackage, version, bootVersion, tag } of [
         { currentPackage: 1, version: '1.8', bootVersion: '1.7', tag: 'v1.8' },
@@ -1801,6 +1803,101 @@ module.exports = async function() {
         assert.equal(dialogs.length, 1, '批量应记录原因且不弹单装对话框');
     }
 
+    // 目录尚未刷新时，已读取的完整发布历史须纠正卡片；手动刷新须绕过真实历史缓存。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        sb.StartConfig = { version: '0.5.12.13' };
+        const market = sb.modHubMarket, versions = sb.modHubMarketVersions;
+        const githubUrl = 'https://github.com/VersionTests/ModHub';
+        const indexed = { id: 'modhub', identityId: 'modhub', name: 'ModHub模组管理中心', bootNames: ['ModHub'],
+            githubUrl, repositoryKeys: ['VersionTests/ModHub'], version: '1.3.1', versionSource: 'github',
+            releaseUrl: `${githubUrl}/releases/tag/v1.3.1`, updateDate: '2026-10-01' };
+        const local = { name: 'ModHub', bootJson: { name: 'ModHub', version: '1.3.2', repository: githubUrl } };
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [local], getModListNameNoAlias: () => ['ModHub'] } });
+        sb.modHubGetModInfo = name => name === 'ModHub' ? local : null;
+        const cards = createStubElement();
+        sb.document.getElementById = id => id === 'modHubMarketCardsContainer' ? cards : null;
+        let remoteVersion = '1.3.2', historyRequests = 0;
+        const release = (version, target = '') => {
+            const name = `ModHub-v${version}${target ? `-DoL-${target}` : ''}.zip`;
+            return { tagName: `v${version}`, name: version, publishedAt: version === '1.4.0' ? '2026-10-07T00:00:00Z' : '2026-10-06T00:00:00Z',
+                assets: [{ name, size: 100, downloadUrl: `${githubUrl}/releases/download/v${version}/${name}` }] };
+        };
+        const history = releases => ({ schemaVersion: 1, id: indexed.id, sourceUrl: githubUrl, page: 1, hasMore: false,
+            communityRevision: market.getCommunityRevision(), fetchedAt: new Date().toISOString(), releases });
+        sb.fetch = async url => {
+            if (String(url).includes('/mod-releases?')) {
+                historyRequests++;
+                return { ok: true, json: async () => history([release(remoteVersion)]) };
+            }
+            assert.ok(String(url).endsWith('/release-index.json'), '本用例只读取统一目录与历史接口');
+            return { ok: true, json: async () => ({ schemaVersion: 1, mods: [indexed] }) };
+        };
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [indexed], timestamp: Date.now() }));
+        sb.localStorage.setItem('modhub_custom_setting', '保留');
+        let [mod] = await market.loadMarketData();
+        market.checkModInstallStatus(mod);
+        await market.getModUpdateInfo(mod).promise;
+        market.renderMarketCards();
+        assert.ok(cards.innerHTML.includes('已安装版本：v1.3.2') && cards.innerHTML.includes('最新版本：v1.3.2')
+            && cards.innerHTML.includes('>已是最新</span>'), '截图中的完整历史1.3.2须纠正旧目录1.3.1');
+        assert.equal(mod.version, '1.3.1', '历史观测不能覆盖目录版号或改变历史缓存签名');
+        assert.equal(market.getModUpdateInfo(mod).latestRelease.version, '1.3.2');
+        assert.ok(cards.innerHTML.includes('发布: 2026-10-06'), '采用新历史版号时须同步其真实发布日期');
+        assert.equal(historyRequests, 1, '重绘必须复用已完成的历史检测');
+
+        const oldHistoryContext = market.getReleaseHistoryContext(mod);
+        remoteVersion = '1.3.3';
+        assert.equal((await versions.fetchReleases(mod)).releases[0].tagName, 'v1.3.2', '普通历史读取仍保留六小时缓存');
+        assert.equal(historyRequests, 1);
+        [mod] = await market.loadMarketData(true);
+        market.checkModInstallStatus(mod);
+        const pending = market.getModUpdateInfo(mod);
+        assert.equal(market.getModUpdateInfo({ ...mod }).promise, pending.promise, '手动刷新后同来源副本仍共用请求');
+        await pending.promise;
+        assert.equal(historyRequests, 2, '手动刷新必须实际重读历史，不能命中旧localStorage');
+        assert.equal(market.getModUpdateInfo(mod).version, '1.3.3');
+        assert.ok(cards.innerHTML.includes('最新版本：v1.3.3'));
+        assert.equal(sb.localStorage.getItem('modhub_custom_setting'), '保留', '刷新不能删除其它用户设置');
+        assert.equal(market.getReleaseHistoryContext(mod).useCache, false, '刷新后选版必须使用同一历史缓存策略');
+        assert.equal(market.rememberMarketCandidates(mod, versions.buildCandidates(mod, history([release('9.0.0')])),
+            { context: oldHistoryContext }), null, '刷新前尚未完成的选版请求不能污染新一轮历史状态');
+        assert.equal(market.getModUpdateInfo(mod).latestRelease.version, '1.3.3');
+
+        const candidates = versions.buildCandidates(mod, history([release('1.4.0', '0.5.13.0'), release('1.3.2', '0.5.12.13'),
+            { ...release('9.0.0'), draft: true }, { ...release('8.0.0'), prerelease: true }]));
+        market.rememberMarketCandidates(mod, candidates);
+        const selected = market.getModUpdateInfo(mod);
+        assert.equal(selected.latestRelease.version, '1.4.0', '选版完成后须同步全局最新版');
+        assert.equal(selected.release.version, '1.3.2', '当前游戏推荐目标须独立保留');
+        assert.ok(cards.innerHTML.includes('最新版本：v1.4.0'));
+        assert.ok(cards.innerHTML.includes('发布: 2026-10-07'), '全局最新日期不能误用当前游戏低版本日期');
+        assert.equal(historyRequests, 2, '完整选版候选同步不能再次获取历史');
+        assert.equal(mod.version, '1.3.1');
+        assert.equal(versions.getLatestReleaseCandidate({ ...mod, githubUrl: 'https://github.com/Other/ModHub' }, candidates), null,
+            '其他来源的候选不能作为当前模组全局最新版');
+        assert.equal(versions.getLatestReleaseCandidate(mod, [...candidates, { ...candidates[0], seriesKey: 'other-product' }]), null,
+            '多个产品系列不能猜测统一最新版');
+        sb.StartConfig.version = '';
+        remoteVersion = '1.5.0';
+        await market.getModUpdateInfo(mod).promise;
+        const withoutGame = market.getModUpdateInfo(mod);
+        assert.equal(withoutGame.version, '', '未知游戏不能推断适配更新目标');
+        assert.equal(withoutGame.release, null);
+        assert.equal(withoutGame.latestRelease.version, '1.5.0', '未知游戏仍可核对全局最新发行版');
+        assert.ok(cards.innerHTML.includes('最新版本：v1.5.0'));
+        Object.assign(mod, { versionSource: 'installed', version: '7.0', releaseUrl: null });
+        market.rememberMarketCandidates(mod, versions.buildCandidates(mod, history([release('1.5.0')])));
+        assert.ok(cards.innerHTML.includes('最新版本：v1.5.0') && !cards.innerHTML.includes('最新版本：v7.0'),
+            '目录缺少远端版号来源时，仍可使用真实历史新版，不能以本地线索代替');
+        market.markRepoAsDead(githubUrl);
+        market.renderMarketCards();
+        assert.equal(market.rememberMarketCandidates(mod, candidates), null);
+        assert.ok(!cards.innerHTML.includes('最新版本：v1.5.0'),
+            '失效来源不能继续使用历史观测宣称新版');
+    }
+
     // 更新提醒、统计和忽略记录必须指向当前游戏的最新版，而非仓库最高版本。
     {
         const sb = loadMarket();
@@ -2638,4 +2735,3 @@ module.exports = async function() {
     }
 
 };
-

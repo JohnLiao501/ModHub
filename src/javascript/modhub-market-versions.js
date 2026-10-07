@@ -5,8 +5,14 @@
     const MODHUB_HISTORY_CACHE_PREFIX = 'modhub_market_history_v1_';
     const MODHUB_HISTORY_CACHE_TTL = 6 * 60 * 60 * 1000;
     const MODHUB_HISTORY_GENERATIONS = new Map();
+    const MODHUB_RELEASE_DATE_LABEL_PATTERN = /^(?:[a-z][a-z_-]*)?(?:19|20)\d{2}[-._]?(?:0?[1-9]|1[0-2])[-._]?(?:0?[1-9]|[12]\d|3[01])(?:[-+][a-z0-9][a-z0-9.-]*)?$/i;
     // Worker 的上游查询最多等待 15 秒，为往返与目录核验保留时间。
     const MODHUB_HISTORY_TIMEOUT = 20000;
+
+    function formatReleaseDate(publishedAt) {
+        const time = typeof publishedAt === 'string' ? Date.parse(publishedAt) : NaN;
+        return Number.isFinite(time) ? new Date(time + 8 * 60 * 60 * 1000).toISOString().slice(0, 10) : '';
+    }
 
     function normalizeGameVersion(value) {
         if (typeof value !== 'string') return '';
@@ -503,6 +509,23 @@
         return verified.version;
     }
 
+    /** 多产品发布的标题版号必须直接跟随本品名称，不能借用标题别处的其他产品版号。 */
+    function ownedReleaseTitleVersion(title, mod) {
+        const text = String(title || '').normalize('NFKC');
+        const versions = new Set();
+        for (const name of [...(mod?.bootNames || []), ...(mod?.aliases || []), ...(mod?.repositories || []), mod?.name]) {
+            const identity = String(name || '').trim().normalize('NFKC');
+            if (!identity) continue;
+            const escaped = identity.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            const pattern = new RegExp('(?:^|[^\\p{L}\\p{N}])' + escaped
+                + '[\\s._:：-]*v(\\d+(?:\\.\\d+)+)(?:-[0-9a-z][0-9a-z.-]*)?(?=$|[\\s)\\]（），,])', 'giu');
+            for (const match of text.matchAll(pattern)) {
+                if (!MODHUB_RELEASE_DATE_LABEL_PATTERN.test(match[1])) versions.add(match[1]);
+            }
+        }
+        return versions.size === 1 ? [...versions][0] : '';
+    }
+
     function buildCandidates(mod, history) {
         const market = window.modHubMarket;
         const source = getReleaseSource(normalizeSource(mod?.githubUrl));
@@ -516,6 +539,15 @@
             if (release?.draft || release?.prerelease || !validHistoricalRelease(release, mod, source)) continue;
             const assets = release.assets || [];
             const plan = market.buildReleaseAssetPlan(assets, '', mod, { preserveVersions: true });
+            const availableAssets = plan.availableAssets || assets;
+            const optionalUrls = new Set(availableAssets.flatMap(asset => market.getMatchingOptionalAssets(asset, availableAssets))
+                .map(asset => asset.downloadUrl));
+            const mainAssets = availableAssets.filter(asset => market.getAssetRole(asset.name) !== 'resource'
+                && !optionalUrls.has(asset.downloadUrl));
+            const mixedProducts = Boolean(mod?.sharedRepository
+                && mainAssets.some(asset => market.matchesAssetIdentity(asset, mod))
+                && mainAssets.some(asset => !market.matchesAssetIdentity(asset, mod)));
+            const ownedTitleVersion = ownedReleaseTitleVersion(release.name, mod);
             for (const asset of plan.candidates || []) {
                 const verifiedVersion = verifiedCandidateBootVersion(mod, asset);
                 if (asset.versionSource === 'verified-boot' && !verifiedVersion) continue;
@@ -523,10 +555,15 @@
                 const candidateKey = JSON.stringify([market.getMarketModKey(mod), tagName, asset.downloadUrl]);
                 if (seen.has(candidateKey)) continue;
                 seen.add(candidateKey);
+                const tagVersion = MODHUB_RELEASE_DATE_LABEL_PATTERN.test(tagName)
+                    || Boolean(market.getAssetGameVersion(tagName))
+                    ? '' : String(tagName).match(/^(?:[a-z][a-z_-]*)?v?(\d+(?:\.\d+)*)(?:[-+][a-z0-9][a-z0-9.-]*)?$/i)?.[1] || '';
+                const titleVersion = MODHUB_RELEASE_DATE_LABEL_PATTERN.test(release.name || '') ? ''
+                    : String(release.name || '').trim().match(/^v?(\d+(?:\.\d+)+)$/i)?.[1];
                 const version = verifiedVersion || market.getAssetVersionParts(asset.name).join('.')
-                    || (release.versionSource !== 'verified-boot' ? release.version : '')
-                    || String(release.name || '').trim().match(/^v?(\d+(?:\.\d+)+)$/i)?.[1]
-                    || (String(tagName).match(/(?:^|[^a-z0-9])v?(\d+(?:\.\d+)*)(?=$|[^a-z0-9.])/i)?.[1] || '');
+                    || (mixedProducts ? ownedTitleVersion
+                        : (release.versionSource !== 'verified-boot' ? release.version : '')
+                            || ownedTitleVersion || titleVersion || tagVersion);
                 const selectedAssets = [{ ...asset, packageRole: market.getAssetRole?.(asset.name) || 'main' },
                     ...market.getMatchingCompanionAssets(asset, plan.availableAssets || assets).map(companion => ({ ...companion, packageRole: 'resource' }))];
                 candidates.push({ candidateKey, selectedKey: candidateKey, seriesKey: market.getAssetSeries(asset.name),
@@ -534,7 +571,8 @@
                     assetName: asset.name, assetUrl: asset.downloadUrl, assetSize: Number(asset.size) || 0, assetDigest: asset.digest || '',
                     assets: selectedAssets, optionalAssets: market.getMatchingOptionalAssets?.(asset, plan.availableAssets || assets) || [],
                     availableAssets: plan.availableAssets || assets, candidateAssets: [asset],
-                    requiresManualSelection: false, selectionReason: '', updateDate: String(release.publishedAt || '').slice(0, 10),
+                    requiresManualSelection: false, selectionReason: '', publishedAt: release.publishedAt || '',
+                    updateDate: formatReleaseDate(release.publishedAt),
                     compatibility: candidateCompatibility(asset, release, gameVersion),
                     ...(Array.isArray(asset.dependencies) ? { dependencies: asset.dependencies }
                         : Array.isArray(release.dependencies) ? { dependencies: release.dependencies } : {}),
@@ -553,20 +591,47 @@
                     && window.modHubMarket.compareVersions(info.targetGameVersion, gameVersion) === 0));
     }
 
+    function candidatePublicationTime(candidate, fullTime) {
+        const published = typeof candidate.publishedAt === 'string' ? candidate.publishedAt : '';
+        if (fullTime) return /T/.test(published) ? Date.parse(published) : NaN;
+        const day = /^\d{4}-\d{2}-\d{2}$/.test(candidate.updateDate || '') ? candidate.updateDate
+            : Number.isFinite(Date.parse(published)) ? new Date(published).toISOString().slice(0, 10) : '';
+        return Date.parse(day);
+    }
+
     function latestUnambiguousCandidate(candidates) {
+        if (!candidates.length) return null;
         const market = window.modHubMarket;
-        const sorted = candidates.filter(candidate => normalizeGameVersion(candidate.version)).sort((a, b) =>
-            market.compareVersions(b.version, a.version) || String(b.updateDate).localeCompare(String(a.updateDate)));
-        if (!sorted.length) return null;
-        const latest = sorted.filter(candidate => market.compareVersions(candidate.version, sorted[0].version) === 0);
-        const assetNames = new Set(latest.map(candidate => String(candidate.assetName || candidate.assets?.[0]?.name || candidate.candidateKey).toLowerCase()));
-        return assetNames.size === 1 ? sorted[0] : null;
+        let latest = candidates;
+        // 所有候选版号都可比较时才使用版号，不能把未知版号当作零或截取标签尾段。
+        if (candidates.every(candidate => normalizeGameVersion(candidate.version))) {
+            const highest = [...candidates].sort((a, b) => market.compareVersions(b.version, a.version))[0];
+            latest = candidates.filter(candidate => market.compareVersions(candidate.version, highest.version) === 0);
+        }
+        if (latest.length > 1) {
+            const fullTime = latest.every(candidate => Number.isFinite(candidatePublicationTime(candidate, true)));
+            const times = latest.map(candidate => candidatePublicationTime(candidate, fullTime));
+            if (times.some(time => !Number.isFinite(time))) return null;
+            const newest = Math.max(...times);
+            latest = latest.filter((candidate, index) => times[index] === newest);
+        }
+        // 同一最高版号或发布时间有不同附件时，仍须玩家选择，不依赖上游列表顺序。
+        return new Set(latest.map(candidate => candidate.assetUrl || candidate.assets?.[0]?.downloadUrl || candidate.candidateKey)).size === 1 ? latest[0] : null;
     }
 
     function getLatestGameCandidate(mod, candidates) {
         const gameVersion = getGameVersion();
         if (!gameVersion || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
         return latestUnambiguousCandidate(candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion)));
+    }
+
+    /** 全局最新只比较同一产品系列，适配证据不影响真实发行版号。 */
+    function getLatestReleaseCandidate(mod, candidates) {
+        const market = window.modHubMarket, source = getReleaseSource(normalizeSource(mod?.githubUrl));
+        if (!source || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1
+            || candidates.some(candidate => getReleaseSource(normalizeSource(candidate.assetUrl))?.key !== source.key
+                || candidate.candidateKey !== JSON.stringify([market.getMarketModKey(mod), candidate.tagName, candidate.assetUrl]))) return null;
+        return latestUnambiguousCandidate(candidates);
     }
 
     /** 缺少适配声明不代表没有新版；仅补充身份和版号明确的未知适配候选。 */
@@ -589,7 +654,8 @@
         const matched = getLatestGameCandidate(mod, candidates);
         const latest = matching.length ? matched : latestUnambiguousCandidate(
             candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'));
-        if (!latest || localVersion && market.compareVersions(latest.version, localVersion) < 0
+        if (!latest || localVersion && (!normalizeGameVersion(latest.version) || !normalizeGameVersion(localVersion)
+                || market.compareVersions(latest.version, localVersion) < 0)
             || updateOnly && (!localVersion || market.compareVersions(latest.version, localVersion) <= 0)) return empty;
         let defaultReason;
         if (matched) defaultReason = latest.compatibility?.evidence === 'declaration'
@@ -611,8 +677,17 @@
             if (info.status === 'incompatible' || info.referenceMismatch) return 3;
             return 2;
         };
+        const numeric = candidates.every(candidate => normalizeGameVersion(candidate.version));
+        const fullTime = candidates.every(candidate => Number.isFinite(candidatePublicationTime(candidate, true))
+            || !Number.isFinite(candidatePublicationTime(candidate, false)));
+        const publicationTime = candidate => {
+            const time = candidatePublicationTime(candidate, fullTime);
+            return Number.isFinite(time) ? time : -Infinity;
+        };
         const sorted = [...candidates].sort((a, b) => rank(a) - rank(b)
-            || market.compareVersions(b.version, a.version) || String(b.updateDate).localeCompare(String(a.updateDate)));
+            || (numeric ? market.compareVersions(b.version, a.version) : 0)
+            || publicationTime(b) - publicationTime(a)
+            || String(a.candidateKey).localeCompare(String(b.candidateKey)));
         const recommended = getLatestGameCandidate(mod, sorted);
         return { candidates: sorted, recommendedKey: recommended
             && (!updateOnly || localVersion && market.compareVersions(recommended.version, localVersion) > 0) ? recommended.candidateKey : '',
@@ -629,5 +704,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

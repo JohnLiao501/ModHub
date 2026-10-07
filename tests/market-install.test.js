@@ -6,6 +6,7 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    await require('./market-release-selection.test')();
     // 保留旧来源入口：通过真实导入、列表保存和重载接口核验最外层完成边界。
     for (const route of ['旧单次安装', '旧批量安装', '旧全部更新']) {
         const sb = loadMarket(), market = sb.modHubMarket;
