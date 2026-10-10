@@ -5,6 +5,28 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 切换说明页立即显示加载状态，旧列表读取不能回写后来打开的页面。
+    for (const replaceRoot of [false, true]) {
+        const sb = createBaseSandbox();
+        loadScripts(sb);
+        let root = createStubElement(), finish, calls = 0;
+        sb.document.getElementById = id => id === 'modHubReadmeContainer' ? root : null;
+        sb.modHubGetGui = () => ({ gModUtils: { getModListNameNoAlias: () => [] },
+            listSideLoadModNameOnly: () => ++calls === 1 ? new Promise(resolve => { finish = resolve; }) : Promise.resolve(['当前说明']) });
+        sb.modHubFilterReadmeList = sb.modHubLoadReadme = () => {};
+        sb._modHubReadmeMods = ['当前说明']; sb._modHubSelectedMod = '当前说明';
+        const previous = sb.initModReadMe();
+        assert.match(root.innerHTML, /modhub-progress-ring/);
+        assert.match(root.innerHTML, /role="status"/);
+        if (replaceRoot) root = createStubElement();
+        else await sb.initModReadMe();
+        const current = root.innerHTML;
+        finish(['已过时的说明']); await previous;
+        assert.equal(root.innerHTML, current, '迟到的列表不得覆盖当前说明页面');
+        assert.deepEqual(Array.from(sb._modHubReadmeMods), ['当前说明']);
+        assert.equal(sb._modHubSelectedMod, '当前说明');
+    }
+
     // 说明模块独立加载后仍使用管理器工具、市场回退与 Zip 内置资源。
     {
         const sb = createBaseSandbox({ console: { ...console, warn() {} } });
@@ -120,6 +142,8 @@ module.exports = async function() {
             : Promise.resolve({ markdown: '# 当前说明', isStale: true });
         const first = sb.modHubLoadReadme('First');
         await started;
+        assert.match(body.innerHTML, /modhub-progress-ring/, '等待本地或在线文档时显示圆环');
+        assert.match(body.innerHTML, /role="status"/);
         await sb.modHubLoadReadme('Second');
         const current = body.innerHTML;
         assert.ok(current.includes('当前说明') && current.includes('上次成功读取'), '本地失败后从 boot 仓库回退且标明过期缓存');

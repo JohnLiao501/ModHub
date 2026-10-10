@@ -254,6 +254,15 @@
         return point.kind || (point.id.startsWith('before-restore-') ? 'preRestore' : 'auto');
     }
 
+    function displayPointKind(point) {
+        const summary = point.summary;
+        if (point.kind === 'manual' && !point.operation && Array.isArray(summary?.updated) && summary.updated.length === 1
+            && typeof summary.updated[0] === 'string' && point.label === `AI 修复前：${summary.updated[0]}`
+            && ['installed', 'removed', 'enabled', 'disabled'].every(field => Array.isArray(summary[field]) && !summary[field].length)
+            && ['orderChanged', 'beautyChanged', 'settingsChanged'].every(field => summary[field] === false)) return 'auto';
+        return pointKind(point);
+    }
+
     function parsePoints(value) {
         const points = value ?? [];
         if (!Array.isArray(points) || points.some(point => !point || typeof point.id !== 'string' || !point.state || point.version !== 1 || Object.prototype.hasOwnProperty.call(point, 'userProtected') && typeof point.userProtected !== 'boolean')) fail('还原点目录损坏，未写入数据');
@@ -354,7 +363,7 @@
     }
 
     const createOperation = (meta = {}) => {
-        const context = { id: `point-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`, label: typeof meta.label === 'string' ? meta.label.slice(0, 200) : '模组配置操作', kind: meta.kind === 'manual' ? 'manual' : 'auto', roundId: bootRound, prepared: false, pointId: null, finished: false, withoutPoint: false, cancelled: false };
+        const context = { id: `point-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`, label: typeof meta.label === 'string' ? meta.label.slice(0, 200) : '模组配置操作', kind: ['manual', 'aiRepair'].includes(meta.kind) ? meta.kind : 'auto', roundId: bootRound, prepared: false, pointId: null, finished: false, withoutPoint: false, cancelled: false };
         contexts.add(context);
         return context;
     };
@@ -403,7 +412,8 @@
                 return true;
             }
             const before = await snapshot(env, rows);
-            const point = { version: 1, id: context.id, label: context.label, kind: context.kind, userProtected: false, roundId: context.roundId, at: Date.now(), pending: context.kind !== 'manual', source: sourceMetadata(env), state: before.state };
+            const point = { version: 1, id: context.id, label: context.label, kind: context.kind === 'aiRepair' ? 'auto' : context.kind,
+                ...(context.kind === 'aiRepair' ? { operation: 'aiRepair' } : {}), userProtected: false, roundId: context.roundId, at: Date.now(), pending: context.kind === 'auto', source: sourceMetadata(env), state: before.state };
             // 先保留原历史；无变化时撤销本点，不让空操作挤掉最旧的有效点。
             const next = [point, ...points];
             const values = [...before.blobs].filter(([hash]) => !before.rows.has(MODHUB_BLOB_PREFIX + hash)).map(([hash, data]) => [MODHUB_BLOB_PREFIX + hash, data]);
@@ -442,7 +452,7 @@
             return true;
         } catch (error) {
             context.prepareError = error;
-            if (context.kind === 'manual') {
+            if (context.kind !== 'auto') {
                 context.cancelled = true;
                 release(context);
                 throw error;
@@ -481,7 +491,7 @@
                     marker = { pending: !startupFinished, at: Date.now(), roundId: context.roundId, firstPointId: roundFirstId, changesPending: true };
                     values.push([MODHUB_STARTUP_KEY, marker]);
                 }
-                const keep = changed || context.kind === 'manual' ? all : all.filter(item => item.id !== context.pointId);
+                const keep = changed || context.kind !== 'auto' ? all : all.filter(item => item.id !== context.pointId);
                 const next = retainPoints(keep, policyConfig, protectedPointIds(keep, marker, policyJournal));
                 values.push([MODHUB_POINTS_KEY, next]);
                 await guardedValues(env, after.rows, values, garbage(after.rows, next, policyJournal));
@@ -515,7 +525,7 @@
         }));
         return {
             config: { ...policyConfig },
-            points: points.map(({ id, label, roundId, at, state, summary, source, kind, userProtected }) => ({ id, label, roundId, at, modCount: state.packages.length, summary, source, kind: pointKind({ id, kind }), protected: protectedIds.has(id), userProtected: userProtected === true, systemProtected: (reasons.get(id) || []).some(reason => reason !== '手动保护'), protectionReasons: reasons.get(id) || [] })),
+            points: points.map(({ id, label, roundId, at, state, summary, source, kind, operation, userProtected }) => ({ id, label, roundId, at, modCount: state.packages.length, summary, source, kind: displayPointKind({ id, label, kind, operation, summary }), protected: protectedIds.has(id), userProtected: userProtected === true, systemProtected: (reasons.get(id) || []).some(reason => reason !== '手动保护'), protectionReasons: reasons.get(id) || [] })),
             usageBytes: [...sizes.values()].reduce((total, size) => total + size, 0),
             protectedIds: [...protectedIds],
             recommendedId: points.find(point => point.id === firstId)?.id || points.filter(point => point.roundId === points[0]?.roundId).at(-1)?.id || null,

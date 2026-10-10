@@ -65,29 +65,51 @@
         } catch (_) { return manual(); }
     }
 
+    /** 只按原生范围判断版本；未知结果不能解释为版本不符。调用方先确认提供者存在。 */
+    function assessVersionRange(version, range, ignorePostfix = false) {
+        const unknown = reason => ({ status: 'unknown', reason });
+        if (range == null || typeof range === 'string' && (!range.trim() || range.trim() === '*')) {
+            return { status: 'compatible', reason: '未声明版本限制，仅核对提供者是否存在' };
+        }
+        const current = typeof version === 'string' ? version.trim().replace(/^v(?=\d)/i, '') : '';
+        const match = current.match(/^(\d+(?:\.\d+)*)(?:-[0-9a-z][0-9a-z.-]*)?(?:\+[0-9a-z][0-9a-z.-]*)?$/i);
+        if (!match || !match[1].split('.').every(part => Number.isSafeInteger(Number(part)))) return unknown('当前版本未能识别');
+        // 原生范围使用 && 和 ||；完整验证，避免宽松解析器把不支持的尾部当成有效声明。
+        if (typeof range !== 'string' || !isNativeRangeSyntaxSupported(range)) return unknown('暂不能识别版本要求');
+        const clauses = range.trim().split('||');
+        try {
+            const api = window.modSC2DataManager?.getDependenceChecker?.()?.getInfiniteSemVerApi?.();
+            if (!api?.parseVersion || !api?.parseRange || !api?.satisfies) return unknown('当前 ModLoader 未提供版本核对接口');
+            const parsedVersion = api.parseVersion(current)?.version;
+            const parsedRange = api.parseRange(range.trim());
+            if (!parsedVersion?.version?.length || !Array.isArray(parsedRange) || parsedRange.length !== clauses.length) return unknown('暂不能解析版本要求');
+            const compatible = api.satisfies(parsedVersion, parsedRange, ignorePostfix);
+            if (typeof compatible !== 'boolean') return unknown('当前 ModLoader 未能确定版本是否满足要求');
+            return { status: compatible ? 'compatible' : 'incompatible', reason: compatible
+                ? `当前版本 ${current} 满足作者声明的版本要求 ${range.trim()}`
+                : `当前版本 ${current} 不满足作者声明的版本要求 ${range.trim()}` };
+        } catch (_) {
+            return unknown('暂不能解析版本要求');
+        }
+    }
+
     function assessCompatibility(range, gameVersion = getGameVersion()) {
         const unknown = reason => ({ status: 'unknown', reason });
         const version = normalizeGameVersion(gameVersion);
         if (!version) return unknown('当前游戏版本未能识别，请按作者说明选择安装包');
         if (typeof range !== 'string' || !range.trim()) return unknown('适用的游戏版本尚未确定，下一步会核对安装包中的说明');
-        // 原生范围使用 && 和 ||；完整验证，避免宽松解析器把不支持的尾部当成有效声明。
-        const clauses = range.trim().split('||');
-        const supported = isNativeRangeSyntaxSupported(range);
-        if (!supported) return unknown('暂不能识别作者的游戏版本说明，请查看发布说明');
-        try {
-            const api = window.modSC2DataManager?.getDependenceChecker?.()?.getInfiniteSemVerApi?.();
-            if (!api?.parseVersion || !api?.parseRange || !api?.satisfies) return unknown('当前 ModLoader 无法核对作者的游戏版本范围，请查看作者说明');
-            const parsedVersion = api.parseVersion(version)?.version;
-            const parsedRange = api.parseRange(range.trim());
-            if (!parsedVersion?.version?.length || !Array.isArray(parsedRange) || parsedRange.length !== clauses.length) return unknown('暂不能核对作者的游戏版本说明，请查看发布说明');
-            const compatible = api.satisfies(parsedVersion, parsedRange, true);
-            if (typeof compatible !== 'boolean') return unknown('当前 ModLoader 未能确定该版本是否适用，请查看作者说明');
-            return { status: compatible ? 'compatible' : 'incompatible', reason: compatible
-                ? `作者声明的支持范围包含当前 DoL ${version}；下一步会核对所选安装包`
-                : `作者声明支持 DoL ${formatVersionRange(range)}，当前游戏为 DoL ${version}，不在此范围内` };
-        } catch (_) {
-            return unknown('暂不能核对作者的游戏版本说明，请查看发布说明');
+        if (!isNativeRangeSyntaxSupported(range)) return unknown('暂不能识别作者的游戏版本说明，请查看发布说明');
+        const result = assessVersionRange(version, range, true);
+        if (result.status === 'unknown') {
+            const reasons = {
+                '当前 ModLoader 未提供版本核对接口': '当前 ModLoader 无法核对作者的游戏版本范围，请查看作者说明',
+                '当前 ModLoader 未能确定版本是否满足要求': '当前 ModLoader 未能确定该版本是否适用，请查看作者说明'
+            };
+            return unknown(reasons[result.reason] || '暂不能核对作者的游戏版本说明，请查看发布说明');
         }
+        return { status: result.status, reason: result.status === 'compatible'
+            ? `作者声明的支持范围包含当前 DoL ${version}；下一步会核对所选安装包`
+            : `作者声明支持 DoL ${formatVersionRange(range)}，当前游戏为 DoL ${version}，不在此范围内` };
     }
 
     function normalizeSource(value) {
@@ -390,8 +412,9 @@
         const signatureFields = [base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
             mod.autoInstallScope || '', mod.revision, communityRevision, mod.identityId, mod.name,
             mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
-            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, page, 'modpack-v1', 'asset-series-v2'];
-        // 登记证据变化时废弃旧候选缓存；普通来源沿用原有缓存签名。
+            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, mod.requiredDependencies || [], mod.variant || null, mod.verifiedReleaseAssets || [],
+            page, 'modpack-v1', 'asset-series-v2'];
+        // 登记证据、语言或强制前置变化时废弃旧候选缓存。
         if (mod.verifiedReleaseAsset) signatureFields.push(mod.verifiedReleaseAsset);
         const signature = JSON.stringify(signatureFields);
         const cacheKey = MODHUB_HISTORY_CACHE_PREFIX + encodeURIComponent(signature);
@@ -544,6 +567,36 @@
         return versions.size === 1 ? [...versions][0] : '';
     }
 
+    /** 目录强制前置独立于包体声明；空声明不能移除目录中已核验的要求。 */
+    function candidateDependencies(mod, asset, release) {
+        const declared = Array.isArray(asset.dependencies) ? asset.dependencies
+            : Array.isArray(release.dependencies) ? release.dependencies : [];
+        const required = (Array.isArray(mod.requiredDependencies) ? mod.requiredDependencies : []).flatMap(item => {
+            const bootName = typeof item?.bootName === 'string' && item.bootName.trim()
+                || typeof item?.modName === 'string' && item.modName.trim() || '';
+            const id = typeof item?.id === 'string' ? item.id.trim() : '';
+            if (!bootName && !id) return [];
+            return [{ ...item, ...(bootName ? { bootName } : {}), ...(id ? { id } : {}),
+                version: typeof item.version === 'string' && item.version.trim() || '*',
+                required: true, source: '目录强制前置', declaredBy: mod.name }];
+        });
+        if (!required.length) return Array.isArray(asset.dependencies) || Array.isArray(release.dependencies)
+            ? { dependencies: declared } : {};
+        const dependencies = [], positions = new Map();
+        for (const dependency of [...declared, ...required]) {
+            const identity = String(dependency?.bootName || dependency?.modName || dependency?.id || '').trim().toLowerCase();
+            const key = JSON.stringify([identity, dependency?.version || '*', dependency?.bootVersions || null]);
+            if (!identity || !positions.has(key)) {
+                if (identity) positions.set(key, dependencies.length);
+                dependencies.push(dependency);
+            } else if (dependency.source === '目录强制前置') {
+                const index = positions.get(key);
+                dependencies[index] = { ...dependencies[index], ...dependency };
+            }
+        }
+        return { dependencies };
+    }
+
     function buildCandidates(mod, history) {
         const market = window.modHubMarket;
         const source = getReleaseSource(normalizeSource(mod?.githubUrl));
@@ -592,8 +645,7 @@
                     requiresManualSelection: false, selectionReason: '', publishedAt: release.publishedAt || '',
                     updateDate: formatReleaseDate(release.publishedAt),
                     compatibility: candidateCompatibility(asset, release, gameVersion),
-                    ...(Array.isArray(asset.dependencies) ? { dependencies: asset.dependencies }
-                        : Array.isArray(release.dependencies) ? { dependencies: release.dependencies } : {}),
+                    ...candidateDependencies(mod, asset, release),
                     ...(verifiedVersion ? { versionSource: 'verified-boot', bootName: asset.bootName } : {}),
                     stale: Boolean(history?.stale), fromCache: Boolean(history?.fromCache) });
             }
@@ -663,8 +715,41 @@
         }));
     }
 
+    /** 仅按精确技术身份回读摘要，展示名与同仓库关系不能证明本地包身份。 */
+    function selectionLocalProfile(mod, localProfile) {
+        const profile = localProfile || mod?._matchedLocal;
+        const normalizeName = name => String(name || '').trim().toLowerCase();
+        const names = (mod?.bootNames || []).map(normalizeName).filter(Boolean);
+        const name = normalizeName(profile?.bootJson?.name || profile?.name);
+        if (name && names.length && !names.includes(name)) return null;
+        if (profile?.packageDigest) return name ? profile : null;
+        const matches = (window.modHubMarket.getLocalInstalledProfiles?.() || []).filter(item => {
+            const actual = normalizeName(item.bootJson?.name || item.name);
+            return name ? actual === name : names.includes(actual);
+        });
+        return matches.length === 1 ? matches[0] : profile || null;
+    }
+
+    /** 同版重打包须两份有效摘要及明确未安装结果，不能仅凭版号或日期猜更新。 */
+    function isVerifiedRepackage(mod, candidate, localVersion, localProfile) {
+        const market = window.modHubMarket, profile = selectionLocalProfile(mod, localProfile);
+        const normalizeDigest = digest => typeof digest === 'string' && /^sha256:[a-f0-9]{64}$/i.test(digest) ? digest.toLowerCase() : '';
+        const asset = market.getReleaseInstallAssets?.(candidate)?.[0] || candidate?.assets?.[0];
+        const localDigest = normalizeDigest(profile?.packageDigest);
+        const candidateDigest = normalizeDigest(asset?.digest || (!asset || asset.downloadUrl === candidate.assetUrl ? candidate.assetDigest : ''));
+        return Boolean(localDigest && candidateDigest && localDigest !== candidateDigest
+            && market.isSameVersion(candidate?.version, localVersion) && market.isSameVersion(profile?.version, localVersion)
+            && market.isReleaseInstalled?.(candidate, profile) === false);
+    }
+
+    function isDefaultUpdate(mod, candidate, localVersion, localProfile) {
+        if (!localVersion || !normalizeGameVersion(candidate?.version) || !normalizeGameVersion(localVersion)) return false;
+        const compared = window.modHubMarket.compareVersions(candidate.version, localVersion);
+        return compared > 0 || compared === 0 && isVerifiedRepackage(mod, candidate, localVersion, localProfile);
+    }
+
     /** 默认选择仅减少操作步骤，不能替代安装包的实际适配核对。 */
-    function getDefaultSelection(mod, candidates, { updateOnly = false, localVersion = mod?._matchedLocal?.version || '' } = {}) {
+    function getDefaultSelection(mod, candidates, { updateOnly = false, localProfile, localVersion = localProfile?.version || mod?._matchedLocal?.version || '' } = {}) {
         const empty = { defaultKey: '', defaultReason: '', defaultRisk: false };
         if (!candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return empty;
         const market = window.modHubMarket, gameVersion = getGameVersion();
@@ -674,7 +759,7 @@
             candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'));
         if (!latest || localVersion && (!normalizeGameVersion(latest.version) || !normalizeGameVersion(localVersion)
                 || market.compareVersions(latest.version, localVersion) < 0)
-            || updateOnly && (!localVersion || market.compareVersions(latest.version, localVersion) <= 0)) return empty;
+            || updateOnly && !isDefaultUpdate(mod, latest, localVersion, localProfile)) return empty;
         let defaultReason;
         if (matched) defaultReason = latest.compatibility?.evidence === 'declaration'
             ? '已默认选择作者声明支持当前游戏的最新版本，下一步将核对安装包中的说明。'
@@ -686,7 +771,7 @@
         return { defaultKey: latest.candidateKey, defaultReason, defaultRisk: !matched };
     }
 
-    function rankCandidates(mod, candidates, { updateOnly = false, localVersion = mod?._matchedLocal?.version || '' } = {}) {
+    function rankCandidates(mod, candidates, { updateOnly = false, localProfile, localVersion = localProfile?.version || mod?._matchedLocal?.version || '' } = {}) {
         const market = window.modHubMarket;
         const gameVersion = getGameVersion();
         const rank = candidate => {
@@ -708,8 +793,8 @@
             || String(a.candidateKey).localeCompare(String(b.candidateKey)));
         const recommended = getLatestGameCandidate(mod, sorted);
         return { candidates: sorted, recommendedKey: recommended
-            && (!updateOnly || localVersion && market.compareVersions(recommended.version, localVersion) > 0) ? recommended.candidateKey : '',
-            ...getDefaultSelection(mod, sorted, { updateOnly, localVersion }), gameVersion };
+            && (!updateOnly || isDefaultUpdate(mod, recommended, localVersion, localProfile)) ? recommended.candidateKey : '',
+            ...getDefaultSelection(mod, sorted, { updateOnly, localVersion, localProfile }), gameVersion };
     }
 
     function renderCandidateOptions(candidates, recommendedKey = '') {
@@ -722,5 +807,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

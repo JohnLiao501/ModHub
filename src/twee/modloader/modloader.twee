@@ -19,6 +19,10 @@
 			<<toggleTab>>
 			<<replace #customOverlayContent>><<modloaderlog>><</replace>>
 		<</button>>
+		<<button "帮助中心">>
+			<<toggleTab>>
+			<<replace #customOverlayContent>><<modloaderhelp>><</replace>>
+		<</button>>
 		<<run setTimeout(window.modHubInitOverlayTabs, 0)>>
 	</div>
 	<<closeButton>>
@@ -28,27 +32,31 @@
 	<<modloadermodmanage>>
 <</widget>>
 
+<<widget "modhubloading">>
+	<<print window.modHubLoadingHtml(_args[0])>>
+<</widget>>
+
 <<widget "modloadermodmanage">>
-	<div id="modHubModManageContainer" class="modhub-container"></div>
+	<div id="modHubModManageContainer" class="modhub-container"><<modhubloading "正在读取模组列表…">></div>
 	<<run setTimeout(initModManage, 1)>>
 <</widget>>
 
 <<widget "modloaderreadme">>
-	<div id="modHubReadmeContainer" class="modhub-container"></div>
+	<div id="modHubReadmeContainer" class="modhub-container"><<modhubloading "正在读取模组说明…">></div>
 	<<run setTimeout(initModReadMe, 1)>>
 <</widget>>
 
 <<widget "modloaderlog">>
-	<div class="modhub-container">
+	<div id="modHubLogContainer" class="modhub-container">
 		<div class="modhub-group-header">
 			<span class="gold">模组加载过程日志</span>
-			<div class="modhub-log-header-actions" style="display: flex; gap: 6px; align-items: center;">
+			<div class="modhub-log-header-actions">
 				<button id="btnToggleLogFullscreen" type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubToggleLogFullscreen()">全屏展示</button>
 				<button type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubCaptureLogScreenshot()">一键截图</button>
 				<button type="button" class="macro-button modhub-btn-primary" onclick="window.modHubCopyLoadLog()">复制日志</button>
 			</div>
 		</div>
-		<div id="modHubLogDiagnosisContainer"></div>
+		<div id="modHubLogDiagnosisContainer"><<modhubloading "正在读取加载日志…">></div>
 		<div class="modhub-log-toolbar">
 			<div class="modhub-log-search-row">
 				<input id="modHubLogSearch" class="modhub-search-input modhub-log-search" type="search" placeholder="搜索日志内容……" aria-label="搜索日志内容">
@@ -81,6 +89,11 @@
 <</widget>>
 
 <<widget "modloadermarket">>
-	<div id="modHubModMarketContainer" class="modhub-container"></div>
+	<div id="modHubModMarketContainer" class="modhub-container"><<modhubloading "正在读取模组市场…">></div>
 	<<run setTimeout(window.modHubInitMarket, 1)>>
+<</widget>>
+
+<<widget "modloaderhelp">>
+	<div id="modHubHelpContainer" class="modhub-container modhub-help"><<modhubloading "正在读取帮助中心…">></div>
+	<<run setTimeout(() => window.modHubHelp?.init(), 1)>>
 <</widget>>

@@ -654,6 +654,7 @@ window.modHubAnalyzeLogs = function(rawContent) {
             }
         }
 
+        const foundIssueIdsInLine = new Set();
         // 如果是错误行，归纳并匹配知识库
         if (level === 'error') {
             foundModsInLine.forEach(m => errorMods.add(m));
@@ -668,9 +669,12 @@ window.modHubAnalyzeLogs = function(rawContent) {
                 if (isPregnancyInitFailure && pattern.id === 'type-error') return;
                 if (pattern.keywords.some(kw => lineLower.includes(kw.toLowerCase()))) {
                     const issue = typeof pattern.resolve === 'function' ? pattern.resolve(cleanMsg) : pattern;
-                    if (issue && (!matchedIssuesMap.has(issue.id) ||
-                        (matchedIssuesMap.get(issue.id).isSummary && !issue.isSummary))) {
-                        matchedIssuesMap.set(issue.id, issue);
+                    if (issue) {
+                        foundIssueIdsInLine.add(issue.id);
+                        if (!matchedIssuesMap.has(issue.id) ||
+                            (matchedIssuesMap.get(issue.id).isSummary && !issue.isSummary)) {
+                            matchedIssuesMap.set(issue.id, issue);
+                        }
                     }
                 }
             });
@@ -682,7 +686,8 @@ window.modHubAnalyzeLogs = function(rawContent) {
             level,
             message: cleanMsg,
             mods: Array.from(foundModsInLine),
-            files: Array.from(foundFilesInLine)
+            files: Array.from(foundFilesInLine),
+            issueIds: Array.from(foundIssueIdsInLine)
         });
     });
 
@@ -706,6 +711,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
     const autoOpenEnabled = window.modHubIsAutoOpenErrorLogEnabled();
 
     if (!analysis || analysis.errorCount === 0) {
+        container.onclick = null;
         container.innerHTML = `
             <div class="childItem modhub-diagnosis-card diag-normal">
                 <div class="modhub-diag-header">
@@ -714,7 +720,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
                     </div>
                     <label class="modhub-checkbox-label" title="开启后，若下次游戏启动加载模组发生错误将自动弹出本窗口">
                         <input type="checkbox" id="toggleAutoOpenErrorLog" class="macro-checkbox" ${autoOpenEnabled ? 'checked' : ''} onchange="window.modHubToggleAutoOpenLogSetting(this.checked)" />
-                        加载出错时自动弹窗
+                        <span>加载出错时自动弹窗</span>
                     </label>
                 </div>
             </div>
@@ -725,11 +731,13 @@ window.modHubRenderLogDiagnosis = function(analysis) {
     let html = `
         <div class="childItem modhub-diagnosis-card diag-error">
             <div class="modhub-diag-header">
-                <div class="modhub-diag-title red">
-                    <span class="gold">[!]</span> 模组加载异常快速诊断 (发现 ${analysis.errorCount} 条错误日志)
+                <div class="modhub-diag-heading">
+                    <div class="modhub-diag-title red">模组加载异常快速诊断</div>
+                    <div class="modhub-diag-count grey">发现 ${analysis.errorCount} 条错误日志</div>
                 </div>
                 <div class="modhub-diag-actions">
                     <button type="button" class="macro-button modhub-btn-primary modhub-btn-locate" onclick="window.modHubScrollToFirstError()">定位首处错误</button>
+                    <button type="button" class="macro-button modhub-btn-locate" data-log-help-first="true">获取帮助</button>
                 </div>
             </div>
     `;
@@ -739,20 +747,25 @@ window.modHubRenderLogDiagnosis = function(analysis) {
         html += `
             <div class="modhub-diag-row">
                 <span class="grey diag-label">报错关联模组：</span>
-                <div class="diag-badges">
-                    ${analysis.errorMods.map(modName => {
+                <div class="modhub-diag-mod-list">
+                    ${analysis.errorMods.map((modName, modIndex) => {
                         const friendly = window.modHubFindKnownAlias(modName);
                         const label = friendly && friendly !== modName ? `${friendly} (${modName})` : modName;
                         return `
-                            <button type="button" class="modhub-diag-badge mod-badge" data-log-search="${window.modHubEscapeHtml(modName)}" title="点击在日志中筛选此模组">
-                                [模组] ${window.modHubEscapeHtml(label)}
-                            </button>
+                            <div class="modhub-diag-mod">
+                                <button type="button" class="modhub-diag-badge mod-badge" data-log-search="${window.modHubEscapeHtml(modName)}" title="点击在日志中筛选此模组">
+                                    [模组] ${window.modHubEscapeHtml(label)}
+                                </button>
+                                <button type="button" class="modhub-diag-badge modhub-diag-help" data-log-help-mod="${modIndex}">分析此问题</button>
+                            </div>
                         `;
                     }).join('')}
                 </div>
             </div>
         `;
     }
+
+    html += '<div class="modhub-diag-note grey">点击“获取帮助”预览错误日志和模组源码，确认后发送给 AI 分析。</div>';
 
     // 报错关联文件/段落徽章
     if (analysis.errorFiles.length > 0) {
@@ -780,7 +793,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
     if (analysis.matchedIssues.length > 0) {
         html += `
             <div class="modhub-diag-issues">
-                <div class="grey diag-label" style="margin-bottom: 6px;">原因分析与排查建议：</div>
+                <div class="grey diag-label">原因分析与排查建议：</div>
                 ${analysis.matchedIssues.map(issue => `
                     <div class="modhub-issue-item">
                         <div class="issue-title gold">【${window.modHubEscapeHtml(issue.title)}】</div>
@@ -807,7 +820,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
             <div class="modhub-diag-footer">
                 <label class="modhub-checkbox-label" title="开启后，若下次游戏启动检测到加载错误将自动打开日志窗口并定位">
                     <input type="checkbox" id="toggleAutoOpenErrorLog" class="macro-checkbox" ${autoOpenEnabled ? 'checked' : ''} onchange="window.modHubToggleAutoOpenLogSetting(this.checked)" />
-                    游戏启动检测到加载错误时自动打开日志窗口并定位 <span class="gold">(默认开启，可在此关闭)</span>
+                    <span>游戏启动检测到加载错误时自动打开日志窗口并定位 <span class="gold">(默认开启，可在此关闭)</span></span>
                 </label>
             </div>
         </div>
@@ -815,6 +828,21 @@ window.modHubRenderLogDiagnosis = function(analysis) {
 
     container.innerHTML = html;
     container.onclick = event => {
+        const helpButton = event.target?.closest?.('[data-log-help-first], [data-log-help-mod]');
+        if (helpButton) {
+            if (typeof window.modHubHelp?.openProblem !== 'function') {
+                window.modHubShowToast('帮助中心尚未就绪，请等待模组加载完成后重试。', 'warning');
+                return;
+            }
+            const firstError = helpButton.dataset.logHelpFirst === 'true';
+            const modName = firstError ? '' : analysis.errorMods[Number(helpButton.dataset.logHelpMod)];
+            const line = (analysis.lines || []).find(item => item.level === 'error' && (firstError || item.mods?.includes(modName)));
+            if (!line) {
+                window.modHubShowToast('未找到对应错误原文，请重新加载日志后重试。', 'warning');
+                return;
+            }
+            return window.modHubHelp.openProblem({ modName: modName || line.mods?.[0] || '', error: line.message });
+        }
         const button = event.target?.closest?.('[data-log-search]');
         if (button) window.modHubSetLogSearch(button.dataset.logSearch);
     };
@@ -1149,10 +1177,18 @@ window.modHubInitLogTools = function() {
     // 默认保持当前的筛选状态（若未设置则为全部）
     window.modHubSetLogLevelFilter(window._modHubCurrentLogLevelFilter || 'all');
 
-    // 若存在待定位首处错误标记，在当前微任务/下一帧立即执行精准定位
-    if (window._modHubPendingScrollToFirstError) {
+    // 帮助中心指定的检索在日志渲染后只应用一次，优先于首错定位。
+    if (typeof window._modHubPendingLogSearch === 'string' && window._modHubPendingLogSearch) {
+        const query = window._modHubPendingLogSearch;
+        window._modHubPendingLogSearch = null;
         window._modHubPendingScrollToFirstError = false;
+        window.modHubSetLogLevelFilter('all');
+        window.modHubSetLogSearch(query);
+    } else if (window._modHubPendingScrollToFirstError) {
+        window._modHubPendingScrollToFirstError = false;
+        const navigation = window._modHubManagerNavigationRevision;
         setTimeout(() => {
+            if (navigation !== window._modHubManagerNavigationRevision) return;
             if (typeof window.modHubScrollToFirstError === 'function') {
                 window.modHubScrollToFirstError();
             }

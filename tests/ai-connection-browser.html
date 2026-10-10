@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ModHub 虚构材料服务验收</title>
+<style>
+:root{color-scheme:dark}body{max-width:800px;margin:24px auto;padding:0 16px 80px;background:#222;color:#ddd;font:16px/1.6 sans-serif}h1{font-size:24px;color:#ffd700}label{display:block;margin:12px 0}input{display:block;box-sizing:border-box;width:100%;padding:8px;background:#111;color:#eee;border:1px solid #666;font:inherit}button{min-height:36px;padding:6px 12px;background:#333;color:#eee;border:1px solid #ffd700;font:inherit}button:disabled{opacity:.45}pre{padding:12px;background:#181818;white-space:pre-wrap;overflow-wrap:anywhere}#modHubAcceptanceError{color:#ff5050}
+</style>
+</head>
+<body>
+<h1>虚构材料服务验收</h1>
+<p>仅使用下方公开的虚构材料测试实际 AI 接口。密钥仅用于请求认证，不保存；本页没有实际模组、玩家日志或文件修改入口。</p>
+<label>API 地址<input id="modHubAcceptanceEndpoint" type="url" autocomplete="off"></label>
+<label>模型名称<input id="modHubAcceptanceModel" autocomplete="off"></label>
+<label>API 密钥<input id="modHubAcceptanceKey" type="password" autocomplete="off"></label>
+<pre id="modHubAcceptanceMaterial"></pre>
+<button id="modHubAcceptanceAnalyze" type="button">分析以上虚构材料</button>
+<p id="modHubAcceptanceStatus" role="status"></p>
+<pre id="modHubAcceptanceError" role="alert"></pre>
+<pre id="modHubAcceptanceAdvice"></pre>
+<script>
+'use strict';
+window.StartConfig={version:'test-only-game'};
+window.modHubGetGui=()=>({gModUtils:{version:'test-only-loader'}});
+window.modHubGetModInfo=()=>({bootJson:{version:'test-only-modhub'}});
+window.modHubReadIndexDBModLists=async()=>({ok:true,enabled:['TestOnlyMod'],disabled:[]});
+window.modHubGetRawModLoaderLogs=()=>[{level:'error',message:'虚构日志：TestOnlyMod requires TestOnlyDependency >=1.0.0, provider not found.'}];
+window.modHubAnalyzeLogs=lines=>({lines,errorCount:lines.length,warnCount:0});
+</script>
+<script src="/source/javascript/modhub-ai-repair.js"></script>
+<script>
+'use strict';
+(async()=>{
+ const el=id=>document.getElementById('modHubAcceptance'+id);
+ const prepared=await window.modHubAiRepair.prepareLogs('虚构验收：安装 TestOnlyMod 后提示缺少 TestOnlyDependency。请仅给出排查建议，不修改任何文件。');
+ el('Material').textContent=prepared.material;
+ el('Analyze').onclick=async()=>{
+  el('Analyze').disabled=true;el('Error').textContent='';el('Advice').textContent='';
+  try{
+   const plan=await window.modHubAiRepair.analyze(prepared,{endpoint:el('Endpoint').value,model:el('Model').value,key:el('Key').value,onProgress:phase=>{el('Status').textContent='正在处理：'+phase;}});
+   if(plan.changes.length||plan.data)throw new Error('虚构日志验收不得生成可应用的代码改动。');
+   el('Advice').textContent=[plan.notice,plan.summary,'依据：'+plan.evidence,'验证：'+plan.verification].filter(Boolean).join('\n\n');
+   el('Status').textContent='分析完成；未修改任何文件。返回模式：'+plan.mode;
+  }catch(error){el('Status').textContent='分析未完成。';el('Error').textContent=String(error.message||error);}
+  finally{el('Analyze').disabled=false;el('Key').value='';}
+ };
+})().catch(error=>{document.getElementById('modHubAcceptanceError').textContent=String(error.message||error);});
+</script>
+</body>
+</html>

@@ -21,12 +21,107 @@ module.exports = async function() {
         assert.ok(analysis.errorFiles.includes('Widgets Clothing Caption'), '必须准确提取报错段落【Widgets Clothing Caption】');
 
         assert.equal(analysis.matchedIssues.length, 1, '两行补丁同源错误必须归纳为 1 项知识库命中');
+        assert.deepEqual(Array.from(analysis.lines, line => Array.from(line.issueIds)), [['twee-patch-mismatch'], ['twee-patch-mismatch']], '具体错误和同类统计行均须保留本行命中，不能被全局去重吞掉');
         const issue = analysis.matchedIssues[0];
         assert.equal(issue.id, 'twee-patch-mismatch', '必须精准命中 twee-patch-mismatch 模式，绝不能退化为常规运行时异常');
         assert.ok(issue.desc.includes('原版优化'), '诊断描述中必须包含受影响模组名');
         assert.ok(issue.desc.includes('Widgets Clothing Caption'), '诊断描述中必须包含目标段落名');
         assert.ok(issue.solution.includes('智能整理模组与美化顺序'), '解决方案必须指导使用智能整理或调整次序');
         assert.ok(issue.solution.includes('核心剧情') && issue.solution.includes('可正常游玩'), '对于原版优化顶栏入口补丁冲突必须给出不影响核心游玩的安抚与分析');
+    }
+
+    // 行级知识库关联只复用现有错误诊断，警告和普通日志不新增推断。
+    {
+        const manager = loadManager();
+        const analysis = manager.modHubAnalyzeLogs([
+            { level: 'error', message: 'TypeError: firstCall is not a function at first.js:1' },
+            { level: 'error', message: 'TypeError: secondCall is not a function at second.js:2' },
+            { level: 'warn', message: 'dependency optional not found' },
+            { level: 'info', message: 'TweeReplacer 初始化完成' },
+        ]);
+        assert.deepEqual(Array.from(analysis.lines, line => Array.from(line.issueIds)), [['type-error'], ['type-error'], [], []], '同类错误须各自保留规则标识，警告和普通日志标识须为空');
+        assert.deepEqual(Array.from(analysis.matchedIssues, issue => issue.id), ['type-error'], '新增行级关联不得改变全局知识库去重结果');
+        assert.equal(analysis.errorCount, 2, '行级关联不得改变错误级别判定');
+        assert.equal(analysis.warnCount, 1, '含诊断关键词的警告仍须保留原级别');
+    }
+
+    // 日志获取帮助只传关联技术名和错误原文，不将日志提名认定为责任。
+    {
+        const manager = loadManager();
+        const diagnosis = createStubElement();
+        const problems = [];
+        const searches = [];
+        const effects = [];
+        const firstMod = '首错技术名';
+        const selectedMod = '关联模组"<script>名称</script>';
+        const firstError = '首处错误原文 <<variablesStatic>>\nTypeError: <img src=x onerror="不应执行">\nstartup@game.html:12:3';
+        const selectedError = '关联错误原文 <<link [[入口|StoryCaption]]>>\n<script>不可进入诊断 HTML</script>\n  保留缩进和 "引号"';
+        const analysis = {
+            errorCount: 4,
+            errorMods: ['其他技术名', selectedMod, firstMod],
+            errorFiles: [], matchedIssues: [], firstErrorIndex: 4,
+            lines: [
+                { index: 2, level: 'warn', message: '相关警告不能代替错误', mods: [selectedMod] },
+                { index: 4, level: 'error', message: firstError, mods: [firstMod] },
+                { index: 5, level: 'error', message: '其他模组错误', mods: ['其他技术名'] },
+                { index: 6, level: 'error', message: selectedError, mods: [selectedMod, '其他技术名'] },
+                { index: 7, level: 'error', message: '后续关联错误', mods: [selectedMod] },
+            ],
+        };
+        manager.document.getElementById = id => id === 'modHubLogDiagnosisContainer' ? diagnosis : null;
+        manager.modHubHelp = { openProblem: problem => { problems.push(problem); } };
+        manager.modHubSetLogSearch = value => searches.push(value);
+        manager.fetch = () => { effects.push('请求'); throw new Error('日志入口不得联网'); };
+        manager.modHubApplyAiPackage = () => { effects.push('写包'); };
+        manager.localStorage.setItem = () => { effects.push('保存'); };
+        manager.modHubRenderLogDiagnosis(analysis);
+        assert.ok(diagnosis.innerHTML.includes('data-log-help-first="true"') && diagnosis.innerHTML.includes('获取帮助'), '有错误时必须提供首错获取帮助入口');
+        assert.match(diagnosis.innerHTML, /class="[^"]*modhub-btn-primary[^"]*"[^>]*>定位首处错误<\/button>/, '定位首处错误须保留主操作样式');
+        assert.match(diagnosis.innerHTML, /class="macro-button modhub-btn-locate" data-log-help-first="true">获取帮助<\/button>/, '获取帮助须保留次操作层级');
+        const logStyles = readStyles();
+        assert.match(logStyles, /#modHubLogContainer \.modhub-log-header-actions button\.macro-button,\s*#modHubLogContainer \.modhub-diag-actions button\.macro-button\s*\{[^}]*min-height:\s*36px !important;[^}]*padding:\s*6px 12px !important;[^}]*font-size:\s*0\.84rem !important;[^}]*line-height:\s*1\.4 !important;[^}]*border:\s*1px solid var\(--gold\) !important;/, '日志五个操作须共享根字号、金色边框与高度，并覆盖窄屏及全屏的旧高度规则');
+        assert.match(logStyles, /#modHubLogContainer \.modhub-diag-actions button:not\(\.modhub-btn-primary\)\s*\{[^}]*background-color:\s*var\(--800\) !important;[^}]*font-weight:\s*600 !important;/, '次操作须通过较暗底色与字重区分，避免五个金框按钮全部过亮');
+        assert.match(logStyles, /#modHubLogContainer \.modhub-diag-actions button:focus-visible\s*\{[^}]*outline:\s*1px solid var\(--gold\) !important;/, '键盘操作须具有清晰的焦点提示');
+        assert.match(logStyles, /@media \(max-width: 768px\)\s*\{\s*#modHubLogContainer \.modhub-log-filter-btn,\s*#modHubLogContainer \.modhub-log-btn\s*\{\s*min-height:\s*32px !important;/, '窄屏日志筛选与匹配定位按钮须具有至少 32px 的触控高度');
+        assert.equal((diagnosis.innerHTML.match(/data-log-help-mod=/g) || []).length, 3, '每个关联模组必须提供分析此问题入口');
+        assert.ok(/class="modhub-diag-heading"[\s\S]*?class="modhub-diag-title red"[\s\S]*?class="modhub-diag-count grey">发现 4 条错误日志/.test(diagnosis.innerHTML), '诊断标题与错误行数须独立呈现，保留准确计数');
+        assert.ok(diagnosis.innerHTML.includes('class="modhub-diag-mod-list"'), '关联模组须使用独立列表，避免与文件徽章混排');
+        const modGroups = Array.from(diagnosis.innerHTML.matchAll(/<div class="modhub-diag-mod">([\s\S]*?)<\/div>/g), match => match[1]);
+        assert.equal(modGroups.length, analysis.errorMods.length, '每个模组须保留自己的筛选和帮助组合');
+        modGroups.forEach((group, index) => {
+            assert.ok(group.includes(`data-log-search="${manager.modHubEscapeHtml(analysis.errorMods[index])}"`) && group.includes(`data-log-help-mod="${index}"`), '模组筛选与对应帮助按钮必须属于同一组合，不能错配');
+        });
+        assert.ok(diagnosis.innerHTML.includes('class="modhub-diag-note grey"'), '材料确认提示须独立于关联模组列表');
+        assert.ok(/id="toggleAutoOpenErrorLog"[^>]*\/>\s*<span>游戏启动检测到加载错误时自动打开日志窗口并定位/.test(diagnosis.innerHTML), '自动弹窗开关文字须独立包裹，以保持窄屏换行对齐');
+        assert.ok(diagnosis.innerHTML.includes('点击“获取帮助”预览错误日志和模组源码，确认后发送给 AI 分析。'), '说明须简洁列出预览内容，并明确确认后才发送');
+        assert.ok(diagnosis.innerHTML.includes('关联模组&quot;&lt;script&gt;名称&lt;/script&gt;'), '外部技术名必须转义后展示');
+        assert.ok(!diagnosis.innerHTML.includes(firstError) && !diagnosis.innerHTML.includes(selectedError), '完整错误原文不得插入诊断 HTML 或按钮属性');
+        assert.ok(!diagnosis.innerHTML.includes('<img src=x') && !diagnosis.innerHTML.includes('<script>'), '日志原文和技术名不得产生可执行 HTML');
+        assert.deepEqual(problems, [], '渲染诊断不得自动整理或发送问题');
+        assert.deepEqual(effects, [], '渲染诊断不得请求、写包或保存');
+
+        const clickHelp = dataset => diagnosis.onclick({
+            target: { closest: selector => selector === '[data-log-help-first], [data-log-help-mod]' ? { dataset } : null },
+        });
+        clickHelp({ logHelpFirst: 'true' });
+        assert.equal(problems[0].modName, firstMod, '首错候选必须来自首条错误本身，不能取全局模组名单首项');
+        assert.equal(problems[0].error, firstError, '首错必须原样传递完整多行原文和宏标签');
+        clickHelp({ logHelpMod: '1' });
+        assert.equal(problems[1].modName, selectedMod, '关联入口必须传技术名，不能传友好展示名称');
+        assert.equal(problems[1].error, selectedError, '关联入口必须传首条关联错误，不能传警告、其他模组错误或归并摘要');
+        assert.deepEqual(effects, [], '点击获取帮助不得自行联网、写包或保存');
+
+        diagnosis.onclick({ target: { closest: selector => selector === '[data-log-search]' ? { dataset: { logSearch: selectedMod } } : null } });
+        assert.deepEqual(searches, [selectedMod], '新增帮助入口不得改变原有模组日志筛选');
+        assert.equal(problems.length, 2, '筛选徽章不得触发帮助整理');
+        manager.modHubHelp = {};
+        assert.doesNotThrow(() => clickHelp({ logHelpFirst: 'true' }), '帮助接口未就绪时不得抛出异常');
+        assert.ok(manager._toastLog.at(-1).message.includes('帮助中心尚未就绪') && manager._toastLog.at(-1).message.includes('等待模组加载完成后重试'), '未就绪提示必须说明状态和重试条件');
+        assert.equal(problems.length, 2, '帮助接口未就绪时不得继续传递问题');
+
+        manager.modHubRenderLogDiagnosis({ errorCount: 0 });
+        assert.ok(!diagnosis.innerHTML.includes('data-log-help-') && !diagnosis.innerHTML.includes('分析此问题'), '无错误日志时不得显示修复入口');
+        assert.equal(diagnosis.onclick, null, '无错误时必须清除上一轮诊断的帮助事件闭包');
     }
 
     // 截图中的作弊条件是待匹配代码，不能作为模组名，也不能套用管理器入口诊断。
@@ -437,6 +532,7 @@ module.exports = async function() {
         assert.equal(weather.lines.length, weatherRows.length, '合并诊断不得删除或压缩原始错误行');
         assert.deepEqual(Array.from(weather.lines, line => line.message), weatherRows.map(row => row.message), '每条天气错误的 effect、参数与图像路径必须原样保留');
         assert.deepEqual(Array.from(weather.matchedIssues, issue => issue.id), ['weather-image-error'], '同一组天气错误只显示一条具体诊断，不附通用 TypeError 或美化缺图卡片');
+        assert.ok(weather.lines.every(line => line.issueIds.length === 1 && line.issueIds[0] === 'weather-image-error'), '每条天气行仅关联专项诊断，不能在行级关联中恢复泛 TypeError 或资源诊断');
         assert.ok(weather.errorFiles.includes('img/misc/sky/clouds/overcast/0.png'), '天气专用分类不能隐藏原始图像路径');
         assert.ok(weather.matchedIssues[0].desc.includes('可能'), '天气诊断必须保留图片加载原因尚待核实的边界');
 
@@ -447,6 +543,8 @@ module.exports = async function() {
         const mixed = manager.modHubAnalyzeLogs([...weatherRows, ...independentRows]);
         assert.equal(mixed.errorCount, weatherRows.length + independentRows.length, '独立脚本和美化错误必须继续计数');
         assert.deepEqual(Array.from(mixed.matchedIssues, issue => issue.id).sort(), ['asset-missing', 'type-error', 'weather-image-error'], '天气分类不得遮蔽独立的 TypeError 和美化资源缺失');
+        assert.deepEqual(Array.from(mixed.lines[weatherRows.length].issueIds), ['type-error'], '独立脚本异常仍须保留本行通用 TypeError 关联');
+        assert.deepEqual(Array.from(mixed.lines[weatherRows.length + 1].issueIds), ['asset-missing'], '独立图像异常仍须保留本行资源诊断关联');
         assert.ok(mixed.errorFiles.includes('img/hands/left.png'), '独立美化资源错误仍必须保留路径');
 
         const unrelatedRows = [
@@ -1182,6 +1280,12 @@ module.exports = async function() {
         const cssContent = readStyles();
         assert.ok(cssContent.includes('.modhub-mobile-close-tab'), 'CSS 中必须包含移动端关闭按钮样式定义');
         assert.ok(cssContent.includes('.modhub-has-mobile-close'), 'CSS 中必须包含带有移动端关闭按钮时的容器留白样式');
+        const overridesCss = fs.readFileSync(path.join(srcRoot, 'stylesheet/modhub-overrides.css'), 'utf8');
+        const mobileTabsCss = overridesCss.slice(overridesCss.indexOf('/* 顶栏按可用宽度换行'), overridesCss.indexOf('@media (max-height: 600px)'));
+        assert.match(mobileTabsCss, /#overlayTabs\s*\{[^}]*display:\s*flex\s*!important;[^}]*flex-wrap:\s*wrap\s*!important;[^}]*padding-right:\s*40px\s*!important;[^}]*overflow:\s*visible\s*!important;/, '窄屏顶栏必须自动换行并为右上角关闭按钮预留空间');
+        assert.match(mobileTabsCss, /#overlayTabs button\s*\{[^}]*flex:\s*0 1 120px\s*!important;[^}]*min-width:\s*96px\s*!important;[^}]*min-height:\s*36px\s*!important;/, '窄屏页签必须保持同宽、不拉伸末行，并保留触控高度');
+        assert.match(mobileTabsCss, /#overlayTabs\.modhub-has-mobile-close\s*\{[^}]*padding-right:\s*0\s*!important;/, '使用左侧关闭标签时不得留下右侧叉号占位');
+        assert.match(mobileTabsCss, /\.customOverlayClose\s*\{[^}]*top:\s*0\.5rem\s*!important;[^}]*right:\s*8px\s*!important;[^}]*width:\s*36px\s*!important;[^}]*height:\s*36px\s*!important;[^}]*transform:\s*none\s*!important;/, '窄屏关闭按钮必须固定在面板右上角且具有完整触控面积');
 
         // 16.5 契约 5：连续安装/多步骤下载过程中不弹出重启提示打断，全部完成后统一弹窗
         const marketJs = fs.readFileSync(path.join(srcRoot, 'javascript/modhub-market.js'), 'utf8');

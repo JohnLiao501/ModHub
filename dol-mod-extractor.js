@@ -44,6 +44,36 @@ function uniqueStrings(values) {
   return [...new Set((values || []).filter((value) => typeof value === 'string' && value.trim()))];
 }
 
+/** 仅透传维护者显式声明的语言分组，不从同仓库或名称推断。 */
+export function modHubNormalizeVariant(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'language') return null;
+  const text = (item, limit) => typeof item === 'string' && item.trim().length <= limit
+    && !/[\u0000-\u001f\u007f]/u.test(item) ? item.trim() : '';
+  const groupId = text(value.groupId, 128).toLowerCase(), groupName = text(value.groupName, 200);
+  const id = text(value.id, 48), label = text(value.label, 80);
+  if (!/^[a-z0-9][a-z0-9._-]*$/i.test(groupId) || !groupName || !label
+      || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(id)) return null;
+  return { groupId, groupName, type: 'language', id, label };
+}
+
+/** 作者说明中的必需前置独立于包内元数据，使用加载器真实技术名。 */
+export function modHubNormalizeRequiredDependencies(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const modName = typeof item.modName === 'string' ? item.modName.trim() : '';
+    if (!modName || modName.length > 200 || /[\u0000-\u001f\u007f]/u.test(item.modName)
+        || item.version !== undefined && (typeof item.version !== 'string' || item.version.length > 200
+          || /[\u0000-\u001f\u007f]/u.test(item.version))) return [];
+    const version = item.version?.trim() || '*';
+    const key = `${modName.toLowerCase()}\n${version}`;
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ modName, version }];
+  });
+}
+
 function normalizeDependencies(value) {
   if (!Array.isArray(value)) return [];
   const seen = new Set();
@@ -152,6 +182,8 @@ export function mergeModIdentities(mods, catalog) {
         category: null,
         tags: [],
         dependencies: getModDependencies(mod),
+        variant: null,
+        requiredDependencies: [],
       };
     }
     return {
@@ -165,6 +197,8 @@ export function mergeModIdentities(mods, catalog) {
       category: typeof identity.category === 'string' ? identity.category : null,
       tags: uniqueStrings(identity.tags),
       dependencies: getModDependencies(mod, identity),
+      variant: modHubNormalizeVariant(identity.variant),
+      requiredDependencies: modHubNormalizeRequiredDependencies(identity.requiredDependencies),
       releaseCompatibility: modHubNormalizeReleaseCompatibility(identity.releaseCompatibility),
     };
   });

@@ -89,16 +89,20 @@
 
 .modhub-batch-status {
     display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
     gap: 4px;
 }
 
-.modhub-batch-progress {
-    flex: 1 1 120px;
-    min-width: 0;
-    width: 100%;
-    height: 8px;
-    accent-color: var(--gold, #d4af37);
+.modhub-batch-status > .modhub-progress-ring {
+    grid-column: 1;
+    grid-row: 1 / span 2;
+    align-self: center;
+    width: 20px;
+    height: 20px;
 }
+
+.modhub-batch-status > strong,
+.modhub-batch-status > span { grid-column: 2; }
 
 .modhub-market-select-label {
     display: inline-flex;
@@ -165,6 +169,12 @@
     font-size: 0.9em !important;
     line-height: 1.2 !important;
     white-space: nowrap;
+}
+
+#modHubMarketBtnRefresh .modhub-progress-ring {
+    width: 18px;
+    height: 18px;
+    margin-right: 6px;
 }
 
 .modhub-market-feedback-row {
@@ -260,7 +270,7 @@
     color: var(--300, #aaa) !important;
     border-radius: 12px !important;
     cursor: pointer !important;
-    min-height: 28px !important;
+    min-height: 32px !important;
     line-height: 1.2 !important;
     transition: all 0.15s ease !important;
 }
@@ -305,7 +315,13 @@
 .modhub-market-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-auto-rows: 1fr;
+    align-items: stretch;
     gap: 12px;
+}
+
+.modhub-market-grid > .modhub-loading-state {
+    grid-column: 1 / -1;
 }
 
 /* 模组卡片 */
@@ -314,7 +330,9 @@
     border: 1px solid var(--750, #333);
     border-radius: 4px;
     padding: 12px 14px;
-    min-height: 290px;
+    min-height: 0;
+    min-width: 0;
+    align-self: stretch;
     display: flex;
     flex-direction: column;
     box-sizing: border-box;
@@ -335,12 +353,15 @@
 
 .modhub-market-title-wrap {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-between;
     align-items: flex-start;
     gap: 8px;
 }
 
 .modhub-market-title {
+    flex: 1 1 180px;
+    min-width: 0;
     font-size: 1.05em;
     font-weight: bold;
     word-break: break-word;
@@ -422,18 +443,23 @@
     display: flex;
     flex-wrap: wrap;
     column-gap: 10px;
+    row-gap: 4px;
+    min-width: 0;
     font-size: 0.82em;
-    margin-bottom: 8px;
-    line-height: normal;
+    margin-bottom: 6px;
+    line-height: 1.45;
+    overflow-wrap: anywhere;
 }
+
+.modhub-market-meta > span { min-width: 0; }
 
 /* 模组简介描述 */
 .modhub-market-desc {
     font-size: 0.85em;
     color: var(--200, #ccc);
     line-height: 1.45;
-    margin-bottom: 12px;
-    flex: 1;
+    margin: 0 0 10px;
+    flex: 0 1 auto;
     min-height: 0;
     max-height: 7em;
     overflow-y: auto;
@@ -452,12 +478,22 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 8px;
-    margin-top: auto;
+    margin-top: 8px;
 }
+
+.modhub-market-card-footer {
+    min-width: 0;
+    margin-top: auto;
+    border-top: 1px solid var(--750, #333);
+    padding-top: 6px;
+}
+
+.modhub-market-card-footer .modhub-market-source-bar { margin: 0 0 6px; }
 
 .modhub-market-ignore-actions {
     display: flex;
-    gap: 18px;
+    flex-wrap: wrap;
+    gap: 4px 12px;
     margin: 0 0 4px;
 }
 
@@ -468,10 +504,12 @@
     align-items: center !important;
     justify-content: center !important;
     box-sizing: border-box !important;
-    flex: 1 1 0;
+    flex: 0 1 auto;
     min-width: 0 !important;
     max-width: none !important;
     width: auto !important;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .modhub-community-dialog {
@@ -839,27 +877,20 @@
     display: none;
 }
 
-.modhub-download-track {
-    height: 6px;
-    flex: 1;
-    overflow: hidden;
-    border: 1px solid var(--700, #444);
-    border-radius: 4px;
-    background: var(--900, #111);
+.modhub-download-progress > .modhub-progress-ring {
+    width: 20px;
+    height: 20px;
 }
 
-.modhub-download-bar {
-    width: 0;
-    height: 100%;
-    background: var(--gold, #d4af37);
-    transition: width 0.18s ease-out;
-}
+.modhub-download-progress > .modhub-progress-ring[hidden] { display: none; }
 
 .modhub-download-label {
-    min-width: 104px;
+    flex: 1 1 0;
+    min-width: 0;
     font-size: 0.76em;
-    text-align: right;
-    white-space: nowrap;
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
 }
 
 .modhub-download-cancel {
@@ -876,28 +907,7 @@
     display: none !important;
 }
 
-.modhub-download-progress.is-indeterminate .modhub-download-bar {
-    width: 38%;
-    animation: modHubDownloadFlow 1.1s ease-in-out infinite;
-}
-
-.modhub-download-progress.is-error .modhub-download-bar {
-    width: 100%;
-    background: var(--red, #b64b4b);
-}
-
-@keyframes modHubDownloadFlow {
-    from { transform: translateX(-110%); }
-    to { transform: translateX(280%); }
-}
-
-@media (prefers-reduced-motion: reduce) {
-    .modhub-download-progress.is-indeterminate .modhub-download-bar {
-        width: 100%;
-        animation: none;
-        opacity: 0.65;
-    }
-}
+.modhub-download-progress.is-error .modhub-download-label { color: var(--red, #b64b4b); }
 
 .modhub-btn-secondary {
     background-color: var(--800, #222) !important;
@@ -1175,6 +1185,15 @@
     border: 1px solid var(--600, #444);
     background: var(--850, #181818);
 }
+.modhub-version-loading .modhub-loading-state,
+.modhub-version-status .modhub-loading-state {
+    flex-direction: row;
+    justify-content: flex-start;
+    gap: 12px;
+    min-height: 0;
+    padding: 0;
+    text-align: left;
+}
 
 .modhub-version-status {
     font-size: 0.88em;
@@ -1307,6 +1326,11 @@
         flex: 0 1 auto;
         max-height: none;
         overflow-y: visible;
+    }
+
+    .modhub-market-actions button,
+    .modhub-market-actions .buttonlike {
+        flex: 1 1 0;
     }
 }
 
@@ -1648,3 +1672,57 @@
 
 /* 样式守卫用此标记确认本文件已实际生效。 */
 :root { --modhub-market-styles: 1; }
+
+/* 语言按钮共享卡片空间，版本、说明与安装入口跟随所选语言。 */
+.modhub-market-variant-intro { margin: 0 0 8px; font-size: 0.85em; line-height: 1.45; }
+.modhub-market-language-switch {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 0 0 12px;
+    min-width: 0;
+}
+.modhub-market-language-switch > .modhub-market-language-choice {
+    display: flex;
+    flex: 1 1 100px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    box-sizing: border-box;
+    min-width: 0 !important;
+    max-width: none !important;
+    width: auto !important;
+    min-height: 44px;
+    margin: 0;
+    padding: 6px 10px;
+    border: 1px solid var(--600, #555);
+    border-radius: 3px;
+    background: var(--850, #181818);
+    color: var(--200, #ccc);
+    font: inherit;
+    font-size: 0.85em;
+    line-height: 1.4;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+}
+.modhub-market-language-choice[aria-pressed="true"] {
+    border-color: var(--gold, #d4af37);
+    background: var(--800, #222);
+    color: var(--gold, #d4af37);
+}
+.modhub-market-language-choice:not(:disabled):hover { border-color: var(--gold, #d4af37); }
+.modhub-market-language-choice:focus { outline: none; }
+.modhub-market-language-choice:focus-visible { outline: 2px solid var(--gold, #d4af37); outline-offset: 2px; }
+.modhub-market-language-choice:disabled { cursor: default; opacity: 0.65; }
+.modhub-market-variant-status { font-size: 0.82em; }
+.modhub-market-variant-list,
+.modhub-market-variant-row { display: flex; flex: 1 1 auto; flex-direction: column; min-width: 0; }
+.modhub-market-variant-row { overflow-wrap: anywhere; }
+.modhub-market-variant-row[hidden] { display: none !important; }
+.modhub-market-variant-requirements { margin: 0 0 10px; }
+.modhub-market-ignore-actions > button,
+.modhub-market-variant-row .btn-market-unignore { min-height: 32px; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+
+.modhub-install-dialog .modhub-modal-close { min-width: 32px; min-height: 32px; flex-shrink: 0; }

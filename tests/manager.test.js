@@ -5,6 +5,37 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 字体就绪前及加载失败时继续显示原 SVG，多个圆环共用一次字体请求。
+    {
+        const sb = createBaseSandbox();
+        const classes = new Set();
+        let finish, calls = 0;
+        sb.document.documentElement.classList.add = name => classes.add(name);
+        sb.document.fonts = { load: (font, text) => {
+            calls++; assert.equal(font, '32px ModHubProgress'); assert.equal(text.length, 120);
+            return new Promise(resolve => { finish = resolve; });
+        } };
+        loadScripts(sb, ['javascript/modhub-dialog.js']);
+        sb.modHubProgressRingHtml(); sb.modHubProgressRingHtml(50, '下载');
+        assert.equal(calls, 1); assert.equal(classes.size, 0);
+        finish([{}]); await new Promise(resolve => setImmediate(resolve));
+        assert.ok(classes.has('modhub-progress-font-ready'));
+        sb.modHubProgressRingHtml(); assert.equal(calls, 1);
+    }
+    for (const firstResult of ['尚无样式', '加载失败']) {
+        const sb = createBaseSandbox();
+        let calls = 0, ready = false;
+        sb.document.documentElement.classList.add = () => { ready = true; };
+        sb.document.fonts = { load: () => {
+            calls++;
+            return calls > 1 ? Promise.resolve([{}]) : firstResult === '加载失败' ? Promise.reject(new Error('模拟字体加载失败')) : Promise.resolve([]);
+        } };
+        loadScripts(sb, ['javascript/modhub-dialog.js']);
+        assert.match(sb.modHubProgressRingHtml(), /modhub-progress-indeterminate/);
+        await new Promise(resolve => setImmediate(resolve)); assert.equal(ready, false);
+        sb.modHubProgressRingHtml(); await new Promise(resolve => setImmediate(resolve));
+        assert.equal(calls, 2); assert.equal(ready, true, '样式就绪后允许重新加载字体');
+    }
     // 异步适配核验撤销更新提醒时，第四卡片与旧统计必须同步恢复。
     {
         const sb = createBaseSandbox();
@@ -82,15 +113,16 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.3.4', 'boot.json 版本号必须为 1.3.4');
+    assert.equal(bootJson.version, '1.4.0', 'boot.json 版本号必须为 1.4.0');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
         'javascript/modhub-manager.js',
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
-        'javascript/modhub-log.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
+        'javascript/modhub-log.js', 'javascript/modhub-market-variants.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
-    ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志与市场');
+        'javascript/modhub-ai-package.js', 'javascript/modhub-ai-repair.js', 'javascript/modhub-help.js',
+    ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志、市场与帮助');
     assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-style.js', 'javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '样式守卫必须先于弹窗、面板与恢复引擎注入，早期模块必须先于业务脚本');
     for (const file of [...bootJson.scriptFileList_inject_early, ...bootJson.scriptFileList]) {
         assert.ok(fs.existsSync(path.join(srcRoot, file)), `${file} 必须存在于 src`);
@@ -103,6 +135,40 @@ module.exports = async function() {
     }
     assert.ok(bootJson.tweeFileList.includes('twee/modloader/modloader.twee'), '必须注册 modloader.twee');
     assert.ok(fs.existsSync(path.join(srcRoot, 'twee', 'modloader', 'modloader.twee')), 'modloader.twee 必须存在');
+
+    // 帮助中心追加为第五页签，现有日志索引与早期救援边界保持不变。
+    {
+        const opened = [];
+        const sb = loadManager({ Wikifier: { wikifyEval: macro => opened.push(macro) } });
+        assert.equal(sb.modHubIsManagerTabLabel('帮助中心'), true, '帮助页签必须保留在原生顶栏中');
+        assert.equal(sb.modHubOpenManager('帮助中心'), true, '公共入口必须支持直达帮助中心');
+        assert.ok(opened[0].includes('<<titleModloader 4>>') && opened[0].includes('<<modloaderhelp>>'), '帮助中心必须使用第五页签与独立内容宏');
+        assert.equal(Boolean(sb._modHubPendingScrollToFirstError), false, '打开帮助中心不得自动定位错误日志');
+        assert.ok(!bootJson.scriptFileList_inject_early.includes('javascript/modhub-help.js'), '帮助模块不得进入加载期救援的早期依赖链');
+        const twee = fs.readFileSync(path.join(srcRoot, 'twee/modloader/modloader.twee'), 'utf8');
+        assert.ok(twee.indexOf('<<button "帮助中心">>') > twee.indexOf('<<button "加载日志">>'), '帮助中心必须追加在加载日志之后');
+        assert.ok(twee.includes('<<widget "modloaderhelp">>') && twee.includes('id="modHubHelpContainer"'), '帮助内容宏必须提供独立容器');
+        assert.ok(twee.includes('window.modHubHelp?.init()'), '帮助内容必须通过已注册的公共接口初始化');
+    }
+
+    // 侧栏入口使用稳定标记；名称回退只匹配完整入口，避免触发市场操作。
+    {
+        for (const kind of ['marked', 'current', 'legacy', 'legacy-spaced', 'missing']) {
+            const sb = createBaseSandbox();
+            loadScripts(sb, ['javascript/modhub-manager.js']);
+            const clicks = [];
+            const makeButton = text => ({ textContent: text, click: () => clicks.push(text) });
+            const misleading = makeButton('更新 ModHub');
+            const marked = makeButton('自定义入口说明');
+            const current = makeButton(' ModHub ');
+            const legacy = makeButton(kind === 'legacy-spaced' ? 'Mod 管理器' : 'Mod管理器');
+            const buttons = [misleading, ...(kind === 'marked' ? [legacy, current, marked] : kind === 'current' ? [legacy, current] : kind.startsWith('legacy') ? [legacy] : [])];
+            sb.document.querySelector = selector => kind === 'marked' && selector === '.modhub-sidebar-entry button' ? marked : null;
+            sb.document.querySelectorAll = selector => selector === 'button' ? buttons : [];
+            assert.equal(sb.modHubOpenManager(), kind !== 'missing', '入口缺失时不能声称已打开');
+            assert.deepEqual(clicks, kind === 'missing' ? [] : [kind === 'marked' ? marked.textContent : kind === 'current' ? current.textContent : legacy.textContent], '稳定标记优先于新名称，新名称优先于旧名称，不误点更新按钮');
+        }
+    }
 
     // 1.2 解耦红线：不得残留原版优化模块的任何文件
     for (const forbidden of ['javascript/dol-optimization.js', 'javascript/AsAPI.js']) {
@@ -122,6 +188,12 @@ module.exports = async function() {
     for (const patch of managerPatches) {
         assert.ok(patch.tip.startsWith('【ModHub】'), `补丁 tip 必须以【ModHub】标识: ${patch.tip}`);
         assert.ok(fs.existsSync(path.join(srcRoot, patch.replaceFile)), `补丁文件必须存在: ${patch.replaceFile}`);
+        assert.ok(!patch.tip.includes('Mod管理器'), '补丁说明须采用当前入口名称');
+        if (patch.passage !== 'overlayReplace') {
+            const replacement = fs.readFileSync(path.join(srcRoot, patch.replaceFile), 'utf8');
+            assert.match(replacement, /<span class="modhub-sidebar-entry"><<button "ModHub">>/, '两个可见入口须提供 ModHub 文案与稳定定位标记');
+            assert.ok(!replacement.includes('Mod管理器'), '可见入口不得残留旧名称');
+        }
     }
 
     // 新游戏入口原文须唯一匹配，替换后保留原有入口并只插入一次 ModHub 入口。
@@ -505,11 +577,13 @@ module.exports = async function() {
                 loadAndAddMod: async () => { throw new Error('ModPack 不得交给仅支持 Zip 的旧 GUI'); }
             } : null;
             const sb = loadManager({ modModLoadController: controller, modUtils: utils, ...(gui ? { modLoaderGui: gui } : {}) });
+            let invalidations = 0;
+            sb.modHubMarket = { invalidateLocalPackageProfiles: () => { invalidations++; } };
             sb.modHubLoadBeautyState = async () => {};
             sb.modHubSwitchTab = name => { tabs.push(name); return true; };
             sb.initModManage = async () => {};
             sb.modHubSelectReadmeMod = () => {};
-            return { sb, controller, stored, checks, tabs, gui };
+            return { sb, controller, stored, checks, tabs, gui, invalidations: () => invalidations };
         };
         const file = (name, marker) => ({ name, arrayBuffer: async () => new Uint8Array([marker, 42, 255, 0]).buffer });
         for (const displayName of ['ModHub', `${'较长的模组名称'.repeat(12)}<img src=x onerror="bad()"> & "测试"`]) {
@@ -534,6 +608,7 @@ module.exports = async function() {
             assert.deepEqual(f.controller.store.enabled, ['NativePack'], '持久化名称必须取自真实 boot，而非文件名');
             assert.deepEqual(f.controller.store.disabled, [], '已有禁用版本应在成功导入后启用');
             assert.deepEqual(f.tabs, ['模组说明'], '单个原生包包含说明时应保留本地导入分流');
+            assert.equal(f.invalidations(), 1, '真实包体写入后使市场本地资料失效');
         }
         {
             const f = createImporter(true);
@@ -543,6 +618,7 @@ module.exports = async function() {
             assert.deepEqual([...f.stored.values()], [[2, 42, 255, 0], [1, 42, 255, 0], [3, 42, 255, 0]]);
             assert.deepEqual(f.tabs, ['模组管理'], '批量 Zip / ModPack 导入应保持管理页集中高亮');
             assert.deepEqual([...f.sb._modHubHighlightMods], ['ZipPack', 'NativePack', 'EncryptedPack']);
+            assert.equal(f.invalidations(), 3, '批次每份成功包体均使旧资料失效');
         }
         {
             const f = createImporter(true);
@@ -562,6 +638,18 @@ module.exports = async function() {
             assert.equal(await f.sb.modHubHandleAddMod({ files: [file('plain.zip', 2)] }, { askRestart: false }), true);
             assert.equal(called, 1, '仅含 Zip 的旧 GUI 路径必须保留');
             assert.equal(f.checks.length, 0);
+            assert.equal(f.invalidations(), 1, '旧 GUI 成功导入同样使市场资料失效');
+        }
+        for (const legacy of [false, true]) {
+            const f = createImporter(legacy);
+            if (legacy) f.gui.loadAndAddMod = async () => { f.controller.store.enabled.push('ZipPack'); };
+            f.sb.modHubLoadModManageState = async () => {
+                assert.equal(f.invalidations(), 1, '市场失效须先于安装后的状态回读');
+                throw new Error('模拟安装后状态回读失败');
+            };
+            assert.equal(await f.sb.modHubHandleAddMod({ files: [file(legacy ? 'plain.zip' : 'native.modpack', legacy ? 2 : 1)] },
+                { askRestart: false, keepCurrentTab: true }), true);
+            assert.equal(f.invalidations(), 1, '后续回读失败不得丢失已经落盘的包体失效通知');
         }
         {
             const f = createImporter(true);
@@ -582,6 +670,7 @@ module.exports = async function() {
             assert.equal(f.stored.size, 0);
             assert.deepEqual(f.controller.store.enabled, []);
             assert.deepEqual(f.controller.store.disabled, ['NativePack']);
+            assert.equal(f.invalidations(), 0, '校验未通过时不能伪称包体已改变');
         }
         {
             const f = createImporter();
@@ -750,6 +839,46 @@ module.exports = async function() {
         const sb = loadManager();
         assert.equal(typeof sb.modHubConfirm, 'function', '必须封装游戏原生暗黑确认框');
         assert.equal(typeof sb.modHubAlert, 'function', '必须封装游戏原生暗黑提示框');
+        const loading = sb.modHubLoadingHtml('<img src=x onerror=1>');
+        assert.match(loading, /role="status".*aria-live="polite"/);
+        assert.match(loading, /class="modhub-progress-ring".*aria-hidden="true"/);
+        assert.match(loading, /&lt;img src=x onerror=1&gt;/); assert.doesNotMatch(loading, /<img|aria-valuenow/);
+        const unknown = sb.modHubProgressRingHtml(null, '<等待>', '状态"');
+        assert.match(unknown, /role="progressbar".*aria-label="&lt;等待&gt;"/);
+        assert.match(unknown, /aria-describedby="状态&quot;"/);
+        assert.doesNotMatch(unknown, /is-determinate|aria-valuenow/);
+        assert.match(unknown, /^<svg\b/);
+        assert.match(unknown, /<circle class="modhub-progress-indeterminate" cx="16" cy="16" r="13"/);
+        const frames = unknown.match(/<text\b[^>]*aria-hidden="true">([^<]+)<\/text>/)?.[1];
+        assert.equal(frames?.length, 120, '字体序列完整保留两个秒周期的 120 帧');
+        assert.equal(frames.charCodeAt(0), 0xE000); assert.equal(frames.charCodeAt(119), 0xE077);
+        for (const [input, value] of [[0, 0], [37.5, 37.5], [100, 100], [-1, 0], [101, 100]]) {
+            const html = sb.modHubProgressRingHtml(input, '下载进度');
+            assert.match(html, /class="modhub-progress-ring is-determinate"/);
+            assert.ok(html.includes('aria-valuenow="' + value + '"'));
+            assert.ok(html.includes('stroke-dashoffset="' + (100 - value) + '"'));
+            if (value === 0) assert.match(html, /opacity="0"/, '零进度仅显示背景圆环');
+        }
+        for (const input of [null, NaN, Infinity]) assert.doesNotMatch(sb.modHubProgressRingHtml(input, '等待'), /is-determinate|aria-valuenow/);
+        const attributes = new Map([['role', 'progressbar']]), arcAttributes = new Map(), classes = new Set();
+        const ring = {
+            classList: { toggle: (name, active) => active ? classes.add(name) : classes.delete(name) },
+            getAttribute: name => attributes.get(name), setAttribute: (name, value) => attributes.set(name, value),
+            removeAttribute: name => attributes.delete(name),
+            querySelector: () => ({ setAttribute: (name, value) => arcAttributes.set(name, value) })
+        };
+        sb.modHubSetProgressRing(ring, 75);
+        assert.equal(classes.has('is-determinate'), true); assert.equal(attributes.get('aria-valuenow'), '75');
+        assert.equal(arcAttributes.get('stroke-dashoffset'), '25');
+        sb.modHubSetProgressRing(ring, null);
+        assert.equal(classes.has('is-determinate'), false); assert.equal(attributes.has('aria-valuenow'), false);
+        sb.modHubSetProgressRing(ring, 0); assert.equal(arcAttributes.get('opacity'), '0');
+        sb.modHubSetProgressRing(null, 10);
+        const template = fs.readFileSync(path.join(srcRoot, 'twee/modloader/modloader.twee'), 'utf8');
+        for (const widget of ['modloadermodmanage', 'modloaderreadme', 'modloaderlog', 'modloadermarket', 'modloaderhelp']) {
+            const body = template.split('<<widget "' + widget + '">>')[1]?.split('<</widget>>')[0];
+            assert.match(body, /<<modhubloading /, '每个页签在延迟初始化之前已有可见加载占位');
+        }
         const css = readStyles();
         const backdropStyle = css.match(/^\.modhub-modal-backdrop\s*\{([^}]+)\}/m)[1];
         const dialogStyle = css.match(/^\.modhub-modal-dialog\s*\{([^}]+)\}/m)[1];

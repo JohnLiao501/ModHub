@@ -133,6 +133,82 @@ module.exports = async function() {
     assert.equal(compatibleDefault.defaultKey, supported[0].candidateKey);
     assert.equal(compatibleDefault.defaultRisk, false);
 
+    // 目录强制前置适用于全部历史候选，不能被包体或发布中的空声明覆盖。
+    const translated = { ...mod, requiredDependencies: [{ modName: 'GenericTranslation', version: '*' }] };
+    const dependencyRelease = release('v2.10', '2026-06-14T22:00:00Z');
+    for (const declaration of [dependencyRelease, { ...dependencyRelease, dependencies: [] },
+        { ...dependencyRelease, dependencies: [{ id: 'OriginalRequirement', version: '^1.0.0' }],
+            assets: dependencyRelease.assets.map(asset => ({ ...asset, dependencies: [] })) }]) {
+        const [candidate] = candidates([declaration], translated);
+        assert.equal(candidate.dependencies.length, 1);
+        assert.equal(candidate.dependencies[0].bootName, 'GenericTranslation');
+        assert.equal(candidate.dependencies[0].required, true);
+        assert.equal(candidate.dependencies[0].source, '目录强制前置');
+    }
+    assert.equal(candidates([dependencyRelease], mod)[0].dependencies, undefined, '无额外目录前置的语言不借用其他语言的要求');
+    const [combinedDependencies] = candidates([{ ...dependencyRelease,
+        dependencies: [{ id: 'GenericTranslation', version: '*' }, { bootName: 'GenericTranslation', version: '>=1.0' },
+            { id: 'OriginalRequirement', version: '^1.0.0' }] }], {
+        ...translated, requiredDependencies: [...translated.requiredDependencies,
+            { bootName: 'GenericTranslation', version: '>=2.0' }, { id: 'OnlyCatalogId', version: '^3.0' },
+            { bootName: 'ActualTechnicalName', modName: 'DisplayAlias', id: 'catalog-entry', version: '*' }, {}]
+    });
+    assert.deepEqual(Array.from(combinedDependencies.dependencies.filter(item => (item.bootName || item.id) === 'GenericTranslation'), item => item.version),
+        ['*', '>=1.0', '>=2.0'], '同一前置的不同版本范围必须全部保留');
+    assert.equal(combinedDependencies.dependencies.find(item => item.version === '*').source, '目录强制前置', '相同要求合并时保留强制来源');
+    assert.ok(combinedDependencies.dependencies.some(item => item.id === 'OriginalRequirement'));
+    assert.ok(combinedDependencies.dependencies.some(item => item.id === 'OnlyCatalogId' && item.required));
+    assert.ok(combinedDependencies.dependencies.some(item => item.bootName === 'ActualTechnicalName' && item.id === 'catalog-entry'),
+        '明确 bootName 优先于兼容字段 modName，同时保留目录 ID');
+
+    // 同版重打包只能由已安装包与主包的可靠摘要证明，默认及推荐使用相同规则。
+    const oldDigest = 'sha256:' + 'a'.repeat(64), newDigest = 'sha256:' + 'b'.repeat(64);
+    const localProfile = { name: 'GenericFeatureAlpha', version: '2.10', packageDigest: oldDigest };
+    const [repacked] = candidates([{ ...dependencyRelease,
+        assets: dependencyRelease.assets.map(asset => ({ ...asset, digest: newDigest })) }]);
+    repacked.compatibility = { status: 'compatible', evidence: 'declaration' };
+    const repackOptions = { updateOnly: true, localProfile };
+    const repackSelection = versions.rankCandidates(mod, [repacked], repackOptions);
+    assert.equal(repackSelection.defaultKey, repacked.candidateKey);
+    assert.equal(repackSelection.recommendedKey, repacked.candidateKey);
+    assert.equal(repackSelection.defaultRisk, false);
+    assert.equal(versions.getDefaultSelection({ ...mod, _matchedLocal: localProfile }, [repacked], { updateOnly: true }).defaultKey, repacked.candidateKey);
+    for (const packageDigest of [newDigest, newDigest.toUpperCase(), '', 'sha256:bad', 'sha512:' + 'a'.repeat(64), { toString: () => newDigest }]) {
+        const ranked = versions.rankCandidates(mod, [repacked], { updateOnly: true, localProfile: { ...localProfile, packageDigest } });
+        assert.equal(ranked.defaultKey, '', '相同或未知本地摘要不能默认选同版更新');
+        assert.equal(ranked.recommendedKey, '');
+    }
+    for (const digest of ['', 'sha256:bad', oldDigest]) {
+        const candidate = { ...repacked, assetDigest: digest, assets: repacked.assets.map(asset => ({ ...asset, digest })) };
+        assert.equal(versions.rankCandidates(mod, [candidate], repackOptions).defaultKey, '', '未知或相同主包摘要不能默认选同版更新');
+    }
+    const installedCheck = market.isReleaseInstalled;
+    for (const installed of [true, null, undefined]) {
+        market.isReleaseInstalled = () => installed;
+        const ranked = versions.rankCandidates(mod, [repacked], repackOptions);
+        assert.equal(ranked.defaultKey, '', '安装状态须明确为 false');
+        assert.equal(ranked.recommendedKey, '');
+    }
+    market.isReleaseInstalled = installedCheck;
+    const originalProfiles = market.getLocalInstalledProfiles;
+    market.getLocalInstalledProfiles = () => [localProfile];
+    assert.equal(versions.rankCandidates(mod, [repacked], { updateOnly: true, localVersion: '2.10' }).defaultKey, repacked.candidateKey,
+        '缺少选项档案时可以按目录中的唯一技术名回读摘要');
+    market.getLocalInstalledProfiles = () => [{ ...localProfile, name: 'AnotherTechnicalName', displayNames: [mod.name] }];
+    assert.equal(versions.rankCandidates(mod, [repacked], { updateOnly: true, localVersion: '2.10' }).defaultKey, '',
+        '同展示名不能证明已安装包身份');
+    assert.equal(versions.rankCandidates(mod, [repacked], { updateOnly: true, localProfile: { ...localProfile, name: 'AnotherTechnicalName' } }).defaultKey, '',
+        '其他语言或产品的摘要不能证明本语言更新');
+    assert.equal(versions.rankCandidates(mod, [repacked], { updateOnly: true, localProfile: { ...localProfile, name: '' } }).defaultKey, '',
+        '缺少技术身份的摘要不能证明本语言已安装包');
+    market.getLocalInstalledProfiles = originalProfiles;
+    const onlyResourceDigest = { ...repacked, assetDigest: '', assets: [
+        { ...repacked.assets[0], digest: '' }, { name: 'GenericFeatureAlpha-resource.zip', packageRole: 'resource', digest: newDigest }
+    ] };
+    assert.equal(versions.rankCandidates(mod, [onlyResourceDigest], repackOptions).defaultKey, '', '附包摘要不能替代主包摘要');
+    assert.equal(versions.rankCandidates(mod, [repacked], { updateOnly: true, localProfile: { ...localProfile, version: '3.0' } }).defaultKey, '',
+        '不同摘要不允许默认降级');
+
     // 身份变化使历史缓存签名失配；强制刷新仍跳过新签名的有效缓存。
     let requests = 0;
     sb.AbortController = AbortController;
@@ -150,4 +226,17 @@ module.exports = async function() {
     assert.equal(requests, 2);
     await versions.fetchReleases(pinned, { useCache: false });
     assert.equal(requests, 3, '刷新上下文跳过有效历史缓存');
+
+    const withRequired = { ...pinned, requiredDependencies: [{ modName: 'GenericTranslation', version: '*' }] };
+    assert.equal((await versions.fetchReleases(withRequired)).schemaVersion, 1, '额外契约保持旧客户端 schemaVersion 1');
+    await versions.fetchReleases(withRequired);
+    assert.equal(requests, 4, '新增目录强制前置必须跳过旧缓存，新签名仍可复用');
+    await versions.fetchReleases({ ...withRequired, requiredDependencies: [{ modName: 'GenericTranslation', version: '>=2.0' }] });
+    assert.equal(requests, 5, '目录强制前置的版本范围变化使缓存失效');
+    const zhVariant = { ...withRequired, variant: { groupId: 'generic-feature', kind: 'language', code: 'zh-CN', label: '简体中文' } };
+    await versions.fetchReleases(zhVariant);
+    await versions.fetchReleases(zhVariant);
+    assert.equal(requests, 6, '语言变体契约新增后不复用旧缓存');
+    await versions.fetchReleases({ ...zhVariant, variant: { ...zhVariant.variant, code: 'en', label: 'English' } });
+    assert.equal(requests, 7, '语言变体变化必须重新核验历史');
 };

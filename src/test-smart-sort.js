@@ -18,15 +18,23 @@ process.on('beforeExit', () => {
     await require('../tests/restore-panel.test')();
     await require('../tests/restore-startup.test')();
     await require('../tests/market-catalog.test')();
+    await require('../tests/market-variants.test')();
+    await require('../tests/market-language-cards.test')();
     await require('../tests/diagnostics-conflicts.test')();
+    await require('../tests/ai-package.test')();
+    await require('../tests/ai-manager.test')();
+    await require('../tests/ai-repair.test')();
+    await require('../tests/help.test')();
+    await require('../tests/help-ai.test')();
     await require('../tests/market-install.test')();
     await require('../tests/market-versions.test')();
     await require('../tests/market-preparation.test')();
+    await require('../tests/market-required-dependencies.test')();
     await require('../tests/market-version-install.test')();
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.3.4 全部测试通过');
+    console.log('ModHub v1.4.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

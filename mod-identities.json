@@ -1957,6 +1957,19 @@
     {
       "id": "lnn-enemy-stats-display-chs",
       "name": "LNN 战斗对手状态显示（简中）",
+      "variant": {
+        "groupId": "lnn-enemy-stats-display",
+        "groupName": "LNN 战斗对手状态显示",
+        "type": "language",
+        "id": "zh-CN",
+        "label": "简体中文"
+      },
+      "requiredDependencies": [
+        {
+          "modName": "ModI18N",
+          "version": "*"
+        }
+      ],
       "bootNames": [
         "LNN 战斗对手状态显示·简中"
       ],
@@ -1982,6 +1995,13 @@
     {
       "id": "lnn-enemy-stats-display-en",
       "name": "LNN 战斗对手状态显示（英文）",
+      "variant": {
+        "groupId": "lnn-enemy-stats-display",
+        "groupName": "LNN 战斗对手状态显示",
+        "type": "language",
+        "id": "en",
+        "label": "English"
+      },
       "bootNames": [
         "LNN Enemy Stats Display"
       ],

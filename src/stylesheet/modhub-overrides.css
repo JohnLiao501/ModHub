@@ -188,11 +188,96 @@
         padding: 6px 10px !important;
     }
 }
+@media (max-width: 768px) {
+    /* 顶栏按可用宽度换行，关闭按钮独占右上角触控区域。 */
+    #customOverlay[data-overlay="modloader"] #customOverlayTitle {
+        min-width: 0 !important;
+        max-width: 100% !important;
+    }
+    #customOverlay[data-overlay="modloader"] #overlayTabs {
+        display: flex !important;
+        flex-wrap: wrap !important;
+        min-width: 0 !important;
+        padding-right: 40px !important;
+        overflow: visible !important;
+    }
+    #customOverlay[data-overlay="modloader"] #overlayTabs button {
+        flex: 0 1 120px !important;
+        width: auto !important;
+        min-width: 96px !important;
+        max-width: none !important;
+        min-height: 36px !important;
+        padding: 7px 8px !important;
+    }
+    #customOverlay[data-overlay="modloader"] #overlayTabs.modhub-has-mobile-close {
+        padding-right: 0 !important;
+    }
+    #customOverlay[data-overlay="modloader"] #overlayTabs button.modhub-mobile-close-tab {
+        flex: 0 0 auto !important;
+        min-width: 64px !important;
+        max-width: 80px !important;
+    }
+    #customOverlay[data-overlay="modloader"] .customOverlayClose {
+        top: 0.5rem !important;
+        right: 8px !important;
+        width: 36px !important;
+        height: 36px !important;
+        transform: none !important;
+    }
+    #customOverlay[data-overlay="modloader"] .customOverlayClose:hover {
+        transform: none !important;
+    }
+    #customOverlay[data-overlay="modloader"] .customOverlayClose::before,
+    #customOverlay[data-overlay="modloader"] .customOverlayClose::after {
+        top: 7px !important;
+        left: 17px !important;
+    }
+}
 @media (max-height: 600px) {
     .modhub-restore-notice .modhub-modal-header,
     .modhub-restore-notice .modhub-modal-footer { padding: 8px 12px; }
     .modhub-restore-notice .modhub-modal-body { padding: 10px 12px; line-height: 1.45; }
     .modhub-restore-notice .modhub-modal-message { gap: 8px; }
+}
+
+/* 日志操作统一金色边框与尺寸，用底色和字重保留主次层级。 */
+#modHubLogContainer .modhub-log-header-actions,
+#modHubLogContainer .modhub-diag-actions { align-items: stretch; gap: 8px; }
+#modHubLogContainer .modhub-log-header-actions button.macro-button,
+#modHubLogContainer .modhub-diag-actions button.macro-button {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    min-height: 36px !important;
+    box-sizing: border-box;
+    margin: 0;
+    padding: 6px 12px !important;
+    font-size: 0.84rem !important;
+    line-height: 1.4 !important;
+    border: 1px solid var(--gold) !important;
+    border-radius: 3px !important;
+    text-align: center;
+    transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease !important;
+}
+#modHubLogContainer .modhub-log-header-actions button:not(.modhub-btn-primary),
+#modHubLogContainer .modhub-diag-actions button:not(.modhub-btn-primary) {
+    background-color: var(--800) !important;
+    color: var(--000) !important;
+    font-weight: 600 !important;
+}
+#modHubLogContainer .modhub-log-header-actions button:not(.modhub-btn-primary):hover,
+#modHubLogContainer .modhub-diag-actions button:not(.modhub-btn-primary):hover {
+    background-color: var(--700) !important;
+}
+#modHubLogContainer .modhub-log-header-actions button:focus-visible,
+#modHubLogContainer .modhub-diag-actions button:focus-visible {
+    outline: 1px solid var(--gold) !important;
+    outline-offset: 2px;
+}
+@media (max-width: 768px) {
+    #modHubLogContainer .modhub-log-filter-btn,
+    #modHubLogContainer .modhub-log-btn { min-height: 32px !important; }
 }
 
 /* 样式守卫用此标记确认本文件已实际生效。 */

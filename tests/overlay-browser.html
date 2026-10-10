@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ModHub 顶栏布局验收</title>
+<style>
+:root{color-scheme:dark;--000:#fff;--100:#eee;--150:#ddd;--300:#bbb;--600:#666;--700:#555;--750:#444;--800:#333;--850:#222;--900:#111;--gold:#d6b365;--red:#ed7878}
+body{margin:0;background:var(--900);color:var(--100);font:16px/1.5 sans-serif}
+/* 复现游戏原生 overlay、table 标签及全局按钮约束。 */
+button{border:1px solid var(--700);background:var(--850);color:var(--000);font-size:110%}
+.customOverlayContainer{position:fixed;top:0;right:0;width:calc(100% - 17.6em);height:100%;backdrop-filter:blur(3px)}
+.customOverlay{position:absolute;top:10px;right:10px;bottom:10px;left:10px;width:auto;max-width:1000px;line-height:1.5em}
+#customOverlayTitle{display:flex;flex-wrap:wrap;align-items:center;padding:.5rem;padding-bottom:0}
+#customOverlayContent{margin:0 .5rem;padding:16px;background:var(--850);overflow:auto;max-height:calc(100% - 180px)}
+.tab{display:table;width:100%;border:1px solid var(--150);border-radius:4px 4px 0 0;background:var(--750)}
+.tab button{--max-width:max-content;background:var(--800);display:table-cell;float:none;padding:5px 15px;margin:0;min-width:150px;width:calc(var(--max-width) + 100px);font-size:1rem;border:0;border-right:1px solid var(--300);position:relative;white-space:nowrap;overflow:hidden}
+.tab button.tab-selected{background:var(--850);color:var(--gold)}
+.customOverlayClose{position:absolute;width:24px;height:24px;right:12px;cursor:pointer;opacity:.5}
+.customOverlayClose::before,.customOverlayClose::after{position:absolute;top:0;left:10px;content:" ";height:24px;width:3px;background:var(--100)}
+.customOverlayClose::before{transform:rotate(45deg)}.customOverlayClose::after{transform:rotate(-45deg)}
+@media(max-width:870px){.customOverlay{left:-17.6em}}
+@media(max-width:1250px){.tab button{padding:5px 10px;min-width:125px;width:calc(var(--max-width) + 50px)}}
+@media(max-width:1000px){.tab button{font-size:98%;min-width:100px;width:calc(var(--max-width) + 40px)}}
+@media(max-width:595px){.tab button{font-size:96%;min-width:75px;width:calc(var(--max-width) + 25px)}}
+@media(max-width:470px){.tab button{font-size:94%;min-width:50px;width:calc(var(--max-width) + 10px)}}
+#modHubOverlayAcceptanceResult{white-space:pre-wrap;overflow-wrap:anywhere}
+</style>
+<script>
+if (new URL(location.href).searchParams.get('view') === 'logs') {
+    const nativeStyle = document.createElement('link');
+    nativeStyle.rel = 'stylesheet';
+    nativeStyle.href = '/native-game.css';
+    document.head.append(nativeStyle);
+}
+</script>
+<link rel="stylesheet" href="/source/stylesheet/modhub.css">
+<link rel="stylesheet" href="/source/stylesheet/modhub-market.css">
+<link rel="stylesheet" href="/source/stylesheet/modhub-overrides.css">
+</head>
+<body>
+<div class="customOverlayContainer">
+<div id="customOverlay" class="customOverlay" data-overlay="modloader">
+<div id="customOverlayTitle">
+<div id="overlayTabs" class="tab modhub-modloader-tabs modhub-tabs-ready">
+<button class="macro-button modhub-core-tab tab-selected">模组管理</button>
+<button class="macro-button modhub-core-tab">模组市场</button>
+<button class="macro-button modhub-core-tab">模组说明</button>
+<button class="macro-button modhub-core-tab">加载日志</button>
+<button class="macro-button modhub-core-tab">帮助中心</button>
+</div>
+<div class="customOverlayClose" onclick="(document.getElementById('modHubLogAcceptanceResult') || document.getElementById('modHubOverlayAcceptanceResult')).textContent='关闭按钮已响应。'"></div>
+</div>
+<div id="customOverlayContent">
+<h1>顶栏布局验收</h1>
+<p>此页面仅复现游戏原生顶栏结构与样式，未载入完整游戏。检查 360px、768px 与桌面宽度，并覆盖两种关闭按钮及日志全屏。</p>
+<label><input id="modHubOverlayAcceptanceMobile" type="checkbox">使用左侧关闭标签</label><br>
+<label><input id="modHubOverlayAcceptanceFullscreen" type="checkbox">使用日志全屏</label>
+<pre id="modHubOverlayAcceptanceResult" role="status"></pre>
+</div>
+</div>
+</div>
+<script>
+'use strict';
+const panel = document.getElementById('customOverlay');
+const tabs = document.getElementById('overlayTabs');
+const close = document.querySelector('.customOverlayClose');
+const mobile = document.getElementById('modHubOverlayAcceptanceMobile');
+const fullscreen = document.getElementById('modHubOverlayAcceptanceFullscreen');
+const result = document.getElementById('modHubOverlayAcceptanceResult');
+const mobileClose = document.createElement('button');
+mobileClose.className = 'macro-button modhub-core-tab modhub-mobile-close-tab';
+mobileClose.textContent = '关闭';
+mobileClose.onclick = () => { result.textContent = '关闭标签已响应。'; };
+function check() {
+    const bounds = panel.getBoundingClientRect();
+    const buttons = [...tabs.querySelectorAll('button')];
+    const rectangles = buttons.map(button => button.getBoundingClientRect());
+    const inPanel = rectangle => rectangle.left >= bounds.left - 1 && rectangle.right <= bounds.right + 1;
+    const assert = (condition, message) => { if (!condition) throw new Error(message); };
+    try {
+        assert(rectangles.every(inPanel), '标签超出了面板左右边界。');
+        if (innerWidth <= 768) {
+            assert(rectangles.every(rectangle => rectangle.height >= 32), '标签触控高度不足。');
+            assert(getComputedStyle(tabs).flexWrap === 'wrap', '窄屏标签没有启用自动换行。');
+            const ordinaryRectangles = buttons.filter(button => !button.classList.contains('modhub-mobile-close-tab')).map(button => button.getBoundingClientRect());
+            assert(ordinaryRectangles.every(rectangle => Math.abs(rectangle.width - ordinaryRectangles[0].width) < 1 && rectangle.width <= 120), '普通页签宽度不一致或发生拉伸。');
+            if (!mobile.checked) {
+                const rectangle = close.getBoundingClientRect();
+                assert(inPanel(rectangle) && rectangle.top >= bounds.top && rectangle.height >= 32 && rectangle.width >= 32, '关闭按钮越界或触控面积不足。');
+                assert(rectangles.every(button => button.right <= rectangle.left || button.left >= rectangle.right || button.bottom <= rectangle.top || button.top >= rectangle.bottom), '关闭按钮覆盖了标签。');
+            }
+        }
+        result.textContent = '通过：' + innerWidth + 'px；' + new Set(rectangles.map(rectangle => Math.round(rectangle.top))).size + ' 行标签；' + (mobile.checked ? '左侧关闭标签' : '右上角关闭按钮') + '；' + (fullscreen.checked ? '日志全屏' : '普通面板') + '。';
+    } catch (error) { result.textContent = '失败：' + error.message; }
+}
+mobile.onchange = () => {
+    tabs.classList.toggle('modhub-has-mobile-close', mobile.checked);
+    if (mobile.checked) tabs.prepend(mobileClose); else mobileClose.remove();
+    close.style.display = mobile.checked ? 'none' : '';
+    check();
+};
+fullscreen.onchange = () => {
+    panel.classList.toggle('modhub-overlay-fullscreen', fullscreen.checked);
+    panel.parentElement.classList.toggle('modhub-container-fullscreen', fullscreen.checked);
+    check();
+};
+if (new URL(location.href).searchParams.get('view') !== 'logs') {
+    window.addEventListener('resize', check);
+    window.addEventListener('load', check);
+} else {
+    document.title = 'ModHub 日志布局验收';
+    tabs.querySelector('.tab-selected').classList.remove('tab-selected');
+    tabs.children[3].classList.add('tab-selected');
+    document.getElementById('customOverlayContent').innerHTML = `
+        <div id="modHubLogContainer" class="modhub-container">
+            <div class="modhub-group-header">
+                <span class="gold">模组加载过程日志</span>
+                <div class="modhub-log-header-actions">
+                    <button id="btnToggleLogFullscreen" type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubToggleLogFullscreen()">全屏展示</button>
+                    <button type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubCaptureLogScreenshot()">一键截图</button>
+                    <button type="button" class="macro-button modhub-btn-primary" onclick="window.modHubCopyLoadLog()">复制日志</button>
+                </div>
+            </div>
+            <div id="modHubLogDiagnosisContainer"></div>
+            <div class="modhub-log-toolbar">
+                <div class="modhub-log-search-row">
+                    <input id="modHubLogSearch" class="modhub-search-input modhub-log-search" type="search" placeholder="搜索日志内容……" aria-label="搜索日志内容">
+                    <span id="modHubLogSearchStatus" class="modhub-log-search-status grey">0/0</span>
+                </div>
+                <div class="modhub-log-actions-row">
+                    <div class="modhub-log-filter-group">
+                        <button type="button" class="modhub-log-filter-btn active" data-filter="all" onclick="window.modHubSetLogLevelFilter('all')">全部</button>
+                        <button id="modHubFilterError" type="button" class="modhub-log-filter-btn filter-error" data-filter="error" onclick="window.modHubSetLogLevelFilter('error')">仅错误</button>
+                        <button id="modHubFilterWarn" type="button" class="modhub-log-filter-btn filter-warn" data-filter="warn" onclick="window.modHubSetLogLevelFilter('warn')">仅警告</button>
+                        <button type="button" class="modhub-log-filter-btn" data-filter="issues" onclick="window.modHubSetLogLevelFilter('issues')">错误+警告</button>
+                    </div>
+                    <div style="display:flex;gap:4px;align-items:center">
+                        <button type="button" class="macro-button modhub-log-btn" onclick="window.modHubMoveLogMatch(-1)">↑ 上一处</button>
+                        <button type="button" class="macro-button modhub-log-btn" onclick="window.modHubMoveLogMatch(1)">↓ 下一处</button>
+                        <button id="modHubLogErrors" type="button" class="macro-button modhub-log-btn" onclick="window.modHubJumpToLevel('error')"><span class="red">错误</span></button>
+                        <button id="modHubLogWarnings" type="button" class="macro-button modhub-log-btn" onclick="window.modHubJumpToLevel('warn')"><span class="gold">警告</span></button>
+                    </div>
+                </div>
+            </div>
+            <div id="modHubLogContent" class="modhub-log-wrapper"></div>
+            <p class="grey">此页面使用虚构日志及当前源码渲染器，仅验证布局和交互，未载入完整游戏。</p>
+            <pre id="modHubLogAcceptanceResult" role="status"></pre>
+        </div>`;
+    const logResult = document.getElementById('modHubLogAcceptanceResult');
+    const aliases = { DomRobin: '强势罗宾扩展', BabyHawk: '小鹰育雏扩展', 'More Love Interests Mod': '更多恋爱对象扩展', FertilityExpansion: '生育拓展' };
+    const longCase = new URL(location.href).searchParams.get('case') === 'long';
+    if (longCase) aliases['More Love Interests Mod'] += '与机制及剧情兼容说明';
+    window._modHubStartupCheckInitialized = true;
+    window.modHubGetGui = () => ({ gModUtils: { getModListNameNoAlias: () => Object.keys(aliases) } });
+    window.modHubEscapeHtml = value => String(value ?? '').replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[character]));
+    window.modHubFindKnownAlias = name => aliases[name] || name;
+    window.modHubShowToast = (message, type) => { logResult.textContent = message; logResult.dataset.noticeType = type; };
+    window.modHubHelp = { openProblem(problem) {
+        logResult.textContent = '已整理对应错误，等待玩家确认材料；未发送分析。';
+        logResult.dataset.helpMod = problem.modName;
+        logResult.dataset.helpError = problem.error;
+    } };
+    const logScript = document.createElement('script');
+    logScript.src = '/source/javascript/modhub-log.js';
+    logScript.onload = () => {
+        const templates = [
+            '[TweeReplacer] do_patch() cannot find findString: [DomRobin] findString: [<<if $money gte 300>>] in: [Ocean Breeze]',
+            '[TweeReplacer] do_patch() cannot find findString: [BabyHawk] findString: [!$daily.birdBabyFeed] in: [Widgets Bird]',
+            '[TweeReplacer] do_patch() cannot find findString: [More Love Interests Mod] findString: [<<link "互动">>] in: [Children Activity Events]',
+            "[sugarcube] (:: Start): <<npcPregnancyUpdater>>: error within widget code: TypeError: Cannot read properties of undefined (reading 'pregnancy') <<if C.npc[$_name].pregnancy is undefined>>"
+        ];
+        if (longCase) templates[3] += ' at components/startup/npcPregnancyUpdater/initialization-context-without-word-boundaries.js:20:4';
+        const normalCase = new URL(location.href).searchParams.get('case') === 'normal';
+        const rawLogs = normalCase ? [{ level: 'info', time: '10:24:00', message: 'ModHub 已完成加载。' }] : [
+            ...Array.from({ length: 168 }, (_, index) => ({ level: 'error', time: '10:24:00', message: templates[index % 3] })),
+            ...Array.from({ length: 4 }, () => ({ level: 'error', time: '10:24:01', message: templates[3] })),
+            { level: 'warn', time: '10:24:02', message: '虚构可选资源警告。' },
+            { level: 'info', time: '10:24:03', message: '虚构模组加载阶段结束。' }
+        ];
+        window.modHubGetRawModLoaderLogs = () => rawLogs;
+        window.modHubIsAutoOpenErrorLogEnabled = () => true;
+        window.modHubSetAutoOpenErrorLogEnabled = checked => { logResult.textContent = '自动弹窗演示设为' + (checked ? '开启' : '关闭') + '；未保存配置。'; };
+        window.modHubCopyLoadLog = () => { logResult.textContent = '复制按钮已响应；验收页面不访问剪贴板。'; };
+        window.modHubCaptureLogScreenshot = () => { logResult.textContent = '截图按钮已响应；验收页面不创建图片或访问剪贴板。'; };
+        window.modHubInitLogTools();
+        logResult.textContent = '日志布局已就绪：' + (normalCase ? '无错误' : '172 条错误日志、2 项诊断') + '；未联网分析、未读取包体、未保存设置。';
+        logResult.dataset.ready = 'true';
+    };
+    document.addEventListener('click', event => {
+        const searchButton = event.target.closest('[data-log-search]');
+        if (searchButton) {
+            logResult.dataset.search = document.getElementById('modHubLogSearch').value;
+            logResult.textContent = '已筛选日志：' + logResult.dataset.search;
+        }
+    });
+    document.head.append(logScript);
+}
+</script>
+</body>
+</html>

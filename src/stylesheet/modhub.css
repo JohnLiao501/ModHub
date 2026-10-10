@@ -24,6 +24,547 @@
     margin-top: 4px;
 }
 
+/* 帮助中心复用原生按钮与灰阶，结果和报告仅在本页展示。 */
+.modhub-help {
+    min-width: 0;
+    padding-bottom: calc(60px + env(safe-area-inset-bottom));
+    overflow-wrap: anywhere;
+}
+
+#modHubHelpContainer .modhub-help-section {
+    min-width: 0;
+    margin: 0 0 16px;
+    padding: 0;
+    box-sizing: border-box;
+    border: 0;
+    background: transparent;
+}
+
+#modHubHelpContainer .modhub-help-result {
+    min-width: 0;
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    border-left: 2px solid var(--600);
+    background: var(--850);
+}
+
+#modHubHelpContainer .modhub-help-topic {
+    min-width: 0;
+    margin: 12px 0;
+    padding: 0;
+    box-sizing: border-box;
+    border: 0;
+    border-top: 1px solid var(--750);
+    background: transparent;
+}
+
+.modhub-help-section h3,
+.modhub-help-result h3 {
+    margin: 0 0 8px;
+    color: var(--gold);
+}
+
+.modhub-help-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 10px 0;
+}
+
+.modhub-help-choice,
+.modhub-help-choice select {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+}
+
+.modhub-help-choice select {
+    min-height: 32px;
+    margin-top: 4px;
+    padding: 6px;
+    border: 1px solid var(--600);
+    background: var(--800);
+    color: var(--100);
+    font: inherit;
+}
+
+.modhub-help-steps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 24px;
+    margin: 0 0 12px;
+    padding-left: 24px;
+}
+
+#modHubHelpContainer button {
+    width: auto !important;
+    flex-shrink: 0;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
+    min-height: 32px !important;
+    height: auto !important;
+    margin: 0;
+    font-size: 1em;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+}
+
+#modHubHelpContainer button:disabled {
+    opacity: 0.45;
+    cursor: default;
+    box-shadow: none !important;
+    border-color: var(--600) !important;
+    color: var(--400) !important;
+    background: var(--850) !important;
+}
+
+#modHubHelpContainer .modhub-help-actions > button {
+    flex: 0 1 auto;
+}
+
+#modHubHelpContainer .modhub-help-actions-primary {
+    justify-content: flex-end;
+    align-items: stretch;
+    margin: 16px 0;
+}
+
+#modHubHelpContainer .modhub-help-actions-primary > .modhub-btn-primary {
+    order: 1;
+    margin-left: auto;
+}
+
+#modHubHelpContainer .modhub-help-actions-links {
+    gap: 6px 10px;
+    margin: 12px 0;
+}
+
+#modHubHelpContainer .modhub-help-actions-links > button {
+    background: transparent !important;
+    border-color: var(--750) !important;
+    box-shadow: none !important;
+    color: var(--300) !important;
+    font-weight: normal !important;
+    padding: 5px 10px !important;
+}
+
+#modHubHelpContainer .modhub-help-actions-links > button:hover:not(:disabled) {
+    background: var(--850) !important;
+    border-color: var(--600) !important;
+    color: var(--100) !important;
+}
+
+.modhub-help-report {
+    display: block;
+    width: 100%;
+    min-width: 0;
+    min-height: 200px;
+    max-height: 45vh;
+    box-sizing: border-box;
+    overflow: auto;
+    resize: vertical;
+    padding: 10px;
+    border: 1px solid var(--600);
+    background: var(--900);
+    color: var(--100);
+    font: inherit;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+#modHubHelpAi [hidden] { display: none !important; }
+#modHubHelpAi { scroll-margin-top: 48px; }
+
+.modhub-help-welcome { margin: 12px 0 24px; }
+.modhub-help-welcome h2 { margin: 0 0 8px; color: var(--100); font-size: 1.7em; }
+.modhub-help-welcome p { margin: 0; color: var(--300); }
+.modhub-ai-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; margin: 0 0 18px; }
+#modHubAiConnectionStatus { flex: 1 1 240px; min-width: 0; font-size: 0.85em; }
+#modHubAiSettings { flex: 0 0 auto; width: auto !important; }
+.modhub-help-question textarea { min-height: 120px; }
+.modhub-help-question-meta { display: flex; flex-wrap: wrap; gap: 6px 20px; font-size: 0.85em; }
+#modHubAiDescriptionHint { flex: 1 1 240px; }
+#modHubAiDescriptionCount { flex-shrink: 0; }
+.modhub-help-topics { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.modhub-help-topics button { text-align: left; padding: 10px !important; }
+.modhub-help-suggestions { margin: 0 0 20px; }
+.modhub-help-suggestions > p { margin: 0 0 10px; font-size: 0.85em; }
+.modhub-help-suggestions .modhub-help-topics { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
+.modhub-help-suggestions small { display: block; margin-top: 4px; font-size: 0.8em; font-weight: normal; }
+.modhub-ai-status { padding: 10px 12px; background: var(--800); border-left: 3px solid var(--600); }
+.modhub-ai-status:empty { display: none; }
+.modhub-ai-status.red { border-left-color: var(--red); }
+@font-face {
+    font-family: ModHubProgress;
+    src: url("data:font/woff;base64,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") format("woff");
+    font-weight: normal;
+    font-style: normal;
+    font-display: block;
+}
+.modhub-progress-ring {
+    display: block;
+    overflow: hidden;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    color: var(--100);
+    animation: modhub-progress-rotate 2s linear infinite;
+    transform-origin: center;
+    will-change: transform;
+}
+.modhub-loading-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 16px;
+    min-height: clamp(220px, 36vh, 360px);
+    padding: 24px 16px;
+    box-sizing: border-box;
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+.modhub-loading-state p { margin: 0; }
+#modHubAiSettingsProgress { display: block; margin: 12px 0; }
+#modHubHelpResults > .modhub-loading-state { min-height: 160px; }
+#modHubHelpStatus .modhub-loading-state { flex-direction: row; min-height: 0; padding: 12px 0; text-align: left; }
+.modhub-progress-ring circle {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.5;
+    stroke-linecap: round;
+}
+.modhub-progress-track,
+.modhub-progress-value { display: none; }
+.modhub-progress-ring .modhub-progress-track { stroke: var(--700); }
+.modhub-progress-ring.is-determinate { animation: none; transform: rotate(-90deg); will-change: auto; }
+.modhub-progress-ring.is-determinate .modhub-progress-track,
+.modhub-progress-ring.is-determinate .modhub-progress-value { display: block; }
+.modhub-progress-ring.is-determinate .modhub-progress-indeterminate { display: none; animation: none; }
+.modhub-progress-indeterminate { stroke-dasharray: 1 82; animation: modhub-progress-arc 2s ease-in-out infinite; }
+.modhub-progress-frames {
+    display: none;
+    pointer-events: none;
+    user-select: none;
+    fill: currentColor;
+    stroke: none;
+    font: 32px/1 ModHubProgress;
+    font-kerning: none;
+    font-variant-ligatures: none;
+    letter-spacing: 0;
+    word-spacing: 0;
+}
+.modhub-progress-font-ready .modhub-progress-ring:not(.is-determinate) { animation: none; will-change: auto; }
+.modhub-progress-font-ready .modhub-progress-ring:not(.is-determinate) .modhub-progress-indeterminate { display: none; animation: none; }
+.modhub-progress-font-ready .modhub-progress-ring:not(.is-determinate) .modhub-progress-frames {
+    display: inline;
+    animation: modhub-progress-frames 2s steps(120, end) infinite;
+    will-change: transform;
+}
+@keyframes modhub-progress-frames {
+    from { transform: translateX(0); }
+    to { transform: translateX(-3840px); }
+}
+@keyframes modhub-progress-rotate {
+    from { transform: rotate(-90deg); }
+    to { transform: rotate(270deg); }
+}
+@keyframes modhub-progress-arc {
+    0% { stroke-dasharray: 1 82; stroke-dashoffset: 0; }
+    50% { stroke-dasharray: 60 82; stroke-dashoffset: -8; }
+    100% { stroke-dasharray: 1 82; stroke-dashoffset: -82; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .modhub-progress-ring,
+    .modhub-progress-indeterminate { animation: none; will-change: auto; }
+    .modhub-progress-indeterminate { stroke-dasharray: 60 82; stroke-dashoffset: -8; }
+    .modhub-progress-font-ready .modhub-progress-ring:not(.is-determinate) .modhub-progress-frames { display: none; animation: none; will-change: auto; }
+    .modhub-progress-font-ready .modhub-progress-ring:not(.is-determinate) .modhub-progress-indeterminate { display: inline; }
+}
+.modhub-ai-progress {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    align-items: center;
+    gap: 4px 12px;
+    margin: 0 0 16px;
+    padding: 12px 14px;
+    border: 1px solid var(--700);
+    background: var(--850);
+}
+.modhub-ai-progress p { margin: 0; font-size: 0.85em; }
+#modHubHelpContainer .modhub-ai-progress .modhub-help-actions { grid-column: 2; display: flex; margin: 4px 0 0; }
+.modhub-ai-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--700); }
+#modHubHelpContainer .modhub-ai-footer .modhub-help-actions { display: flex; align-items: center; margin: 0; }
+#modHubHelpContainer .modhub-ai-footer .modhub-ai-history-actions { margin-left: auto; }
+@media (max-width: 600px) {
+    .modhub-ai-footer { display: grid; grid-template-columns: minmax(0, 1fr); }
+    #modHubHelpContainer .modhub-ai-footer .modhub-ai-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #modHubAiBack { grid-column: 1 / -1; }
+    #modHubHelpContainer .modhub-ai-footer .modhub-ai-history-actions { margin-left: 0; }
+    #modHubHelpContainer .modhub-ai-history-actions > button { flex: 1 1 100%; }
+}
+.modhub-ai-error { max-height: 200px; overflow: auto; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--100); }
+.modhub-ai-problem { white-space: pre-wrap; max-height: 180px; overflow: auto; }
+.modhub-ai-advice-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+#modHubHelpContainer .modhub-ai-settings { max-width: 800px; margin: 0 auto; }
+.modhub-ai-settings h3 { margin: 0 0 8px; }
+.modhub-ai-settings-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 20px; margin-top: 20px; }
+.modhub-ai-settings-fields .modhub-ai-field { margin: 0; }
+.modhub-ai-settings-address, .modhub-ai-settings-wide { grid-column: 1 / -1; }
+.modhub-ai-settings-fields small { display: block; margin-top: 6px; font-size: 0.8em; }
+.modhub-ai-settings-fields > .modhub-ai-settings-wide { margin: 0; }
+.modhub-ai-remember { display: flex; align-items: center; gap: 8px; min-height: 32px; margin-top: 12px; cursor: pointer; }
+.modhub-ai-remember input { flex: 0 0 auto; width: auto; margin: 0; accent-color: var(--gold); }
+.modhub-ai-remember input:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+.modhub-ai-rounds-controls { display: flex; align-items: center; gap: 12px; }
+.modhub-ai-rounds-controls input[type="number"] { flex: 0 1 144px; width: 144px; min-width: 0; margin: 0; }
+.modhub-ai-rounds-controls input[type="checkbox"] { width: auto; min-height: 0; margin: 0; padding: 0; }
+.modhub-ai-rounds-controls .modhub-ai-remember { flex: 0 0 auto; margin: 0; white-space: nowrap; }
+.modhub-ai-settings-hint { font-size: 0.85em; margin: 6px 0 14px; }
+#modHubHelpContainer .modhub-ai-settings-actions { gap: 8px; align-items: stretch; padding-top: 16px; border-top: 1px solid var(--750); }
+#modHubHelpContainer #modHubAiSettingsSave { margin-left: auto; }
+@media (max-width: 600px) {
+    .modhub-ai-settings-fields { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    #modHubHelpContainer .modhub-ai-settings-actions > button { flex: 1 1 auto; }
+    #modHubHelpContainer #modHubAiSettingsSave { flex-basis: 100% !important; margin-left: 0; }
+}
+
+.modhub-ai-field {
+    display: block;
+    min-width: 0;
+    margin-bottom: 12px;
+}
+
+.modhub-ai-field input,
+.modhub-ai-field select,
+.modhub-ai-field textarea {
+    display: block;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    min-height: 36px;
+    box-sizing: border-box;
+    margin: 4px 0 0;
+    padding: 8px;
+    font: inherit;
+    color: var(--100);
+    background: var(--900);
+    border: 1px solid var(--600);
+}
+
+.modhub-ai-field textarea { resize: vertical; }
+#modHubAiMaxRounds:disabled {
+    color: var(--400);
+    background: var(--850);
+    border-color: var(--750);
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+.modhub-ai-field :focus-visible,
+.modhub-ai-files :focus-visible,
+.modhub-ai-consent :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+.modhub-ai-files {
+    max-height: 240px;
+    overflow: auto;
+    border: 1px solid var(--600);
+    padding: 6px;
+}
+
+.modhub-ai-file,
+.modhub-ai-consent {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 32px;
+    padding: 4px 0;
+    cursor: pointer;
+}
+
+.modhub-ai-file input,
+.modhub-ai-consent input { flex: 0 0 auto; margin-top: 5px; }
+.modhub-ai-file > span { min-width: 0; overflow-wrap: anywhere; }
+.modhub-ai-steps [aria-current="step"] { font-weight: bold; }
+#modHubAiDiff { min-height: 240px; font-family: monospace; }
+
+#modHubAiWorkflow { max-width: 920px; margin: 0 auto; }
+#modHubHelpContainer .modhub-ai-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 0; margin: 0 0 16px; list-style: none; counter-reset: modhub-ai-step; font-size: 0.85em; }
+.modhub-ai-steps li { min-width: 0; padding: 6px 0 8px; border-bottom: 2px solid var(--750); counter-increment: modhub-ai-step; }
+.modhub-ai-steps li::before { content: counter(modhub-ai-step) '. '; }
+.modhub-ai-steps li[aria-current="step"] { border-bottom-color: var(--gold); }
+#modHubAiStatus:not(.red):not(.gold):not(.green) { margin: 8px 0 14px; padding: 0; background: transparent; border: 0; color: var(--300); font-size: 0.85em; }
+.modhub-ai-review,
+.modhub-ai-result { min-width: 0; padding: 16px 18px; border: 1px solid var(--700); background: var(--850); line-height: 1.6; }
+#modHubHelpContainer .modhub-ai-review h3,
+#modHubHelpContainer .modhub-ai-result h3 { margin: 0 0 8px; color: var(--100); font-size: 1.2em; }
+.modhub-ai-review-hint { margin: 0 0 16px; font-size: 0.85em; }
+.modhub-ai-overview { display: grid; grid-template-columns: 5em minmax(0, 1fr); gap: 8px 14px; margin: 0 0 16px; }
+.modhub-ai-overview dt { color: var(--300); }
+.modhub-ai-overview dd { min-width: 0; margin: 0; color: var(--100); overflow-wrap: anywhere; }
+.modhub-ai-send { padding-top: 12px; margin-top: 12px; border-top: 1px solid var(--700); }
+.modhub-ai-send > p { margin: 0 0 8px; font-size: 0.85em; }
+#modHubHelpContainer .modhub-ai-send .modhub-help-actions,
+#modHubHelpContainer .modhub-ai-result .modhub-help-actions { margin-bottom: 0; }
+.modhub-ai-result .modhub-ai-advice-text { margin: 0 0 12px; }
+#modHubAiNextHint { margin: 0 0 16px; font-size: 0.85em; }
+#modHubAiAdviceDetails .modhub-ai-advice-text { margin: 8px 0; line-height: 1.65; }
+#modHubHelpContainer .modhub-ai-review .modhub-ai-log-summary { margin: 0; }
+#modHubHelpContainer .modhub-ai-review .modhub-help-topic { margin: 0; padding: 4px 0; }
+@media (max-width: 600px) {
+    .modhub-ai-steps li::before { display: block; margin-bottom: 2px; }
+    .modhub-ai-review,
+    .modhub-ai-result { padding: 12px; }
+    .modhub-ai-overview { grid-template-columns: 4em minmax(0, 1fr); gap: 8px; }
+    #modHubHelpContainer .modhub-ai-result .modhub-help-actions > .modhub-btn-primary,
+    #modHubHelpContainer .modhub-ai-send .modhub-help-actions > .modhub-btn-primary { flex: 1 1 100%; margin-left: 0; }
+}
+
+#modHubHelpContainer .modhub-help-topic > summary {
+    display: block;
+    position: relative;
+    box-sizing: border-box;
+    min-height: 32px;
+    padding: 6px 2px 6px 18px;
+    margin: 0;
+    border: 0;
+    background: transparent;
+    color: var(--300);
+    line-height: 1.5;
+    list-style: none;
+    cursor: pointer;
+}
+
+#modHubHelpContainer .modhub-help-topic > summary::marker { content: ''; }
+#modHubHelpContainer .modhub-help-topic > summary::-webkit-details-marker { display: none; }
+
+#modHubHelpContainer .modhub-help-topic > summary::before {
+    content: '';
+    position: absolute;
+    top: calc(50% - 4px);
+    left: 2px;
+    width: 0;
+    height: 0;
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+    border-left: 6px solid var(--gold);
+    transform-origin: 3px 4px;
+}
+
+#modHubHelpContainer .modhub-help-topic[open] > summary::before { transform: rotate(90deg); }
+#modHubHelpContainer .modhub-help-topic[open] > summary,
+#modHubHelpContainer .modhub-help-topic > summary:hover { color: var(--100); }
+#modHubHelpContainer .modhub-help-topic > summary + * { margin-top: 10px; }
+
+#modHubHelpContainer .modhub-help-footer {
+    margin-top: 24px;
+    padding-top: 4px;
+    border-top: 1px solid var(--600);
+}
+
+#modHubHelpContainer .modhub-help-footer > .modhub-help-topic {
+    margin: 0;
+    border-top: 0;
+    border-bottom: 1px solid var(--750);
+}
+
+#modHubHelpContainer .modhub-help-footer > .modhub-help-topic > summary { padding-top: 8px; padding-bottom: 8px; }
+#modHubHelpContainer .modhub-help-footer > .modhub-help-topic[open] { padding-bottom: 12px; }
+
+#modHubHelpContainer #modHubHelpLocalDetails[open] > summary {
+    color: var(--gold);
+    font-weight: bold;
+}
+
+.modhub-help-local-content {
+    margin: 10px 0 4px;
+    padding: 0 0 0 14px;
+    border-left: 2px solid var(--600);
+}
+
+.modhub-help-local-content > p { margin: 0 0 16px; font-size: 0.9em; }
+.modhub-help-local-group { min-width: 0; margin: 16px 0 0; }
+.modhub-help-local-group h4 { margin: 0 0 10px; font-size: 1em; color: var(--100); }
+.modhub-help-local-group .modhub-help-choice { font-size: 0.9em; color: var(--300); }
+.modhub-help-local-group .modhub-help-choice select { font-size: 1.1em; }
+.modhub-help-guidance { padding: 12px; background: var(--900); }
+.modhub-help-guidance:empty { display: none; }
+#modHubHelpContainer .modhub-help-guidance > .modhub-help-topic { margin: 0; border: 0; }
+.modhub-help-guidance ol { padding-left: 24px; line-height: 1.6; }
+.modhub-help-guidance li + li { margin-top: 6px; }
+.modhub-help-local-header {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding-top: 16px;
+    border-top: 1px solid var(--600);
+}
+.modhub-help-local-header h4 { margin: 0; }
+#modHubHelpResults > p { margin: 10px 0; }
+#modHubHelpResults > .modhub-help-result-state { font-weight: bold; }
+#modHubHelpResults > .grey { font-size: 0.9em; }
+#modHubHelpLogDetails { font-size: 0.9em; }
+#modHubHelpStatus:empty { display: none; }
+
+#modHubHelpContainer .modhub-help-notice dl {
+    display: grid;
+    grid-template-columns: 7em minmax(0, 1fr);
+    gap: 10px 16px;
+    margin: 12px 0 4px;
+    line-height: 1.6;
+}
+
+#modHubHelpContainer .modhub-help-notice dt { color: var(--300); font-weight: bold; }
+#modHubHelpContainer .modhub-help-notice dd { min-width: 0; margin: 0; color: var(--200); }
+#modHubHelpContainer .modhub-ai-selection > summary { font-size: 0.95em; }
+#modHubHelpContainer .modhub-ai-selection .modhub-ai-files { margin: 10px 0; padding: 0 0 0 10px; border: 0; border-left: 2px solid var(--750); }
+
+#modHubHelpContainer .modhub-ai-log-summary { margin: 12px 0; color: var(--300); }
+#modHubHelpContainer .modhub-ai-log-summary > p { margin: 6px 0; }
+#modHubHelpContainer .modhub-ai-log-summary pre,
+#modHubHelpContainer .modhub-ai-log-summary ul,
+#modHubHelpContainer .modhub-ai-log-summary ol {
+    max-height: 180px;
+    margin: 8px 0;
+    padding: 0 0 0 10px;
+    overflow: auto;
+    border-left: 2px solid var(--600);
+    list-style: none;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    font-size: 0.9em;
+    line-height: 1.5;
+}
+
+#modHubHelpContainer .modhub-ai-log-summary li { padding: 4px 0; }
+
+.modhub-help-topic summary:focus-visible,
+.modhub-help-report:focus-visible {
+    outline: 2px solid var(--gold);
+    outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+    #modHubHelpContainer .modhub-help-actions > button { flex: 1 1 140px; }
+    #modHubHelpContainer .modhub-help-actions-primary > .modhub-btn-primary { margin-left: 0; }
+    #modHubHelpContainer .modhub-help-result { padding: 10px; }
+}
+
+@media (max-width: 480px) {
+    .modhub-help-local-content { padding-left: 10px; }
+    #modHubHelpContainer .modhub-help-local-header > button { flex: 1 1 100%; }
+    .modhub-help-topics { grid-template-columns: minmax(0, 1fr); }
+    .modhub-help-welcome h2 { font-size: 1.4em; }
+    #modHubHelpContainer .modhub-help-actions-primary > .modhub-btn-primary { flex-basis: 100%; order: -1; }
+    #modHubHelpContainer .modhub-help-actions-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    #modHubHelpContainer .modhub-help-notice dl { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+    #modHubHelpContainer .modhub-help-notice dd { margin-bottom: 10px; }
+    #modHubHelpContainer .modhub-help-notice dd:last-child { margin-bottom: 0; }
+}
+
 /* ========== 1. 主要行动按钮 (Primary CTA Button) ========== */
 /* 应用于：重新载入游戏、智能整理、复制日志等核心主操作 */
 .modhub-btn-primary,
@@ -82,7 +623,7 @@ button.modhub-btn-primary:active,
     display: none;
 }
 
-/* 4个标签：保持与原版【存档/设置】界面一致的固定舒适等宽（120px）！ */
+/* 各页签保持与原版【存档/设置】界面一致的固定舒适等宽（120px）。 */
 #customOverlay[data-overlay="modloader"] #overlayTabs button {
     /* flex: 0 0 120px !important; */
     width: 120px !important;
@@ -1295,32 +1836,78 @@ button.modhub-btn-primary:active,
 }
 
 /* ========== 10.1 置顶诊断卡片 (0 Emoji) ========== */
+.modhub-log-header-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 6px;
+}
+
+.modhub-log-header-actions button {
+    width: auto !important;
+    min-width: 0;
+    min-height: 34px;
+    margin: 0;
+    padding: 6px 12px !important;
+    font-size: 0.84em !important;
+    white-space: normal !important;
+}
+
 .modhub-diagnosis-card {
     background-color: var(--850);
     border: 1px solid var(--700);
     border-radius: 4px;
-    padding: 10px 14px;
+    padding: 14px 16px;
     margin-bottom: 12px;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    min-width: 0;
+    box-sizing: border-box;
 }
 
 .modhub-diagnosis-card.diag-error {
-    border-color: var(--red);
-    background-color: rgba(45, 15, 15, 0.7);
+    border-left: 3px solid var(--red);
 }
 
 .modhub-diagnosis-card.diag-normal {
-    border-color: var(--green);
-    background-color: rgba(15, 35, 20, 0.6);
+    border-left: 3px solid var(--green);
+}
+
+.modhub-diagnosis-card.diag-normal .modhub-diag-header {
+    padding-bottom: 0;
+    border-bottom: 0;
 }
 
 .modhub-diag-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     justify-content: space-between;
     gap: 10px;
     flex-wrap: wrap;
-    margin-bottom: 8px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--750);
+}
+
+.modhub-diag-heading {
+    flex: 1 1 280px;
+    min-width: 0;
+}
+
+.modhub-diag-count {
+    margin-top: 4px;
+    font-size: 0.84em;
+}
+
+.modhub-diag-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.modhub-diag-actions button {
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: 0;
+    min-height: 34px;
+    margin: 0;
 }
 
 .modhub-diag-title {
@@ -1329,14 +1916,16 @@ button.modhub-btn-primary:active,
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .modhub-diag-title.red {
-    color: #ff6b6b;
+    color: var(--red);
 }
 
 .modhub-diag-title.green {
-    color: #51cf66;
+    color: var(--green);
 }
 
 .modhub-btn-locate {
@@ -1346,36 +1935,80 @@ button.modhub-btn-primary:active,
 
 .modhub-diag-row {
     display: flex;
-    align-items: center;
+    flex-direction: column;
+    align-items: stretch;
     gap: 8px;
-    margin-top: 6px;
-    flex-wrap: wrap;
+    margin-top: 12px;
+    min-width: 0;
 }
 
 .diag-label {
+    font-size: 0.84em;
+}
+
+.modhub-diag-mod-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+    gap: 6px;
+    min-width: 0;
+}
+
+.modhub-diag-mod {
+    display: flex;
+    align-items: stretch;
+    gap: 4px;
+    min-width: 0;
+    padding: 4px;
+    border: 1px solid var(--700);
+    border-radius: 3px;
+    background: var(--800);
+}
+
+.modhub-diag-mod .mod-badge {
+    flex: 1 1 0;
+}
+
+.modhub-diag-mod .modhub-diag-help {
+    flex: 0 0 auto;
+    align-self: center;
+    white-space: nowrap;
+}
+
+.modhub-diag-note {
+    margin-top: 8px;
     font-size: 0.82em;
-    flex-shrink: 0;
+    line-height: 1.5;
 }
 
 .diag-badges {
     display: flex;
     gap: 6px;
     flex-wrap: wrap;
+    min-width: 0;
 }
 
 .modhub-diag-badge {
     background-color: var(--800);
     border: 1px solid var(--600);
     color: var(--000);
-    font-size: 0.78em;
-    padding: 2px 8px;
+    font-size: 0.82em;
+    padding: 4px 8px;
     border-radius: 3px;
     cursor: pointer;
     transition: all 0.15s ease;
-    white-space: nowrap;
+    width: auto !important;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 32px;
+    box-sizing: border-box;
+    margin: 0;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
 }
 
-.modhub-diag-badge:hover {
+.modhub-diag-badge:hover,
+.modhub-diag-badge:focus-visible {
     background-color: var(--700);
     border-color: var(--gold);
     color: var(--gold);
@@ -1392,41 +2025,57 @@ button.modhub-btn-primary:active,
 }
 
 .modhub-diag-issues {
-    margin-top: 10px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    padding-top: 8px;
+    margin-top: 14px;
+    border-top: 1px solid var(--750);
+    padding-top: 12px;
+}
+
+.modhub-diag-issues > .diag-label {
+    margin-bottom: 8px;
 }
 
 .modhub-issue-item {
-    background-color: rgba(0, 0, 0, 0.3);
-    border-left: 3px solid var(--gold);
-    padding: 6px 10px;
-    margin-bottom: 6px;
+    background-color: var(--900);
+    border-left: 2px solid var(--gold);
+    padding: 10px 12px;
+    margin-bottom: 8px;
     border-radius: 2px;
 }
 
 .modhub-issue-item .issue-title {
-    font-size: 0.88em;
+    font-size: 0.92em;
     font-weight: bold;
-    margin-bottom: 2px;
+    margin-bottom: 6px;
 }
 
 .modhub-issue-item .issue-desc {
-    font-size: 0.8em;
-    line-height: 1.4;
-    margin-bottom: 3px;
+    font-size: 0.86em;
+    line-height: 1.6;
+    margin-bottom: 6px;
 }
 
 .modhub-issue-item .issue-solution {
-    font-size: 0.82em;
-    line-height: 1.4;
+    font-size: 0.86em;
+    line-height: 1.6;
 }
 
 .modhub-diag-footer {
-    margin-top: 10px;
-    padding-top: 6px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-    font-size: 0.84em;
+    margin-top: 12px;
+    padding-top: 12px;
+    border-top: 1px solid var(--750);
+    font-size: 0.82em;
+}
+
+.modhub-diagnosis-card .modhub-checkbox-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    line-height: 1.5;
+}
+
+.modhub-diagnosis-card .modhub-checkbox-label input {
+    flex: 0 0 auto;
+    margin: 4px 0 0;
 }
 
 /* ========== 10.2 结构化日志行排版 ========== */
@@ -1643,10 +2292,6 @@ button.modhub-btn-primary:active,
         flex-wrap: wrap;
     }
 
-    .modhub-download-track {
-        flex-basis: 100%;
-    }
-
     .modhub-download-label {
         flex: 1 1 auto;
         min-width: 0;
@@ -1800,6 +2445,37 @@ button.modhub-btn-primary:active,
     }
 
     /* 日志工具栏移动端结构化两行排布 */
+    #modHubLogContainer .modhub-log-header-actions {
+        width: 100%;
+        flex-wrap: nowrap;
+    }
+
+    #modHubLogContainer .modhub-log-header-actions button {
+        flex: 1 1 0;
+        width: auto !important;
+        min-width: 0;
+        padding: 6px 4px !important;
+        font-size: 0.82em !important;
+        white-space: normal !important;
+    }
+
+    .modhub-diagnosis-card {
+        padding: 12px;
+    }
+
+    .modhub-diag-actions {
+        width: 100%;
+    }
+
+    .modhub-diag-actions button {
+        flex: 1 1 0;
+        padding: 6px 4px !important;
+    }
+
+    .modhub-diag-mod-list {
+        grid-template-columns: 1fr;
+    }
+
     .modhub-log-toolbar {
         display: flex !important;
         flex-direction: column !important;

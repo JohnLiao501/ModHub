@@ -8,6 +8,47 @@ window.modHubEscapeHtml = function(str) {
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 };
 
+const MODHUB_PROGRESS_FRAMES = Array.from({ length: 120 }, (_, index) => String.fromCharCode(0xE000 + index)).join('');
+let modHubProgressFontLoading = false;
+
+window.modHubProgressRingHtml = function(percent = null, label = '', describedBy = '') {
+    if (document.fonts?.load && !modHubProgressFontLoading) {
+        modHubProgressFontLoading = true;
+        document.fonts.load('32px ModHubProgress', MODHUB_PROGRESS_FRAMES).then(fonts => {
+            if (fonts.length) document.documentElement?.classList.add('modhub-progress-font-ready');
+            else modHubProgressFontLoading = false;
+        }).catch(() => { modHubProgressFontLoading = false; });
+    }
+    const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+    const escape = window.modHubEscapeHtml;
+    const semantics = label ? ' role="progressbar" aria-label="' + escape(label) + '" aria-valuemin="0" aria-valuemax="100"'
+        + (value === null ? '' : ' aria-valuenow="' + value + '"') : ' aria-hidden="true"';
+    return '<svg class="modhub-progress-ring' + (value === null ? '' : ' is-determinate') + '" viewBox="0 0 32 32" focusable="false"' + semantics
+        + (describedBy ? ' aria-describedby="' + escape(describedBy) + '"' : '') + '>'
+        + '<text class="modhub-progress-frames" x="0" y="32" display="none" aria-hidden="true">' + MODHUB_PROGRESS_FRAMES + '</text>'
+        + '<circle class="modhub-progress-indeterminate" cx="16" cy="16" r="13"></circle>'
+        + '<circle class="modhub-progress-track" cx="16" cy="16" r="13"></circle><circle class="modhub-progress-value" cx="16" cy="16" r="13" pathLength="100" stroke-dasharray="100 100" stroke-dashoffset="'
+        + (value === null ? 100 : 100 - value) + '" opacity="' + (value === 0 ? 0 : 1) + '"></circle></svg>';
+};
+
+window.modHubSetProgressRing = function(ring, percent) {
+    if (!ring) return;
+    const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
+    ring.classList.toggle('is-determinate', value !== null);
+    if (value === null) ring.removeAttribute('aria-valuenow');
+    else if (ring.getAttribute('role') === 'progressbar') ring.setAttribute('aria-valuenow', String(value));
+    const arc = ring.querySelector('.modhub-progress-value');
+    if (arc) {
+        arc.setAttribute('stroke-dashoffset', String(value === null ? 100 : 100 - value));
+        arc.setAttribute('opacity', value === 0 ? '0' : '1');
+    }
+};
+
+window.modHubLoadingHtml = function(message) {
+    return '<div class="modhub-loading-state grey" role="status" aria-live="polite">' + window.modHubProgressRingHtml()
+        + '<p>' + window.modHubEscapeHtml(message) + '</p></div>';
+};
+
 // 统一 Toast 提示
 window.modHubShowToast = function(message, type = '', duration = 2500) {
     let toast = document.getElementById('modHubToast');

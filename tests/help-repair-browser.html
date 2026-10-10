@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ModHub 帮助与代码修复界面验收</title>
+<link rel="stylesheet" href="/source/stylesheet/modhub.css">
+<link rel="stylesheet" href="/source/stylesheet/modhub-market.css">
+<link rel="stylesheet" href="/source/stylesheet/modhub-overrides.css">
+<style>
+:root{color-scheme:dark;--000:#000;--100:#eee;--200:#ccc;--400:#aaa;--500:#777;--600:#666;--700:#444;--750:#444;--800:#333;--850:#222;--900:#111;--gold:#ffd700;--red:#e44}
+body{margin:0;background:#111;color:#ddd;font:18px/1.6 sans-serif}.gold{color:#ffd700}.grey{color:#aaa}.red{color:#e44}.green{color:#8b8}
+button,input,select,textarea{font:inherit;background:#333;color:#eee;border:1px solid #666;box-sizing:border-box}button{padding:6px 12px;cursor:pointer}
+#modHubAcceptanceHeader{padding:8px 14px;font-size:14px}#modHubAcceptanceHeader p{margin:0}#customOverlay{border:1px solid #666;margin:0 4px;height:calc(100dvh - 100px);display:flex;flex-direction:column;background:#222}#customOverlayTitle{border-bottom:1px solid #666;padding:6px 14px;flex-shrink:0}#customOverlayContent{overflow:auto;flex:1;min-height:0;padding:0 12px}#modHubAcceptanceCounters{white-space:pre-wrap}
+</style>
+</head>
+<body>
+<header id="modHubAcceptanceHeader"><p>本机固定回复界面验收：使用真实 CSS 与帮助模块，材料与源码均为虚构。</p><p id="modHubAcceptanceCounters" role="status"></p></header>
+<div id="customOverlay"><div id="customOverlayTitle">模组管理　模组市场　模组说明　加载日志　帮助中心</div><div id="customOverlayContent"><div id="modHubHelpContainer"></div></div></div>
+<script>
+(() => {
+    'use strict';
+    const calls = { requests: 0, triages: 0, reads: 0, corrections: 0, writes: 0, blockedNetwork: 0, roundChecks: 0 };
+    const scenario = new URLSearchParams(location.search).get('case') || 'success';
+    const names = ['ModHub界面验收参考包', 'ModHub界面验收证据指向的很长技术名' + 'VeryLongTechnicalNameWithoutSpaces'.repeat(3)];
+    const paths = ['javascript/modhub-acceptance.js'];
+    const sources = names.map((name, index) => ({ name, path: paths[0], content: Array.from({ length: 16 }, (_, line) => 'window.modHubAcceptance' + index + '_' + line + ' = ' + line + ';').join('\n') }));
+    let maxRounds = 5;
+    let lastPrepared;
+    const assert = (condition, message) => { if (!condition) throw new Error('固定验收边界：' + message); };
+    const storage = new Map([['modhub_ai_connection', JSON.stringify({ endpoint: 'https://example.invalid/v1', model: '本机固定回复', ...(scenario === 'round-settings' ? { maxRounds: 0 } : {}) })]]);
+    Object.defineProperty(window, 'localStorage', { value: { getItem: key => storage.get(key) || null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) } });
+    const count = () => { document.getElementById('modHubAcceptanceCounters').textContent = '场景 ' + scenario + '；固定分析 ' + calls.requests + '；证据分诊 ' + calls.triages + '；AI指定读取 ' + calls.reads + '；格式纠正 ' + calls.corrections + '；包体写入 ' + calls.writes + '；阻止网络 ' + calls.blockedNetwork + '；轮次检查 ' + calls.roundChecks; };
+    window.fetch = () => { calls.blockedNetwork++; count(); throw new Error('界面验收禁止网络请求'); };
+    window.XMLHttpRequest = class { constructor() { calls.blockedNetwork++; count(); throw new Error('界面验收禁止网络请求'); } };
+    window.WebSocket = class { constructor() { calls.blockedNetwork++; count(); throw new Error('界面验收禁止网络请求'); } };
+    window.modHubEscapeHtml = value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]);
+    window.modHubGetRawModLoaderLogs = () => [];
+    window.modHubAnalyzeLogs = () => ({ lines: [], errorMods: [], matchedIssues: [], errorCount: 0, warnCount: 0 });
+    window.modHubShowToast = () => {};
+    const material = (name, description, withFiles = false, repairIntent = '', round = 1, sourceEvidence = []) => {
+        const sourceCatalog = sources.map(source => ({ name: source.name, version: '1.0.0', files: [{ path: source.path, size: source.content.length }] }));
+        const source = sources.find(source => source.name === name);
+        const body = { description, target: name ? { name, version: '1.0.0' } : null, files: withFiles ? [{ path: source.path, content: source.content }] : [], sourceCatalog, sourceEvidence,
+            diagnosisContext: { round, maxRounds, history: [{ round: 1, summary: '本机固定分析，证据指向第二个模组。' }] } };
+        if (repairIntent) body.repairIntent = repairIntent;
+        return { name, description, bootJson: name ? { name, version: '1.0.0' } : null, files: body.files, fileNames: source ? sourceCatalog.find(item => item.name === name).files : [], sourceCatalog, sourceUnavailable: [], material: JSON.stringify(body, null, 2) };
+    };
+    const evidence = sources.map(source => ({ ...source, offset: 0, start: 0, end: source.content.length, incomplete: false, writable: false }));
+    const advice = extra => ({ name: '', summary: '本机固定回复：尚未找到可应用的修改。', evidence: '依据固定虚构源码核对问题，未运行云模型。', verification: '此流程仅用于界面验收。', changes: [], diff: '', canContinue: false, canTriage: false, ...extra });
+    window.modHubAiRepair = {
+        maxRounds: 5,
+        normalizeMaxRounds: (value = 5) => {
+            assert(Number.isSafeInteger(value) && value >= 0, '内部分析预算须为非负整数');
+            return value;
+        },
+        validateConnection: connection => { if (!connection.endpoint || !connection.model) throw new Error('请填写固定连接信息'); },
+        listTargets: async () => names.map(name => ({ name, enabled: true, bootJson: { version: '1.0.0' } })),
+        prepareLogs: async (description, options = {}) => { maxRounds = options.maxRounds ?? 5; return material('', description, false, '', 1, scenario === 'limit' ? [] : evidence); },
+        prepare: async (name, description, options) => { maxRounds = options.maxRounds ?? 5; return material(name, description, options.paths.length > 0); },
+        recommendFiles: () => ({ paths: paths, reason: '本机固定文件。' }),
+        analyze: async (prepared, connection) => {
+            lastPrepared = prepared;
+            calls.requests++; count(); connection.onProgress?.('request');
+            assert(maxRounds === 0 || calls.requests <= maxRounds, '不能超过玩家确认的分析轮次');
+            if (scenario === 'cancel') return new Promise((resolve, reject) => {
+                if (connection.signal.aborted) reject(new DOMException('已取消本机固定回复', 'AbortError'));
+                else connection.signal.addEventListener('abort', () => reject(new DOMException('已取消本机固定回复', 'AbortError')), { once: true });
+            });
+            if (scenario === 'unknown') return advice({ summary: '已核对已提供的源码，但没有足够证据确定修改位置。', continuationReason: '已核对当前提供的声明文件，尚未找到可应用的修改。现有材料保留，可查看具体依据或检查已有配置。' });
+            if (scenario === 'limit') return advice({ canContinue: true, summary: '本机固定回复：已核对第 ' + calls.requests + ' 份证据，仍无法确认原因。' });
+            const body = JSON.parse(prepared.material);
+            if (prepared.files.length) {
+                assert(prepared.name === names[1], '修复对象必须由固定 AI 读取请求明确指定第二个模组');
+                if (['format-correction', 'repeat-format'].includes(scenario)) {
+                    if (!body.diagnosisContext.responseCorrection) return advice({ name: names[1], summary: '已读取相关源码，诊断仍保留。回复结构不完整，将使用现有材料自动校正一次。', canContinue: true, responseCorrection: true,
+                        validationFeedback: { kind: 'response-format', reason: '固定验收回复缺少可校验的修复结构。' } });
+                    if (scenario === 'repeat-format') return advice({ name: names[1], summary: '已读取相关源码，此前诊断仍保留。', validationFeedback: { kind: 'response-format', reason: '固定验收回复仍缺少可校验的修复结构。' }, continuationReason: '回复已校正一次，仍未通过结构校验；已停止重复请求，当前材料和具体原因保留。' });
+                }
+                return advice({ name: names[1], summary: '依据两个模组的源码，已定位第二个模组中的错误初始化。请审阅下方最小修改；尚未保存文件。',
+                    changes: [{ path: paths[0], before: 'window.modHubAcceptance1_0 = 0;', after: 'window.modHubAcceptance1_0 = 1;', reason: '修正固定验收初始化。' }],
+                    diff: '文件：' + paths[0] + '\n- window.modHubAcceptance1_0 = 0;\n+ window.modHubAcceptance1_0 = 1;' });
+            }
+            if (body.repairIntent === 'select-code-repair') return advice({ readRequest: { name: names[1], paths, reason: '两个模组的完整只读证据表明，初始化错误位于第二个模组。' } });
+            return advice({ canTriage: true });
+        },
+        prepareTriage: async () => { calls.triages++; count(); return material('', lastPrepared.description, false, 'select-code-repair', 2, evidence); },
+        prepareRequestedSources: async plan => {
+            assert(plan.readRequest.name === names[1] && plan.readRequest.paths.length === 1 && plan.readRequest.paths[0] === paths[0], '只接受固定 AI 的明确读取请求');
+            calls.reads++; count(); return material(plan.readRequest.name, lastPrepared.description, true, '', 3, evidence);
+        },
+        prepareInvestigation: async plan => {
+            if (plan.responseCorrection && plan.validationFeedback?.kind === 'response-format') {
+                const body = JSON.parse(lastPrepared.material);
+                calls.corrections++; count();
+                assert(calls.corrections === 1, '格式纠正不能重复请求');
+                return { ...lastPrepared, material: JSON.stringify({ ...body, diagnosisContext: { ...body.diagnosisContext,
+                    round: body.diagnosisContext.round + 1, responseCorrection: true, validationFeedback: plan.validationFeedback } }) };
+            }
+            const lines = sources[1].content.split('\n');
+            const fragments = lines.slice(0, calls.requests).map((content, index) => ({ name: names[1], path: paths[0], content,
+                offset: lines.slice(0, index).join('\n').length + (index ? 1 : 0), incomplete: true, writable: false }));
+            return material('', lastPrepared.description, false, '', calls.requests + 1, fragments);
+        },
+        apply: async () => { calls.writes++; count(); throw new Error('界面验收禁止写包'); }
+    };
+    window.modHubAcceptanceCheckRounds = () => {
+        const el = id => document.getElementById('modHubAi' + id);
+        assert(el('MaxRounds').min === '1' && !el('MaxRounds').hasAttribute('max'), '有限轮次仅填写正整数，不设固定最高值');
+        assert(el('UnlimitedRounds').type === 'checkbox', '不限轮次使用独立选项');
+        assert(!el('SettingsPanel').textContent.includes('0 表示不限轮次'), '界面不要求玩家输入零作为无限');
+        if (scenario === 'round-settings') {
+            assert(el('UnlimitedRounds').checked && el('MaxRounds').value === '5' && el('MaxRounds').disabled, '旧零预算自动回填不限轮次，有限值恢复五轮');
+            assert(Number(getComputedStyle(el('MaxRounds')).opacity) < 1, '不限轮次的有限输入显示灰阶禁用状态');
+            el('Settings').click(); el('UnlimitedRounds').click();
+            assert(!el('MaxRounds').disabled && Number(getComputedStyle(el('MaxRounds')).opacity) === 1, '取消不限轮次恢复可编辑状态与正常透明度');
+            const setRounds = value => { el('MaxRounds').value = String(value); el('MaxRounds').dispatchEvent(new Event('input', { bubbles: true })); };
+            setRounds(9); assert(el('RoundsNotice').hidden, '九轮不显示 Token 提示');
+            setRounds(10); assert(!el('RoundsNotice').hidden, '十轮显示 Token 提示');
+            el('UnlimitedRounds').click();
+            assert(el('MaxRounds').disabled && !el('RoundsNotice').hidden, '不限轮次禁用有限输入并显示 Token 提示');
+            assert(Number(getComputedStyle(el('MaxRounds')).opacity) < 1, '再次勾选不限轮次恢复灰阶禁用效果');
+            el('SettingsSave').click();
+            const saved = JSON.parse(storage.get('modhub_ai_connection'));
+            assert(saved.maxRounds === 0 && saved.finiteRounds === 10, '不限轮次保存内部预算及玩家有限值');
+            el('Settings').click(); el('UnlimitedRounds').click();
+            assert(!el('MaxRounds').disabled && el('MaxRounds').value === '10', '取消不限轮次恢复玩家有限值');
+            assert(Number(getComputedStyle(el('MaxRounds')).opacity) === 1, '恢复玩家有限值时解除禁用视觉状态');
+            setRounds(9); assert(el('RoundsNotice').hidden, '降低至九轮后隐藏 Token 提示');
+            el('UnlimitedRounds').click();
+            assert(calls.requests === 0 && calls.blockedNetwork === 0 && calls.writes === 0, '轮次设置自检不请求 AI、联网或写包');
+        } else {
+            assert(!el('UnlimitedRounds').checked && el('MaxRounds').value === '5' && !el('MaxRounds').disabled, '新配置默认五轮且不勾选不限轮次');
+            assert(el('RoundsNotice').hidden, '默认五轮不显示较多轮次的 Token 提示');
+            assert(Number(getComputedStyle(el('MaxRounds')).opacity) === 1, '默认有限轮次保持正常视觉状态');
+        }
+        calls.roundChecks++; count();
+    };
+    count();
+})();
+</script>
+<script src="/source/javascript/modhub-dialog.js"></script>
+<script src="/source/javascript/modhub-help.js"></script>
+<script>window.modHubHelp.init(); window.modHubAcceptanceCheckRounds();</script>
+</body>
+</html>

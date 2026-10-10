@@ -338,6 +338,8 @@ window.modHubReadLocalReadme = async function(modName) {
 window.initModReadMe = async function() {
     const container = document.getElementById('modHubReadmeContainer');
     if (!container) return;
+    const requestId = ++modHubReadmeRequestId;
+    container.innerHTML = window.modHubLoadingHtml('正在读取模组说明列表，请稍候。');
 
     const gui = window.modHubGetGui();
     if (!gui) {
@@ -352,6 +354,7 @@ window.initModReadMe = async function() {
             sideMods = await gui.listSideLoadModNameOnly();
         }
     } catch (_) {}
+    if (requestId !== modHubReadmeRequestId || document.getElementById('modHubReadmeContainer') !== container) return;
     const allMods = window.modHubUniqueModNames([...loadedMods, ...sideMods]);
     window._modHubReadmeMods = allMods;
     if (!window._modHubSelectedMod || !allMods.includes(window._modHubSelectedMod)) {
@@ -659,7 +662,7 @@ window.modHubLoadReadme = async function(modName) {
 
     const requestId = ++modHubReadmeRequestId;
     const isCurrent = () => requestId === modHubReadmeRequestId && document.getElementById('modHubReadmeBody') === bodyEl;
-    bodyEl.innerHTML = '<div class="mod-empty grey">正在读取文档...</div>';
+    bodyEl.innerHTML = window.modHubLoadingHtml('正在读取文档...');
 
     try {
         let readme = null;

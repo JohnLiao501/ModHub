@@ -2,6 +2,6 @@
 				<</button>>
 			</div>
 			<br><br>
-			<<button Mod管理器>>
+			<span class="modhub-sidebar-entry"><<button "ModHub">>
 				<<overlayReplace "modloader">>
-			<</button>>
+			<</button>></span>

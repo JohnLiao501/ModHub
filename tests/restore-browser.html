@@ -17,10 +17,11 @@
     if (!config) return;
     const game = config.mode === 'game';
     const recordKey = `${config.prefix}_expected`;
+    const aiRecordKey = `${config.prefix}_ai_expected`;
     const saveKey = `${config.prefix}_save_sentinel`;
     const keys = config.keys;
     const stateKeys = ['modhub_sideload_mod_order', 'modhub_auto_enable_sideload_beauty'];
-    let output, panel, busy = false;
+    let output, panel, helpPreview, ageChecks = [], busy = false;
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
     const assert = (condition, message) => { if (!condition) throw new Error(message); };
     const settings = () => Object.fromEntries(stateKeys.map(key => [key, localStorage.getItem(key)]));
@@ -159,7 +160,7 @@
         const data = await packageBytes(kind);
         const result = await window.modHubHandleAddMod(fileInput([new File([data], `modhub-acceptance-${kind}.zip`, { type: 'application/zip' })]), { askRestart: promptReload, keepCurrentTab: true });
         assert(result !== false, window._modHubLastInstallError || '真实安装接口返回失败');
-        const actual = await inspect(); const name = kind === 'throw' ? 'ModHub验收抛错' : kind === 'hang' ? 'ModHub验收挂起' : 'ModHub验收图包';
+        const actual = await inspect(); const name = kind === 'throw' ? 'ModHub验收抛错' : kind === 'hang' ? 'ModHub验收挂起' : kind === 'ai-broken' ? 'ModHub验收AI故障' : kind === 'ai-unrelated' ? 'ModHub验收AI无关包' : 'ModHub验收图包';
         assert(actual.enabled.includes(name) && actual.packages.some(item => item.name === name && item.hash === config.hashes[kind]), '真实安装后列表或包体回读不一致');
     }
     async function baseline() {
@@ -372,6 +373,176 @@
             finally { busy = false; button.disabled = false; }
         }); panel.querySelector('.modhub-acceptance-actions').appendChild(button);
     }
+    function previewHelp() {
+        assert(typeof window.modHubOpenManager === 'function' && window.modHubHelp, '帮助运行模块尚未加载');
+        const dialogBody = document.getElementById('ui-dialog-body');
+        const target = window.SugarCube?.Dialog?.isOpen?.() && dialogBody ? dialogBody : document.body;
+        ageChecks = dialogBody ? Array.from(dialogBody.querySelectorAll('input[type="checkbox"]'))
+            .filter(input => !input.closest('#modHubAcceptancePanel,#customOverlayContainer'))
+            .map(input => ({ input, checked: input.checked })) : [];
+        helpPreview = document.getElementById('customOverlayContainer');
+        if (!helpPreview) {
+            // 与真实游戏相同的原生容器结构；不改年龄声明或游戏段落。
+            helpPreview = document.createElement('div');
+            helpPreview.id = 'customOverlayContainer';
+            helpPreview.className = 'customOverlayContainer no-numberify hidden';
+            helpPreview.onclick = () => window.closeOverlay?.();
+            const overlay = document.createElement('div');
+            overlay.id = 'customOverlay'; overlay.className = 'customOverlay hidden';
+            overlay.onclick = event => event.stopPropagation();
+            for (const id of ['customOverlayTitle', 'customOverlayContent']) {
+                const child = document.createElement('div'); child.id = id; overlay.appendChild(child);
+            }
+            helpPreview.appendChild(overlay);
+        }
+        target.appendChild(helpPreview);
+        // 年龄 Dialog 没有游戏侧栏，仅对验收外壳取消原生侧栏留白。
+        Object.assign(helpPreview.style, { position: 'fixed', inset: '0', width: '100%', height: '100dvh', zIndex: '4990' });
+        document.getElementById('customOverlay').style.left = '10px';
+        helpPreview.removeAttribute('aria-hidden');
+        document.getElementById('modHubAcceptancePanel').open = false;
+        assert(window.modHubOpenManager('帮助中心'), '未能调用帮助中心原生入口');
+        log('帮助中心已受控展示；年龄声明仍保留，未勾选、未关闭，也未进入游戏。请调整实际窗口宽度后使用【核验帮助布局】。');
+    }
+    function previewHelpSample() {
+        const results = document.getElementById('modHubHelpResults');
+        const report = document.getElementById('modHubHelpReport');
+        assert(results && report, '请先打开【帮助中心界面验收】');
+        const reportDetails = document.getElementById('modHubHelpReportDetails');
+        if (reportDetails) reportDetails.open = true;
+        document.getElementById('modHubAcceptanceHelpSample')?.remove();
+        const sample = document.createElement('article'); sample.id = 'modHubAcceptanceHelpSample'; sample.className = 'modhub-help-result';
+        const title = document.createElement('strong'); title.className = 'gold'; title.textContent = '界面验收样例：长名称与长报告';
+        const description = document.createElement('p');
+        const name = 'ModHubAcceptanceVeryLongTechnicalNameWithoutSpaces'.repeat(4);
+        description.textContent = name;
+        const actions = document.createElement('div'); actions.className = 'modhub-help-actions';
+        const button = document.createElement('button'); button.type = 'button'; button.disabled = true;
+        button.className = 'macro-button modhub-btn-primary'; button.textContent = '验收样例按钮：' + name;
+        actions.appendChild(button); sample.append(title, description, actions); results.appendChild(sample);
+        report.value = '仅用于界面验收，不是实际检查结果。\n' + Array.from({ length: 40 }, (_, index) => `${index + 1}. ${name}`).join('\n');
+        document.getElementById('modHubHelpCopy').disabled = true;
+        document.getElementById('modHubAcceptancePanel').open = false;
+        sample.scrollIntoView({ block: 'start' });
+        log('已添加明确标注的临时 DOM 样例；未改变真实包、检查接口或仓库配置。重新打开帮助页即可清除。');
+    }
+    async function helpRepairSample() {
+        assert(game && /^modhub_acceptance_[a-z0-9_]+$/.test(config.prefix), '只允许在当前隔离游戏命名空间构造修复样例');
+        schema();
+        const controller = window.modHubGetController?.();
+        assert(typeof controller?.addModIndexDB === 'function' && typeof controller.checkModZipFileIndexDB === 'function'
+            && typeof controller.overwriteModIndexDBModList === 'function' && typeof controller.overwriteModIndexDBHiddenModList === 'function', '真实加载器导入与启禁保存接口尚未就绪');
+        const expected = [];
+        for (const [kind, name] of [['help-provider', 'ModHub验收前置'], ['help-client', 'ModHub验收依赖']]) {
+            const data = await packageBytes(kind);
+            const boot = await controller.checkModZipFileIndexDB(new Uint8Array(data));
+            assert(boot?.name === name && !boot.scriptFileList?.length && !boot.imgFileList?.length, '隔离修复包声明不符合预期');
+            await controller.addModIndexDB(name, new Uint8Array(data));
+            expected.push({ name, hash: config.hashes[kind] });
+        }
+        const sampleNames = expected.map(item => item.name);
+        const enabled = (await controller.listModIndexDB()).filter(name => !sampleNames.includes(name)).concat('ModHub验收依赖');
+        const disabled = (await controller.loadHiddenModList()).filter(name => !sampleNames.includes(name)).concat('ModHub验收前置');
+        assert(await controller.overwriteModIndexDBModList(enabled) !== false, '隔离修复样例启用列表保存失败');
+        assert(await controller.overwriteModIndexDBHiddenModList(disabled) !== false, '隔离修复样例禁用列表保存失败');
+        const actual = await inspect();
+        assert(same(actual.enabled, enabled) && same(actual.disabled, disabled)
+            && expected.every(item => actual.packages.some(pack => pack.name === item.name && pack.hash === item.hash)), '隔离修复样例回读不一致');
+        await window.modHubLoadModManageState(true);
+        window.modHubRenderModManageUI?.();
+        previewHelp();
+        log('隔离修复样例已就绪：ModHub验收依赖已启用；唯一前置 ModHub验收前置已禁用，提供技术别名 ModHubAcceptanceHelpDependency，版本 1.0.0 满足 ^1.0.0。请在帮助中心主动检查、预览并确认修复；未自动触发修复或重载。');
+    }
+    async function installAiFault() {
+        checkSafeMode();
+        schema();
+        await install('ai-broken');
+        const actual = await inspect(), item = actual.packages.find(item => item.name === 'ModHub验收AI故障');
+        assert(item?.hash === config.hashes['ai-broken'], 'AI 故障包安装后哈希不一致');
+        sessionStorage.setItem(aiRecordKey, JSON.stringify({ hash: item.hash, enabled: actual.enabled, disabled: actual.disabled, pointIds: actual.points.map(point => point.id) }));
+        log('已通过真实安装接口保存 AI 故障包。重载后由普通脚本定义故障探针；受控接口只提供固定建议，不代表云模型修复质量。');
+        location.reload();
+    }
+    async function installAiInvestigation() {
+        checkSafeMode();
+        await install('ai-unrelated');
+        await installAiFault();
+    }
+    async function probeAiFault() {
+        checkSafeMode();
+        assert(typeof window.modHubAcceptanceAiProbe === 'function', 'AI 故障探针尚未加载，请先安装故障包并重载');
+        const actual = await inspect(), item = actual.packages.find(item => item.name === 'ModHub验收AI故障');
+        assert(item, 'AI 故障包不在实际仓库中');
+        let result, error;
+        try { result = window.modHubAcceptanceAiProbe(); } catch (cause) { error = cause; }
+        if (item.hash === config.hashes['ai-broken']) {
+            assert(error instanceof TypeError, 'FAIL：仓库为原故障包，但运行探针未出现预期 TypeError；请核对重载状态');
+            log('PASS：原故障真实复现，调用探针出现 TypeError：' + error.message);
+        } else {
+            assert(!error && result === '已修复', 'FAIL：仓库包体已变化，但运行探针尚未返回“已修复”：' + (error?.message || String(result)) + '；请核对重载状态');
+            log('PASS：修改后的实际包体已重载，探针返回“已修复”。');
+        }
+    }
+    function fillAiConnection() {
+        const values = { Endpoint: location.origin + '/ai/v1', Model: 'modhub-acceptance', Key: '' };
+        for (const [id, value] of Object.entries(values)) {
+            const input = document.getElementById('modHubAi' + id);
+            assert(input, '请先打开帮助中心的 AI 修复界面');
+            input.value = value;
+            input.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        log('仅填入本机受控连接：' + values.Endpoint + '，模型 modhub-acceptance，密钥留空。尚未生成材料或发送请求，请自行查看材料并确认发送。');
+    }
+    async function inspectAiState() {
+        const actual = await inspect(), item = actual.packages.find(item => item.name === 'ModHub验收AI故障');
+        const before = JSON.parse(sessionStorage.getItem(aiRecordKey) || 'null');
+        const response = await fetch('/api/ai-stats');
+        assert(response.ok, '受控 AI 请求统计读取失败');
+        const stats = await response.json();
+        log(JSON.stringify({
+            提供方: '本机受控固定响应，未调用云模型',
+            原故障哈希: config.hashes['ai-broken'], 当前包体: item || null,
+            原包哈希一致: item?.hash === config.hashes['ai-broken'],
+            无关包保持原样: actual.packages.find(item => item.name === 'ModHub验收AI无关包')?.hash === config.hashes['ai-unrelated'],
+            启用列表: actual.enabled, 禁用列表: actual.disabled,
+            启禁配置与安装后基线一致: !!before && same(actual.enabled, before.enabled) && same(actual.disabled, before.disabled),
+            还原点: actual.points.map(point => ({ id: point.id, label: point.label, kind: point.kind, updated: point.summary?.updated || [] })),
+            新还原点: before ? actual.points.filter(point => !before.pointIds.includes(point.id)).map(point => ({ id: point.id, label: point.label, kind: point.kind })) : [],
+            受控请求统计: stats, 运行探针存在: typeof window.modHubAcceptanceAiProbe === 'function'
+        }, null, 2));
+    }
+    function inspectHelpLayout() {
+        const help = document.getElementById('modHubHelpContainer');
+        assert(help?.isConnected && help.getBoundingClientRect().width > 0, '请先打开【帮助中心界面验收】');
+        const rect = element => {
+            const box = element.getBoundingClientRect();
+            return Object.fromEntries(['left', 'right', 'top', 'bottom', 'width', 'height'].map(key => [key, Math.round(box[key] * 10) / 10]));
+        };
+        const content = document.getElementById('customOverlayContent');
+        const tabs = document.getElementById('overlayTabs');
+        const report = document.getElementById('modHubHelpReport');
+        const buttons = Array.from(help.querySelectorAll('button')).filter(button => button.getBoundingClientRect().height > 0)
+            .map(button => ({ text: button.textContent.trim(), ...rect(button), clipped: button.scrollWidth > button.clientWidth + 1 }));
+        const safeBottom = parseFloat(getComputedStyle(help).paddingBottom);
+        const result = {
+            实际视口: { width: innerWidth, height: innerHeight, 建议分别核验: [360, 768, 1365] },
+            展示边界: '实际游戏 HTML、原生容器与 ModHub 样式；验收外壳取消侧栏偏移，年龄声明未处理；不代表正常开局或 APK 实机',
+            原年龄勾选状态保持: ageChecks.every(({ input, checked }) => input.isConnected && input.checked === checked),
+            帮助区域: { ...rect(help), safeBottom, horizontalOverflow: help.scrollWidth > help.clientWidth + 1 },
+            内容滚动区: { ...rect(content), scrollHeight: content.scrollHeight, clientHeight: content.clientHeight, overflowY: getComputedStyle(content).overflowY },
+            顶部页签: { ...rect(tabs), clientWidth: tabs.clientWidth, scrollWidth: tabs.scrollWidth, overflowX: getComputedStyle(tabs).overflowX,
+                帮助页签存在: Array.from(tabs.querySelectorAll('button')).some(button => button.textContent.trim() === '帮助中心' && getComputedStyle(button).display !== 'none') },
+            报告预览: { ...rect(report), readonly: report.readOnly, minHeight: getComputedStyle(report).minHeight, maxHeight: getComputedStyle(report).maxHeight, overflowY: getComputedStyle(report).overflowY },
+            可见帮助按钮: buttons,
+            基础几何通过: safeBottom >= 60 && help.scrollWidth <= help.clientWidth + 1
+                && buttons.every(button => button.height >= 32 && !button.clipped)
+                && report.getBoundingClientRect().width <= help.getBoundingClientRect().width + 1
+        };
+        log(JSON.stringify(result, null, 2));
+        log(`布局读数：视口 ${innerWidth}×${innerHeight}；底部 ${safeBottom}px；按钮最小高度 ${Math.min(...buttons.map(button => button.height))}px；内容横向溢出 ${result.帮助区域.horizontalOverflow}；基础几何通过 ${result.基础几何通过}`);
+        log(`报告 ${result.报告预览.width}×${result.报告预览.height}px，滚动 ${result.报告预览.overflowY}；页签宽 ${tabs.clientWidth}/${tabs.scrollWidth}px，滚动 ${result.顶部页签.overflowX}；年龄勾选保持 ${result.原年龄勾选状态保持}`);
+        console.info('[ModHub] 帮助中心受控布局验收', result);
+    }
     function mount() {
         const style = document.createElement('style');
         style.textContent = '#modHubAcceptancePanel{position:fixed;left:8px;right:8px;bottom:8px;z-index:5000;max-width:780px;margin:auto;background:#191919;color:#ddd;border:1px solid #666;font:14px/1.5 sans-serif;padding:8px;box-sizing:border-box}#modHubAcceptancePanel summary{color:#d6b365;cursor:pointer;min-height:28px}#modHubAcceptancePanel .modhub-acceptance-body{max-height:46dvh;overflow:auto;padding-bottom:60px}#modHubAcceptancePanel button{min-height:36px;flex:1 1 140px;min-width:0;padding:6px;background:#292929;color:#eee;border:1px solid #666;font:inherit}#modHubAcceptancePanel pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:220px;overflow:auto}#modHubAcceptancePanel .modhub-acceptance-actions{display:flex;gap:6px;flex-wrap:wrap}';
@@ -388,6 +559,7 @@
                 const dialogBody = document.getElementById('ui-dialog-body');
                 const target = window.SugarCube?.Dialog?.isOpen?.() && dialogBody ? dialogBody : document.body;
                 if (host.parentNode !== target) target.appendChild(host);
+                if (helpPreview && helpPreview.parentNode !== target) target.appendChild(helpPreview);
                 // 首屏年龄声明保持原样，验收的 ModHub 模态框挂在其内部以便操作。
                 if (target === dialogBody) document.querySelectorAll('.modhub-modal-backdrop,.modhub-restore-panel-overlay').forEach(modal => {
                     if (modal.parentNode === document.body) target.appendChild(modal);
@@ -417,6 +589,15 @@
             addButton('安装挂起模组并重载', () => fault('hang'));
             addButton('核验美化即时生效', beauty);
             addButton('打开 ModHub', () => { assert(window.modHubOpenManager, '运行模块尚未加载'); window.modHubOpenManager('模组管理'); });
+            addButton('帮助中心界面验收', previewHelp);
+            addButton('安装隔离前置修复样例', helpRepairSample);
+            addButton('安装 AI 故障模组并重载', installAiFault);
+            addButton('安装 AI 跨包定位样例并重载', installAiInvestigation);
+            addButton('调用 AI 故障探针', probeAiFault);
+            addButton('填入本机 AI 连接', fillAiConnection);
+            addButton('读取 AI 包体与还原点', inspectAiState);
+            addButton('长名称与报告样例', previewHelpSample);
+            addButton('核验帮助布局', inspectHelpLayout);
         } else {
             addButton('建立原生事务验收场景', harnessCase);
             addButton('建立日期与长列表验收场景', harnessVisualCase);
@@ -430,7 +611,7 @@
             assert(await window.modHubConfirm({ title: '重置隔离验收', message: '只清理此独立端口内的 ModHub 验收库与测试浏览器存储。', confirmText: '清理测试数据', cancelText: '取消', confirmType: 'danger' }), '已取消重置');
             const dbs = await indexedDB.databases();
             for (const db of dbs) if (db.name.startsWith(config.prefix)) await new Promise((resolve, reject) => { const request = indexedDB.deleteDatabase(db.name); request.onsuccess = resolve; request.onerror = () => reject(request.error); request.onblocked = () => reject(new Error('测试数据库仍有连接，请关闭其他测试页后重试')); });
-            for (const key of [recordKey, saveKey, ...stateKeys]) { localStorage.removeItem(key); sessionStorage.removeItem(key); }
+            for (const key of [recordKey, aiRecordKey, saveKey, ...stateKeys]) { localStorage.removeItem(key); sessionStorage.removeItem(key); }
             location.reload();
         });
         if (game) log('本页加载本地实际游戏与当前源码包；首界面出现后安装基线，再安装故障测试。故障重载时使用正式加载页还原窗口。');

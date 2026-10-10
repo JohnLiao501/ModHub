@@ -7,7 +7,8 @@ async function main() {
   assert.deepEqual(await readFile(path.join(__dirname, 'dolmod-site', 'dist', 'dol-mod-extractor.js')), Buffer.from(source), '根目录与网站提取器副本必须逐字节相同');
   const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
   const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories,
-    modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName } = await import(moduleUrl);
+    modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName,
+    modHubNormalizeVariant, modHubNormalizeRequiredDependencies } = await import(moduleUrl);
   for (const name of ['Example.modpack', 'Example.MODPACK.CRYPT', 'Example.mod.zip', 'Example.mod']) {
     assert.equal(modHubIsModPackageName(name), true, `原生模组包后缀应识别：${name}`);
   }
@@ -66,7 +67,31 @@ async function main() {
   assert.deepEqual(lnnChs.bootNames, ['LNN 战斗对手状态显示·简中']);
   assert.deepEqual(lnnEn.bootNames, ['LNN Enemy Stats Display']);
   assert.ok([lnnChs, lnnEn].every(identity => !(identity.dependencies || []).some(item => item.id === 'modi18n')),
-    '作者说明中的中文汉化前提不能冒充包内依赖');
+    '作者说明中的中文汉化前提独立保存，不能冒充包内依赖');
+  assert.deepEqual(lnnChs.variant, { groupId: 'lnn-enemy-stats-display', groupName: 'LNN 战斗对手状态显示',
+    type: 'language', id: 'zh-CN', label: '简体中文' });
+  assert.deepEqual(lnnEn.variant, { ...lnnChs.variant, id: 'en', label: 'English' });
+  assert.deepEqual(lnnChs.requiredDependencies, [{ modName: 'ModI18N', version: '*' }]);
+  assert.deepEqual(lnnEn.requiredDependencies || [], [], '英文没有简中的汉化前置要求');
+  const lnnMerged = mergeModIdentities([lnnChs, lnnEn].map(identity => ({ name: identity.bootNames[0] })), catalog);
+  assert.deepEqual(lnnMerged.map(mod => mod.variant), [lnnChs.variant, lnnEn.variant], '身份合并必须透传独立语言声明');
+  assert.deepEqual(lnnMerged.map(mod => mod.requiredDependencies), [lnnChs.requiredDependencies, []]);
+  assert.deepEqual(lnnMerged.map(mod => mod.identityId), [lnnChs.id, lnnEn.id], '语言分组不能更换旧身份 ID');
+  assert.notEqual(lnnChs.verifiedReleaseAssets[0].sha256, lnnEn.verifiedReleaseAssets[0].sha256, '语言包仍有各自核验摘要');
+  const injected = mergeModIdentities([{ name: '未登记的模组', variant: lnnChs.variant,
+    requiredDependencies: lnnChs.requiredDependencies }], catalog)[0];
+  assert.equal(injected.variant, null, '未登记条目不能自行继承语言分组');
+  assert.deepEqual(injected.requiredDependencies, [], '未登记条目不能伪造维护者前置要求');
+  assert.deepEqual(modHubNormalizeVariant({ ...lnnChs.variant, extra: true, groupId: ' LNN-ENEMY-STATS-DISPLAY ' }), lnnChs.variant);
+  for (const value of [null, [], {}, { ...lnnChs.variant, type: 'model' }, { ...lnnChs.variant, id: '' },
+    { ...lnnChs.variant, groupId: '../bad' }, { ...lnnChs.variant, groupName: '' }, { ...lnnChs.variant, label: '坏\n标签' }]) {
+    assert.equal(modHubNormalizeVariant(value), null, '无效分组字段必须清空');
+  }
+  assert.deepEqual(modHubNormalizeRequiredDependencies([{ modName: ' ModI18N ', version: '*' },
+    { modName: 'modi18n', version: '*' }, { modName: 'ReplacePatcher', version: '^1.0.0' },
+    { modName: 'ModI18N', version: '>=1.0 && <2.0' }, { modName: '坏\n名称' }, { modName: 'Invalid', version: 1 }]),
+    [{ modName: 'ModI18N', version: '*' }, { modName: 'ReplacePatcher', version: '^1.0.0' },
+      { modName: 'ModI18N', version: '>=1.0 && <2.0' }]);
   assert.deepEqual(mergeModIdentities([
     { name: 'LNN 战斗对手状态显示' },
     { name: 'dol-enemy-stats-display-mod', githubUrl: 'https://github.com/DGCK81LNN/dol-enemy-stats-display-mod' },

@@ -18,26 +18,41 @@ module.exports = async function () {
             boot: { name: 'PreparedFixture', version: '1.0', dependenceInfo: [] } };
         const cards = new Map();
         const addCard = (name, idleText = '下载安装') => {
+            if (cards.has(name)) cards.get(name).card.isConnected = false;
             const card = createStubElement();
             card.dataset.modName = name;
+            card.isConnected = true;
             const progress = card.querySelector('.modhub-download-progress');
             progress.hidden = true;
-            const track = progress.querySelector('.modhub-download-track');
+            const classes = new Set();
+            progress.classList = { toggle: (name, active) => active ? classes.add(name) : classes.delete(name),
+                remove: (...names) => names.forEach(name => classes.delete(name)), contains: name => classes.has(name) };
+            const ring = progress.querySelector('.modhub-progress-ring'), ringClasses = new Set();
+            ring.hidden = true;
+            ring.classList = { toggle: (name, active) => active ? ringClasses.add(name) : ringClasses.delete(name),
+                contains: name => ringClasses.has(name) };
             const attributes = new Map();
-            track.setAttribute = (key, value) => attributes.set(key, value);
-            track.removeAttribute = key => attributes.delete(key);
-            track.getAttribute = key => attributes.get(key);
+            ring.setAttribute = (key, value) => attributes.set(key, value);
+            ring.removeAttribute = key => attributes.delete(key);
+            ring.getAttribute = key => attributes.get(key);
+            ring.setAttribute('role', 'progressbar');
             const button = card.querySelector('.btn-market-install, .btn-market-update');
             button.dataset.idleText = idleText;
-            const view = { card, progress, track, button, bar: progress.querySelector('.modhub-download-bar'),
+            const value = ring.querySelector('.modhub-progress-value'), valueAttributes = new Map();
+            value.setAttribute = (key, data) => valueAttributes.set(key, data);
+            value.getAttribute = key => valueAttributes.get(key);
+            const view = { card, progress, ring, button, value,
                 label: progress.querySelector('.modhub-download-label'), cancel: progress.querySelector('.modhub-download-cancel') };
             cards.set(name, view);
             return view;
         };
         const view = addCard(mod.name);
-        sb.document.querySelectorAll = selector => selector === '.modhub-market-card'
-            ? [...cards.values()].map(item => item.card) : [];
-        sb.fetch = async () => {
+        sb.document.querySelectorAll = selector => {
+            if (selector !== '.modhub-market-card') return [];
+            return [...cards.values()].map(item => item.card);
+        };
+        sb.fetch = async url => {
+            if (String(url).includes('release-index.json')) return { ok: true, json: async () => ({ schemaVersion: 1, mods: [mod] }) };
             state.downloads++;
             return { ok: true, headers: { get: () => null }, blob: async () => new Blob(['准备包体']) };
         };
@@ -49,8 +64,104 @@ module.exports = async function () {
             return true;
         };
         sb.modHubConfirm = async () => { state.confirms++; return false; };
-        return { sb, mod, releaseInfo, state, view, addCard, market: sb.modHubMarket };
+        const removeCard = name => { cards.get(name).card.isConnected = false; cards.delete(name); };
+        return { sb, mod, releaseInfo, state, view, addCard, removeCard, market: sb.modHubMarket };
     };
+    // 已知大小逐块更新真实圆环比例，未知大小不显示百分比，准备完成不继续等待动画。
+    for (const knownSize of [false, true]) {
+        const { sb, market, mod, releaseInfo, view } = fixture();
+        let signalRead, finishRead;
+        const nextRead = () => new Promise(resolve => { signalRead = resolve; });
+        const reader = { read: () => { signalRead(); return new Promise(resolve => { finishRead = resolve; }); }, cancel: async () => {} };
+        sb.fetch = async () => ({ ok: true, headers: { get: name => knownSize && name === 'Content-Length' ? '100' : null },
+            body: { getReader: () => reader } });
+        const firstRead = nextRead();
+        const pending = market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        await firstRead;
+        const ring = view.ring, offsets = [];
+        for (const percent of [25, 50, 75, 100]) {
+            const read = nextRead(); finishRead({ done: false, value: new Uint8Array(25) }); await read;
+            assert.equal(view.ring, ring, '流式更新复用圆环节点');
+            assert.equal(ring.hidden, false);
+            assert.equal(ring.classList.contains('is-determinate'), knownSize);
+            assert.equal(ring.getAttribute('aria-valuenow'), knownSize ? String(percent) : undefined);
+            if (knownSize) offsets.push(Number(view.value.getAttribute('stroke-dashoffset')));
+        }
+        if (knownSize) assert.ok(offsets.every((offset, index) => !index || offset < offsets[index - 1]), '实际比例增加时圆环进度相应增加');
+        finishRead({ done: true }); assert.ok(await pending);
+        assert.equal(ring.hidden, true);
+        assert.equal(ring.getAttribute('aria-valuenow'), undefined, '准备完成后不保留正在运行的比例');
+    }
+
+    // 卡片重绘或离页后，只更新仍在页面中的新节点，返回页面时恢复当前真实状态。
+    {
+        const { sb, market, mod, releaseInfo, view, addCard, removeCard } = fixture();
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ timestamp: Date.now(), data: [mod] }));
+        await market.loadMarketData();
+        let signalRead, finishRead;
+        const nextRead = () => new Promise(resolve => { signalRead = resolve; });
+        sb.fetch = async () => ({ ok: true, headers: { get: name => name === 'Content-Length' ? '100' : null },
+            body: { getReader: () => ({ read: () => { signalRead(); return new Promise(resolve => { finishRead = resolve; }); } }) } });
+        const firstRead = nextRead();
+        const pending = market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        await firstRead;
+        const chunk = async () => { const read = nextRead(); finishRead({ done: false, value: new Uint8Array(25) }); await read; };
+        await chunk();
+        const replacement = addCard(mod.name);
+        await chunk();
+        assert.equal(view.ring.getAttribute('aria-valuenow'), '25', '重绘后不再回写旧卡片');
+        assert.equal(replacement.ring.getAttribute('aria-valuenow'), '50');
+        removeCard(mod.name);
+        await chunk();
+        assert.equal(replacement.ring.getAttribute('aria-valuenow'), '50', '离页后不再回写已脱离节点');
+        const returned = addCard(mod.name), container = createStubElement();
+        sb.document.getElementById = id => id === 'modHubMarketCardsContainer' ? container : null;
+        market.renderMarketCards();
+        assert.equal(returned.ring.getAttribute('aria-valuenow'), '75', '返回页面时从运行状态恢复真实比例');
+        await chunk();
+        assert.equal(returned.ring.getAttribute('aria-valuenow'), '100');
+        finishRead({ done: true }); assert.ok(await pending);
+        assert.equal(returned.ring.hidden, true);
+    }
+
+    // 安装内部没有真实比例，下载完成后改为不定圆环，成功、失败或取消后清理。
+    for (const installed of [true, false]) {
+        const { sb, market, mod, releaseInfo, view } = fixture();
+        let finish, entered;
+        const started = new Promise(resolve => { entered = resolve; });
+        sb.modHubHandleAddMod = () => new Promise(resolve => { finish = resolve; entered(); });
+        const pending = market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, batchMode: true });
+        await started;
+        assert.equal(view.ring.hidden, false);
+        assert.equal(view.ring.classList.contains('is-determinate'), false);
+        assert.equal(view.ring.getAttribute('aria-valuenow'), undefined, '下载完成不能表示安装已完成');
+        assert.match(view.ring.getAttribute('aria-label'), /安装进度/);
+        finish(installed); assert.equal(await pending, installed);
+        assert.equal(view.ring.hidden, true, '成功和失败都停止收尾圆环');
+        assert.equal(view.progress.hidden, installed);
+    }
+    {
+        const { sb, market, mod, releaseInfo, view } = fixture(), container = createStubElement();
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ timestamp: Date.now(), data: [mod] }));
+        await market.loadMarketData();
+        sb.document.getElementById = id => id === 'modHubMarketCardsContainer' ? container : null;
+        container.querySelectorAll = selector => selector === '.modhub-download-cancel' ? [view.cancel] : [];
+        view.cancel.dataset.modIndex = '0'; market.renderMarketCards();
+        assert.match(container.innerHTML, /class="modhub-progress-ring/);
+        assert.doesNotMatch(container.innerHTML, /modhub-download-track|modhub-download-bar/);
+        let fail, entered;
+        const started = new Promise(resolve => { entered = resolve; });
+        sb.fetch = () => new Promise((resolve, reject) => { fail = reject; entered(); });
+        const pending = market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, prepareOnly: true, batchMode: true });
+        await started; view.cancel.onclick();
+        assert.equal(view.ring.hidden, false, '等待已取消下载收尾时保留圆环');
+        assert.equal(view.ring.getAttribute('aria-valuenow'), undefined);
+        fail(Object.assign(new Error('已取消下载'), { name: 'AbortError' }));
+        assert.equal(await pending, false);
+        assert.equal(view.ring.hidden, true);
+        assert.equal(view.progress.hidden, true);
+    }
+
     const optionalAudioFixture = () => {
         const base = fixture(), { sb, state } = base;
         const mod = { id: 'deadwood-reblooms', identityId: 'deadwood-reblooms', name: '枯木逢春',
@@ -474,14 +585,15 @@ module.exports = async function () {
         assert.ok(await market.downloadAndInstallMod(mod, 'ddlc', options));
         assert.equal(view.progress.hidden, false);
         assert.equal(view.button.disabled, true);
-        assert.equal(target.track.getAttribute('aria-valuenow'), '100');
+        assert.equal(target.ring.hidden, true, '等待安装确认时不继续播放进度动画');
+        assert.equal(target.ring.getAttribute('aria-valuenow'), undefined);
         assert.equal(sb.modHubClearMarketPreparationProgress(mod.name, targetName), true, '释放待确认包体必须清理主卡片和进度目标');
         for (const card of new Set([view, target])) {
             assert.equal(card.progress.hidden, true);
             assert.equal(card.button.disabled, false);
             assert.equal(card.button.textContent, card.button.dataset.idleText);
-            assert.equal(card.bar.style.width, '');
-            assert.equal(card.track.getAttribute('aria-valuenow'), undefined);
+            assert.equal(card.ring.hidden, true);
+            assert.equal(card.ring.getAttribute('aria-valuenow'), undefined);
             assert.equal(card.label.textContent, '等待下载');
             assert.equal(card.cancel.hidden, true);
         }

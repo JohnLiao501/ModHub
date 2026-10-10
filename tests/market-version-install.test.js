@@ -87,6 +87,8 @@ function fixture(definitions, installed = []) {
     const events = [], prompts = [], alerts = [], preparedCalls = [], importedComponents = [], progress = new Map();
     const mods = definitions.map(definition => ({ id: definition.id, identityId: definition.id, name: definition.id,
         bootNames: [definition.boot?.name || definition.id], dependencies: definition.directoryDependencies || [],
+        ...(definition.variant ? { variant: definition.variant } : {}),
+        ...(definition.requiredDependencies ? { requiredDependencies: definition.requiredDependencies } : {}),
         githubUrl: `https://github.com/ModHubTests/${definition.id}`, version: definition.version || definition.boot?.version || '1.0.0' }));
     const byId = new Map(definitions.map(definition => [definition.id, definition]));
     const compare = (left, right) => {
@@ -229,6 +231,235 @@ function useNativeDependencyRanges(f) {
 }
 
 module.exports = async function () {
+    // 批量读取和核验使用准备阶段，只有实际串行处理开始才提供完成项比例。
+    {
+        const f = fixture([{ id: 'ProgressPhaseA' }, { id: 'ProgressPhaseB' }]), snapshots = [];
+        f.sb.modHubMarket.renderBatchInstallToolbar = () => snapshots.push({ ...f.sb.modHubMarket.batchInstallState });
+        const outcome = await f.sb.modHubMarketInstaller.installBatch(f.mods);
+        assert.equal([...outcome.results.values()].filter(item => item.status === 'success').length, 2);
+        assert.equal(snapshots[0].progressPhase, 'preparing');
+        assert.equal(snapshots[0].total, 2, '读取版本阶段已有总数仍属于准备状态');
+        const installing = snapshots.filter(state => state.running && state.progressPhase === 'installing');
+        assert.deepEqual(installing.map(state => [state.completed, state.total]), [[0, 2], [1, 2]], '完成数仅按已处理的安装项递增');
+        assert.equal(snapshots.at(-1).running, false);
+        assert.equal(snapshots.at(-1).progressPhase, '', '终止后清理阶段标志');
+    }
+    const languageFixture = (installed = [], extra = {}) => {
+        const variant = (id, label) => ({ groupId: 'fixture-languages', groupName: '语言变体测试', type: 'language', id, label });
+        const f = fixture([
+            { id: 'LanguageCHS', variant: variant('zh-CN', '简体中文'), boot: { name: 'EnemyDisplayCHS', version: '1.1.0', dependenceInfo: [{ modName: 'ReplacePatcher', version: '^1.0.0' }] },
+                dependencies: [], requiredDependencies: [{ modName: 'ModI18N', version: '*' }], ...extra.chs },
+            { id: 'LanguageEN', variant: variant('en', 'English'), boot: { name: 'EnemyDisplay', version: '1.1.0', dependenceInfo: [{ modName: 'ReplacePatcher', version: '^1.0.0' }] }, ...extra.en },
+            { id: 'mod-i18n', boot: { name: 'ModI18N', version: '1.0.0' } },
+            { id: 'ReplacePatcher', boot: { name: 'ReplacePatcher', version: '1.0.0' } }
+        ], installed);
+        f.group = { id: 'language-group:fixture-languages', isLanguageGroup: true, variantGroupId: 'fixture-languages', name: '语言变体测试', variants: f.mods.slice(0, 2) };
+        return f;
+    };
+    const chooseLanguage = (f, id, checks = () => {}) => {
+        const confirm = f.sb.modHubConfirm;
+        f.sb.modHubConfirm = async options => {
+            if (options.title === '选择【语言变体测试】语言') {
+                f.prompts.push(options);
+                assert.equal(options.selectValue, '', '首次语言选择不得默认跨语言预选');
+                assert.equal(options.requireSelection, true);
+                const dialog = createStubElement(), select = dialog.querySelector('.modhub-modal-select');
+                assert.equal(options.canConfirm(dialog), false, '未选语言不得确认');
+                select.value = id || '';
+                assert.equal(options.canConfirm(dialog), Boolean(id), '确认必须来自可安装的显式目标');
+                checks(options);
+                return id || false;
+            }
+            return confirm(options);
+        };
+    };
+    // 同一展示组仍使用两个真实身份，选择语言后只读取和安装对应包。
+    for (const language of ['LanguageCHS', 'LanguageEN']) {
+        const f = languageFixture(); chooseLanguage(f, language);
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), true);
+        assert.equal(f.profiles.has(language === 'LanguageCHS' ? 'EnemyDisplayCHS' : 'EnemyDisplay'), true);
+        assert.equal(f.profiles.has(language === 'LanguageCHS' ? 'EnemyDisplay' : 'EnemyDisplayCHS'), false);
+        assert.deepEqual(f.events.filter(event => event.startsWith('install:')), language === 'LanguageCHS'
+            ? ['install:mod-i18n', 'install:ReplacePatcher', 'install:LanguageCHS']
+            : ['install:ReplacePatcher', 'install:LanguageEN']);
+        assert.ok(!f.prompts.some(options => options.title === `选择【${language === 'LanguageCHS' ? 'LanguageEN' : 'LanguageCHS'}】版本`));
+        if (language === 'LanguageCHS') assert.ok(reviewedPlan(f).trustedMessageHtml.includes('目录强制前置'), '发布依赖空数组和包内漏写都不能覆盖目录前置');
+    }
+    {
+        const f = languageFixture(); chooseLanguage(f, null);
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), false);
+        assert.deepEqual(f.events, [], '取消语言选择不得下载或写入');
+        assert.equal(f.prompts.length, 1);
+    }
+    for (const accept of [false, true]) {
+        const old = { name: 'EnemyDisplay', version: '1.0.0' }, f = languageFixture([old]);
+        chooseLanguage(f, 'LanguageCHS');
+        const confirm = f.sb.modHubConfirm;
+        f.sb.modHubConfirm = async options => {
+            if (options.title === '确认保留其他语言包') {
+                f.prompts.push(options);
+                assert.equal(options.confirmText, '保留旧语言包并继续');
+                assert.match(options.message, /English.*EnemyDisplay/);
+                assert.match(options.message, /取消后前往模组管理移除旧语言包/);
+                assert.deepEqual(f.events, [], '处理旧语言的明确确认必须在下载与写入之前');
+                return accept;
+            }
+            return confirm(options);
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), accept);
+        assert.equal(f.profiles.get('EnemyDisplay').version, '1.0.0', '切换选择不能静默替换或禁用旧语言');
+        assert.deepEqual(f.sb._modHubModState.sideDisabled, []);
+        if (!accept) assert.deepEqual(f.events, []);
+    }
+    // 已安装的普通和批量更新按原成员走，不重新挑语言，不借用另一语言的新版。
+    for (const catalogStatus of ['withdrawn', 'deleted']) {
+        const f = languageFixture([{ name: 'EnemyDisplayCHS', version: '1.0.0' }]);
+        const oldIdentity = { ...f.mods[0], catalogStatus, autoInstall: false }, active = f.mods[1];
+        f.mods.splice(0, 1); f.group.variants = [active];
+        f.sb.modHubMarket.getLanguageIdentityMembers = target => {
+            assert.equal(target.id, active.id, '历史身份仅在选中可安装语言后读取');
+            return [oldIdentity, active];
+        };
+        chooseLanguage(f, active.id, options => {
+            assert.deepEqual(Array.from(options.selectOptions, option => option.value), ['', active.id], '历史撤回或删除的语言不得重新进入安装选项');
+        });
+        const confirm = f.sb.modHubConfirm;
+        let prompted = false;
+        f.sb.modHubConfirm = async options => {
+            if (options.title === '确认保留其他语言包') {
+                prompted = true;
+                assert.match(options.message, /简体中文.*EnemyDisplayCHS/);
+                assert.equal(options.confirmText, '保留旧语言包并继续');
+                return false;
+            }
+            return confirm(options);
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), false);
+        assert.equal(prompted, true, `${catalogStatus}身份仍应识别本地已安装语言`);
+        assert.deepEqual(f.events, [], '取消切换不得下载、写入或启禁模组');
+        assert.equal(f.preparedCalls.length, 0);
+        assert.equal(f.profiles.get('EnemyDisplayCHS').version, '1.0.0');
+        assert.equal(f.profiles.has('EnemyDisplay'), false);
+        assert.deepEqual(f.sb._modHubModState.sideDisabled, []);
+        assert.ok(!f.prompts.some(options => options.title === '选择【LanguageCHS】版本'));
+    }
+    for (const batch of [false, true]) {
+        const f = languageFixture([{ name: 'EnemyDisplay', version: '1.0.0' }]);
+        const result = batch ? await f.sb.modHubMarketInstaller.installBatch([f.mods[1]], { updateOnly: true }) : await f.sb.modHubMarketInstaller.install(f.mods[1]);
+        assert.equal(batch ? result.results.get('LanguageEN').status : result, batch ? 'success' : true);
+        assert.ok(f.events.includes('install:LanguageEN'));
+        assert.ok(!f.events.includes('install:LanguageCHS') && !f.events.includes('install:mod-i18n'));
+        assert.ok(!f.prompts.some(options => options.title.endsWith('】语言')));
+    }
+    {
+        const f = languageFixture([{ name: 'EnemyDisplay', version: '1.0.0' }, { name: 'EnemyDisplayCHS', version: '1.0.0' }]);
+        chooseLanguage(f, 'LanguageEN', options => assert.match(options.message, /同时安装多种语言/));
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), true);
+        assert.equal(f.profiles.get('EnemyDisplayCHS').version, '1.0.0');
+        assert.equal(f.profiles.get('EnemyDisplay').version, '1.1.0');
+        assert.ok(!f.prompts.some(options => options.title === '确认保留其他语言包'), '更新已装的目标语言不需重新确认保留旧包');
+    }
+    {
+        const f = languageFixture([{ name: 'EnemyDisplay', version: '1.0.0' }, { name: 'EnemyDisplayCHS', version: '1.1.0' }]);
+        const result = await f.sb.modHubMarketInstaller.installBatch([f.group], { updateOnly: true });
+        assert.equal(result.results.get('LanguageEN').status, 'success');
+        assert.ok(!result.results.has('LanguageCHS'), '简中没有新版本时不能借用英文的更新候选');
+        assert.deepEqual(f.events.filter(event => event.startsWith('install:')), ['install:ReplacePatcher', 'install:LanguageEN']);
+        assert.equal(f.profiles.get('EnemyDisplayCHS').version, '1.1.0');
+        assert.ok(!f.prompts.some(options => options.title.endsWith('】语言') || options.title === '确认保留其他语言包'));
+    }
+    {
+        const f = languageFixture([{ name: 'EnemyDisplay', version: '1.0.0' }, { name: 'EnemyDisplayCHS', version: '1.0.0' }], {
+            en: { boot: { name: 'EnemyDisplay', version: '2.0.0' } }
+        });
+        const result = await f.sb.modHubMarketInstaller.installBatch([f.group], { updateOnly: true });
+        assert.equal(result.results.get('LanguageCHS').status, 'success');
+        assert.equal(result.results.get('LanguageEN').status, 'success');
+        assert.equal(f.profiles.get('EnemyDisplayCHS').version, '1.1.0');
+        assert.equal(f.profiles.get('EnemyDisplay').version, '2.0.0');
+        assert.ok(!f.prompts.some(options => options.title.endsWith('】语言') || options.title === '确认保留其他语言包'), '双安装批量更新保留两个独立语言身份');
+    }
+    // 同版本摘要已证实变化时，批量更新不能被版号相等过滤掉。
+    for (const digest of ['sha256:' + 'b'.repeat(64), 'sha256:' + 'a'.repeat(64), '']) {
+        const candidate = { candidateKey: 'EN-repacked', seriesKey: 'EnemyDisplay', version: '1.1.0', tagName: 'v1.1.0',
+            assets: [{ name: 'EnemyDisplay-v1.1.0.zip', size: 1, downloadUrl: 'https://example.com/EnemyDisplay-v1.1.0.zip', digest }],
+            compatibility: { status: 'compatible', evidence: 'declaration' } };
+        const f = languageFixture([{ name: 'EnemyDisplay', version: '1.1.0', packageDigest: 'sha256:' + 'a'.repeat(64) },
+            { name: 'ReplacePatcher', version: '1.0.0' }], { en: { candidates: [candidate] } });
+        f.sb.modHubMarket.isReleaseInstalled = f.runtimeMarket.isReleaseInstalled;
+        f.sb.modHubMarket.isPreparedComponentInstalled = () => false;
+        const result = await f.sb.modHubMarketInstaller.installBatch([f.mods[1]], { updateOnly: true });
+        if (digest.endsWith('b'.repeat(64))) {
+            assert.equal(result.results.get('LanguageEN').status, 'success');
+            assert.deepEqual(f.events.filter(event => event.startsWith('install:')), ['install:LanguageEN']);
+            assert.equal(f.profiles.get('EnemyDisplay').version, '1.1.0');
+        } else {
+            assert.equal(result, false, '同摘要或候选无摘要不得默认重装同版');
+            assert.deepEqual(f.events, []);
+        }
+    }
+    {
+        const f = languageFixture(); chooseLanguage(f, 'LanguageCHS');
+        const result = await f.sb.modHubMarketInstaller.installBatch([f.group]);
+        assert.equal(result.results.get('LanguageCHS').status, 'success');
+        assert.ok(!f.events.includes('install:LanguageEN'), '批量首次安装组必须沿用显式语言选择');
+    }
+    {
+        const f = languageFixture([{ name: 'EnemyDisplay', version: '1.0.0' }]);
+        const confirm = f.sb.modHubConfirm;
+        f.sb.modHubConfirm = async options => {
+            if (options.title === '选择【语言变体测试】语言') {
+                assert.equal(options.selectOptions.find(item => item.value === 'LanguageEN').disabled, true, '批量首装不能把已安装语言再次当目标');
+                assert.equal(options.selectOptions.find(item => item.value === 'LanguageCHS').disabled, false);
+                return false;
+            }
+            return confirm(options);
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.installBatch([f.group]), false);
+        assert.deepEqual(f.events, []);
+    }
+    {
+        const f = languageFixture(); f.mods.splice(2, 1); chooseLanguage(f, 'LanguageCHS');
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), false);
+        assert.deepEqual(f.events, [], '无法映射的目录强制依赖应阻止下载和写入');
+        assert.ok(f.alerts.some(message => message.includes('ModI18N') && message.includes('目录强制前置')));
+        assert.ok(!f.prompts.some(options => options.title === '前置需要手动处理'), '目录强制依赖不能选择跳过后安装目标');
+    }
+    {
+        const f = languageFixture([{ name: 'ModI18N', version: '1.0.0' }]);
+        f.mods[0].requiredDependencies = [{ modName: 'ModI18N', version: '>=2.0.0' }]; chooseLanguage(f, 'LanguageCHS');
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), false);
+        assert.deepEqual(f.events, [], '强制前置没有满足范围的候选时不得下载目标');
+        const dependencyChoice = f.prompts.find(options => options.title === '选择【mod-i18n】版本');
+        assert.ok(dependencyChoice && !dependencyChoice.trustedMessageHtml.includes('暂不安装此前置'), '目录强制前置选版窗口不得提供跳过选项');
+    }
+    {
+        const f = languageFixture([{ name: 'ModI18N', version: '1.0.0' }]);
+        f.sb._modHubModState.sideDisabled = ['ModI18N']; chooseLanguage(f, 'LanguageCHS');
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), true);
+        assert.ok(reviewedPlan(f).trustedMessageHtml.includes('启用'), '已禁用的强制前置需在计划中明确启用');
+        assert.ok(f.events.indexOf('enable:ModI18N') < f.events.indexOf('install:LanguageCHS'));
+        assert.ok(!f.events.includes('prepare:mod-i18n'), '已有满足版本的强制前置只启用，不重复下载');
+    }
+    {
+        const f = languageFixture([{ name: 'ModI18N', version: '1.0.0' }, { name: 'ReplacePatcher', version: '1.0.0' }]);
+        chooseLanguage(f, 'LanguageCHS');
+        const confirm = f.sb.modHubConfirm;
+        f.sb.modHubConfirm = async options => {
+            const result = await confirm(options);
+            if (options.title === '请再次核对安装计划') f.sb._modHubModState.sideDisabled = ['ModI18N'];
+            return result;
+        };
+        // 在执行入口回读状态时模拟前置被其他操作禁用，最终预检仍必须阻断目标。
+        const download = f.sb.modHubMarket.downloadAndInstallMod;
+        f.sb.modHubMarket.downloadAndInstallMod = async (...args) => {
+            const result = await download(...args);
+            if (args[2].prepareOnly && args[0].id === 'LanguageCHS') f.sb.modHubMarket.refreshLocalPackageProfiles = async () => { f.sb._modHubModState.sideDisabled = ['ModI18N']; };
+            return result;
+        };
+        assert.equal(await f.sb.modHubMarketInstaller.install(f.group), false);
+        assert.ok(!f.events.includes('install:LanguageCHS'), '最终预检不能让已禁用强制前置通过');
+    }
     // 429 登记附件恢复默认选择，但须确认适配风险；SHA 和大小完整交给包体预检。
     {
         const id = 'RegisteredSnapshot';
@@ -1064,15 +1295,22 @@ module.exports = async function () {
         const f = fixture([{ id: 'CancelLoading' }]);
         const originalFetch = f.sb.modHubMarketVersions.fetchReleases, originalConfirm = f.sb.modHubConfirm;
         let finish, signal, ready, area;
+        const timers = [];
+        f.sb.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
         f.sb.modHubMarketVersions.fetchReleases = (mod, options) => {
             signal = options.signal;
             return new Promise((resolve, reject) => { finish = () => lateFailure ? reject(new Error('迟到失败')) : resolve(originalFetch(mod)); });
         };
         f.sb.modHubConfirm = async options => {
             assert.ok(options.trustedMessageHtml.includes('正在读取版本列表'), '请求完成前必须显示加载弹窗');
+            assert.match(options.trustedMessageHtml, /modhub-progress-ring/, '版本列表等待期间显示圆环');
             assert.equal(options.canConfirm(), false, '加载期间 Enter 不得开始准备');
             const dialog = createStubElement(); area = dialog.querySelector('#modHubVersionChoices');
             ready = options.onRender(dialog);
+            timers.find(timer => timer.delay === 3000).callback();
+            const slowStatus = area.querySelector('.modhub-version-loading').innerHTML;
+            assert.match(slowStatus, /发布服务响应较慢/);
+            assert.match(slowStatus, /modhub-progress-ring/, '慢服务提示仍保留圆环');
             return false;
         };
         assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false);
@@ -1113,6 +1351,7 @@ module.exports = async function () {
         f.sb.modHubMarketVersions.fetchReleases = (mod, options) => { calls++; signals.push(options.signal); return new Promise(resolve => { finishes.push(() => resolve(fetch(mod))); }); };
         f.sb.modHubConfirm = async options => {
             assert.ok(options.trustedMessageHtml.includes('已读取 0 / 3 项'), '批量必须先展示所有占位行');
+            assert.equal((options.trustedMessageHtml.match(/modhub-progress-ring/g) || []).length, 1, '批量等待共用一个状态圆环');
             assert.equal(options.canConfirm(), false);
             const dialog = createStubElement(); area = dialog.querySelector('#modHubBatchVersionChoices'); ready = options.onRender(dialog);
             return false;
@@ -1187,8 +1426,10 @@ module.exports = async function () {
             await started;
             for (let index = 0; index < 10; index++) await Promise.resolve();
             assert.ok(area.innerHTML.includes('已读取 1 / 2 项'), '已完成行应及时显示');
+            assert.match(area.innerHTML, /modhub-progress-ring/, '部分行仍在加载时保留圆环');
             select.value = ''; select.onchange();
             finish(); await ready;
+            assert.doesNotMatch(area.innerHTML, /modhub-progress-ring/, '全部行完成后移除圆环');
             assert.equal(options.customResult().length, 1, '后续完成不能覆盖已手动跳过的行');
             return options.customResult();
         };

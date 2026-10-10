@@ -5,6 +5,486 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 普通加载共用在途请求，多个强制刷新顺序获取一份新目录。
+    {
+        const sb = loadMarket(), market = sb.modHubMarket;
+        let finish, requests = 0;
+        const index = version => ({ schemaVersion: 1, mods: [{ id: 'shared-request', name: '共享目录请求', version }] });
+        sb.fetch = () => { requests++; return new Promise(resolve => { finish = () => resolve({ ok: true, json: async () => index('1.0') }); }); };
+        const first = market.loadMarketData(), second = market.loadMarketData();
+        assert.equal(first, second, '离开后重新进入市场应共用仍在拉取的目录');
+        assert.equal(requests, 1);
+        finish(); await Promise.all([first, second]);
+
+        const cachedSb = loadMarket(), cachedMarket = cachedSb.modHubMarket;
+        let finishFirst, indexRequests = 0;
+        cachedSb.fetch = () => {
+            indexRequests++;
+            if (indexRequests === 1) return new Promise(resolve => { finishFirst = () => resolve({ ok: true, json: async () => index('1.0') }); });
+            return Promise.resolve({ ok: true, json: async () => index('2.0') });
+        };
+        const cached = cachedMarket.loadMarketData(), refresh = cachedMarket.loadMarketData(true), repeatedRefresh = cachedMarket.loadMarketData(true);
+        assert.equal(indexRequests, 1, '强制刷新不应与尚未完成的普通读取并发覆盖目录');
+        finishFirst();
+        assert.equal((await cached)[0].version, '1.0');
+        const results = await Promise.all([refresh, repeatedRefresh]);
+        assert.equal(indexRequests, 2, '多个强制刷新应共用下一次真实网络请求');
+        assert.ok(results.every(mods => mods[0].version === '2.0'), '强制刷新不能把旧缓存当作刷新成功');
+    }
+    // 同一轮游戏首次联网核对目录；之后复用成功结果，空目录也不重复拉取。
+    for (const preheated of [false, true]) {
+        const sb = loadMarket(), market = sb.modHubMarket;
+        sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ timestamp: Date.now(), data: [
+            { id: 'old-session', name: '旧缓存目录', version: '1.0' }
+        ] }));
+        if (preheated) market.getUpdatableMods();
+        let requests = 0;
+        sb.fetch = async () => { requests++; return { ok: true, json: async () => ({ schemaVersion: 1, mods: [
+            { id: 'new-session', name: '本轮最新目录', version: '2.0' }
+        ] }) }; };
+        assert.equal((await market.loadMarketData())[0].version, '2.0', '首次进入不能直接沿用上轮游戏持久缓存或看板预热');
+        await market.loadMarketData();
+        assert.equal(requests, 1, '本轮首次成功后切页仅复用内存目录');
+        await market.loadMarketData(true);
+        assert.equal(requests, 2, '手动强制刷新仍获取网络新目录');
+    }
+    {
+        const sb = loadMarket();
+        let requests = 0;
+        sb.fetch = async () => { requests++; return { ok: true, json: async () => ({ schemaVersion: 1, mods: [] }) }; };
+        await sb.modHubMarket.loadMarketData(); await sb.modHubMarket.loadMarketData();
+        assert.equal(requests, 1, '成功的空目录也是本轮缓存');
+        const nextSession = loadMarket();
+        nextSession.fetch = sb.fetch;
+        await nextSession.modHubMarket.loadMarketData();
+        assert.equal(requests, 2, '重新加载游戏后重新核对一次目录');
+    }
+    // 客户端只保存成功目录；离线读取保留原内容与时间，空目录不会被旧缓存复活。
+    for (const empty of [false, true]) {
+        const sb = loadMarket(), key = 'modhub_market_wiki_v5';
+        const saved = JSON.stringify({ timestamp: 1, data: empty ? [] : [
+            { id: 'saved', name: '最近成功目录', bootNames: ['Saved'], description: '最近成功说明', version: '1.0' }
+        ] });
+        sb.localStorage.setItem(key, saved);
+        const write = sb.localStorage.setItem;
+        let writes = 0, requests = 0;
+        sb.localStorage.setItem = (storageKey, value) => { if (storageKey === key) writes++; write(storageKey, value); };
+        sb.fetch = async url => {
+            requests++;
+            if (String(url).includes('mod-identities.json')) return { ok: true, json: async () => ({ schemaVersion: 1, mods: [] }) };
+            throw new Error('模拟离线');
+        };
+        const offline = await sb.modHubMarket.loadMarketData();
+        assert.equal(offline.length, empty ? 0 : 1);
+        assert.equal(sb.localStorage.getItem(key), saved, '离线回退不能刷新持久目录时间或内容');
+        assert.equal(writes, 0, '离线读取不能写成新目录');
+        const offlineRequests = requests;
+        await sb.modHubMarket.loadMarketData();
+        assert.equal(requests, offlineRequests, '有效离线目录在同一轮游戏内也只读取一次');
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [
+            { id: 'latest', name: '最新成功目录', version: '2.0' }
+        ] }) });
+        await sb.modHubMarket.loadMarketData(true);
+        const updated = JSON.parse(sb.localStorage.getItem(key));
+        assert.equal(writes, 1);
+        assert.ok(updated.timestamp > 1);
+        assert.equal(updated.data[0].name, '最新成功目录');
+        assert.equal(updated.data[0].version, '2.0');
+    }
+    {
+        const sb = loadMarket(), market = sb.modHubMarket, key = 'modhub_market_wiki_v5';
+        sb.localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data: [
+            { id: 'old', name: '旧版', bootNames: ['Old'], description: '旧说明', version: '2.0' }
+        ] }));
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => [{ name: 'Old', bootJson: { name: 'Old', version: '1.0' } }] } });
+        assert.ok(market.findMarketModByLocalName('Old'));
+        assert.equal(market.getStaticMarketModSubtext('Old'), '旧版');
+        const write = sb.localStorage.setItem;
+        sb.localStorage.setItem = (storageKey, value) => {
+            if (storageKey === key) throw new Error('模拟存储写入失败');
+            write(storageKey, value);
+        };
+        let requests = 0;
+        sb.fetch = async () => { requests++; return { ok: true, json: async () => ({ schemaVersion: 1, mods: [] }) }; };
+        await market.loadMarketData(); await market.loadMarketData();
+        assert.equal(requests, 1);
+        assert.equal(market.findMarketModByLocalName('Old'), null, '已成功获取空目录后身份查询不能复活旧持久目录');
+        assert.equal(market.getStaticMarketModSubtext('Old'), '');
+        assert.equal(market.getUpdatableMods().length, 0, '空目录不能由管理页更新查询重新预热旧缓存');
+    }
+    // 本地资料仅复用已完成的真实扫描；名单、对象、包体修订或显式失效均重新核验。
+    {
+        const fixture = () => {
+            const sb = loadMarket(), elements = new Map(), counts = { reads: 0, checks: 0, disabled: 0, requests: 0 };
+            const loader = { customStore: {}, constructor: { calcModNameKey: name => name } };
+            let failRead = false;
+            const reopen = () => ['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketBtnRefresh']
+                .forEach(id => elements.set(id, createStubElement()));
+            reopen();
+            sb.document.getElementById = id => elements.get(id) || null;
+            sb._modHubOrphanRepairDone = true;
+            sb._modHubModState = { sideEnabled: ['First', 'Second'], sideDisabled: [], sideMods: [] };
+            sb.modHubLoadModManageState = async () => sb._modHubModState;
+            sb.modHubLoadDisabledModInfo = async () => { counts.disabled++; };
+            sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getIndexDBLoader: () => loader, getModCacheArray: () => [] }),
+                getIdbKeyValRef: () => ({ get: async name => { counts.reads++; if (failRead) throw new Error('测试读取失败'); return { name }; } }) } });
+            sb.modHubGetController = () => ({ checkModZipFileIndexDB: async data => { counts.checks++; return { name: data.name, version: '1.0' }; } });
+            sb.setTimeout = (callback, delay) => delay === 0 ? setTimeout(callback, 0) : 0;
+            sb.fetch = async () => { counts.requests++; return { ok: true, json: async () => ({ schemaVersion: 1, mods: [] }) }; };
+            return { sb, elements, counts, reopen, fail: value => { failRead = value; } };
+        };
+        const f = fixture();
+        await f.sb.modHubInitMarket();
+        assert.deepEqual(f.counts, { reads: 2, checks: 2, disabled: 1, requests: 1 });
+        f.reopen(); await f.sb.modHubInitMarket();
+        assert.deepEqual(f.counts, { reads: 2, checks: 2, disabled: 1, requests: 1 }, '重复切页不再解包、计算摘要或获取目录');
+        f.sb._modHubModState.sideDisabled.push(f.sb._modHubModState.sideEnabled.pop());
+        await f.sb.modHubInitMarket();
+        assert.equal(f.counts.reads, 4, '原地启禁后重新核对两份包体');
+        f.sb._modHubModState.sideEnabled.pop();
+        await f.sb.modHubInitMarket();
+        assert.equal(f.counts.reads, 5, '原地删除后仅核验仍登记的包体');
+        f.sb._modHubModState = { ...f.sb._modHubModState };
+        await f.sb.modHubInitMarket();
+        assert.equal(f.counts.reads, 6, '同名换包后的状态重新读取不能沿用旧摘要');
+        f.sb._modHubReloadRevision++;
+        await f.sb.modHubInitMarket();
+        assert.equal(f.counts.reads, 7, '仅包体修订变化也需重新核验');
+        f.sb.modHubMarket.invalidateLocalPackageProfiles();
+        await f.sb.modHubInitMarket();
+        assert.equal(f.counts.reads, 8, '显式失效覆盖导入已落盘但名单读取失败');
+        await f.sb.modHubInitMarket(true);
+        assert.equal(f.counts.reads, 9, '强制进入重新核验本地资料');
+        assert.equal(f.counts.requests, 2);
+        await f.elements.get('modHubMarketBtnRefresh').onclick();
+        assert.equal(f.counts.reads, 10, '手动刷新重新核验本地资料');
+        assert.equal(f.counts.requests, 3, '手动刷新同时获取最新目录');
+
+        const failed = fixture();
+        failed.fail(true); await failed.sb.modHubInitMarket();
+        assert.equal(failed.counts.reads, 2);
+        failed.fail(false); failed.reopen(); await failed.sb.modHubInitMarket();
+        assert.equal(failed.counts.reads, 4, '读取失败不得登记扫描完成，重进应重新核验');
+        failed.reopen(); await failed.sb.modHubInitMarket();
+        assert.equal(failed.counts.reads, 4, '成功重试后可以复用本轮资料');
+        failed.fail(true); await failed.sb.modHubInitMarket(true);
+        assert.equal(failed.counts.reads, 6);
+        failed.fail(false); failed.reopen(); await failed.sb.modHubInitMarket();
+        assert.equal(failed.counts.reads, 8, '已成功后强制扫描失败，也必须使旧完成标记失效');
+
+        const unavailable = fixture(), getGui = unavailable.sb.modHubGetGui;
+        unavailable.sb.modHubGetGui = () => ({});
+        await unavailable.sb.modHubInitMarket();
+        assert.equal(unavailable.counts.reads, 0);
+        unavailable.sb.modHubGetGui = getGui;
+        unavailable.reopen(); await unavailable.sb.modHubInitMarket();
+        assert.equal(unavailable.counts.reads, 2, '加载器接口未就绪不能登记扫描完成');
+
+        const changing = fixture(), getController = changing.sb.modHubGetController;
+        let invalidated = false;
+        changing.sb.modHubGetController = () => ({ checkModZipFileIndexDB: async data => {
+            const oldBoot = await getController().checkModZipFileIndexDB(data);
+            if (!invalidated) {
+                invalidated = true;
+                changing.sb._modHubDisabledModInfo.set('first', { name: 'First', bootJson: { name: 'First', version: '2.0' } });
+                changing.sb.modHubMarket.invalidateLocalPackageProfiles();
+                return oldBoot;
+            }
+            return { ...oldBoot, version: '2.0' };
+        } });
+        await changing.sb.modHubInitMarket();
+        assert.equal(changing.counts.reads, 1, '扫描期间换包失效后立即停止余包读取');
+        assert.equal(changing.sb.modHubMarket.getLocalInstalledProfiles().find(profile => profile.name === 'First').version, '2.0',
+            '旧包校验完成后不得覆盖安装刚写入的新版本资料');
+        changing.reopen(); await changing.sb.modHubInitMarket();
+        assert.equal(changing.counts.reads, 3, '扫描期间包体落盘失效不能被扫描结束的完成标记覆盖');
+        changing.reopen(); await changing.sb.modHubInitMarket();
+        assert.equal(changing.counts.reads, 3);
+
+        const canceled = fixture(), tasks = [];
+        canceled.sb.setTimeout = (callback, delay) => { if (delay === 0) tasks.push(callback); return 0; };
+        const pending = canceled.sb.modHubInitMarket();
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        assert.equal(tasks.length, 1);
+        canceled.reopen();
+        tasks.shift()(); await pending;
+        assert.equal(canceled.counts.reads, 0);
+        canceled.sb.setTimeout = (callback, delay) => delay === 0 ? setTimeout(callback, 0) : 0;
+        await canceled.sb.modHubInitMarket();
+        assert.equal(canceled.counts.reads, 2, '中途取消不得登记扫描完成，重进应扫描全部包体');
+
+        let finishDisabled;
+        f.sb.modHubLoadDisabledModInfo = () => new Promise(resolve => { finishDisabled = resolve; });
+        const refreshing = f.elements.get('modHubMarketBtnRefresh').onclick();
+        for (let i = 0; i < 10; i++) await Promise.resolve();
+        f.reopen(); finishDisabled(); await refreshing;
+        assert.equal(f.counts.requests, 3, '手动刷新预载过程中离页不得继续新目录请求');
+    }
+    // 拉取期间切到其他页签，再次进入只渲染新容器并复用目录请求。
+    {
+        const sb = loadMarket();
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketSearch'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        sb.modHubRepairOrphanModZips = async () => ({ repaired: [] });
+        sb.modHubLoadModManageState = async () => {};
+        sb.modHubLoadDisabledModInfo = async () => {};
+        let finish, requests = 0, started;
+        const fetching = new Promise(resolve => { started = resolve; });
+        sb.fetch = () => { requests++; started(); return new Promise(resolve => {
+            finish = () => resolve({ ok: true, json: async () => ({ schemaVersion: 1, mods: [{ id: 'reentry', name: '重新进入市场' }] }) });
+        }); };
+        const first = sb.modHubInitMarket();
+        await fetching;
+        let oldSearchTask;
+        sb.setTimeout = (callback, delay) => { if (delay === 200) oldSearchTask = callback; return 0; };
+        const oldSearch = elements.get('modHubMarketSearch');
+        oldSearch.value = '已离页的旧输入';
+        oldSearch.oninput();
+        const oldCards = elements.get('modHubMarketCardsContainer');
+        oldCards.innerHTML = '旧页面已离开';
+        for (const id of elements.keys()) elements.set(id, createStubElement());
+        const second = sb.modHubInitMarket();
+        finish(); await Promise.all([first, second]);
+        oldSearchTask();
+        assert.equal(requests, 1);
+        assert.equal(oldCards.innerHTML, '旧页面已离开', '离页的请求不能重新绘制旧容器');
+        assert.match(elements.get('modHubMarketCardsContainer').innerHTML, /重新进入市场/);
+        assert.equal(sb.modHubMarket.isInstallBusy(), false, '目录读取不能建立安装锁');
+    }
+    // 每段本地预载完成后检查页签；逐包校验前让出事件循环，离页不再读余包。
+    for (const leavingAt of ['repair', 'manager', 'disabled']) {
+        const sb = loadMarket(), root = createStubElement(), stages = [];
+        let active = true, requests = 0;
+        sb.document.getElementById = id => active && id === 'modHubModMarketContainer' ? root : null;
+        const stage = name => { stages.push(name); if (name === leavingAt) active = false; };
+        sb.modHubRepairOrphanModZips = async () => { stage('repair'); return { repaired: [] }; };
+        sb.modHubLoadModManageState = async () => { stage('manager'); };
+        sb.modHubLoadDisabledModInfo = async () => { stage('disabled'); };
+        sb.fetch = async () => { requests++; throw new Error('离页后不应拉取目录'); };
+        await sb.modHubInitMarket();
+        assert.equal(stages.at(-1), leavingAt, '离页后不应继续后续预载阶段');
+        assert.equal(requests, 0);
+    }
+    // 自愈已写入仓库时，即使离页也先同步状态缓存；重新进入不得复用旧名单。
+    {
+        const sb = loadMarket();
+        let active = true, repaired = 0, forced = 0, requests = 0;
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => active ? elements.get(id) || null : null;
+        sb._modHubModState = { sideEnabled: [], sideDisabled: [], sideMods: [], builtInMods: [] };
+        const bootJson = { name: 'Recovered', version: '1.0' };
+        sb.modHubGetGui = () => ({ listSideLoadModNameOnly: async () => ['Recovered'], listSideLoadHiddenModNameOnly: async () => [],
+            gModUtils: { getModListNameNoAlias: () => [], getModLoader: () => ({ getModCacheArray: () => [] }) } });
+        sb.modHubLoadDisabledModInfo = async names => {
+            if (names?.includes('Recovered')) sb._modHubDisabledModInfo.set('recovered', { name: 'Recovered', bootJson });
+        };
+        const loadState = sb.modHubLoadModManageState;
+        sb.modHubLoadModManageState = refresh => { if (refresh) forced++; return loadState(refresh); };
+        sb.modHubRepairOrphanModZips = async () => { repaired++; active = false; return { repaired: ['Recovered'] }; };
+        sb.fetch = async () => { requests++; return { ok: true, json: async () => ({ schemaVersion: 1, mods: [
+            { id: 'recovered', name: '已恢复模组', bootNames: ['Recovered'], githubUrl: 'https://github.com/ModHubTests/Recovered', version: '1.0', versionSource: 'wiki' }
+        ] }) }; };
+        await sb.modHubInitMarket();
+        assert.equal(forced, 1, '已完成自愈必须强制回读缓存后才可因离页退出');
+        assert.deepEqual(Array.from(sb._modHubModState.sideEnabled), ['Recovered']);
+        assert.equal(requests, 0, '状态同步完成后，离页仍不应拉取目录');
+        active = true;
+        for (const id of elements.keys()) elements.set(id, createStubElement());
+        await sb.modHubInitMarket();
+        assert.equal(forced, 1);
+        assert.equal(repaired, 1, '再次进入不得重复执行已完成的孤儿包自愈');
+        assert.equal(requests, 1);
+        assert.match(elements.get('modHubMarketCardsContainer').innerHTML, /已安装版本：v1\.0/);
+        assert.notEqual(sb.modHubMarket.checkModInstallStatus(sb.modHubMarket.getMarketMods()[0]), 'not_installed');
+    }
+    {
+        const sb = loadMarket(), tasks = [], reads = [];
+        let active = true, checked = 0;
+        class Loader { static calcModNameKey(name) { return 'package:' + name; } }
+        const loader = new Loader(); loader.customStore = {};
+        sb._modHubModState = { sideEnabled: ['First', 'Second'], sideDisabled: [] };
+        sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getIndexDBLoader: () => loader }), getIdbKeyValRef: () => ({
+            get: async key => { reads.push(key); active = false; return {}; }
+        }) } });
+        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async () => { checked++; return { name: 'First' }; } });
+        sb.setTimeout = callback => { tasks.push(callback); return tasks.length; };
+        const pending = sb.modHubMarket.refreshLocalPackageProfiles(undefined, () => active);
+        assert.deepEqual(reads, [], '包体读取前必须给页签事件一个调度机会');
+        assert.equal(tasks.length, 1);
+        tasks.shift()(); await pending;
+        assert.deepEqual(reads, ['package:First']);
+        assert.equal(checked, 0, '读取过程中离页，不再解包或扫描下一个包');
+    }
+    {
+        const counts = [];
+        for (const yielding of [false, true]) {
+            const sb = loadMarket(), names = Array.from({ length: 8 }, (_, index) => 'Busy' + index);
+            let active = true, checked = 0, left;
+            const navigation = new Promise(resolve => { left = resolve; });
+            sb.setTimeout = setTimeout;
+            sb._modHubModState = { sideEnabled: names, sideDisabled: [] };
+            const loader = { customStore: {}, constructor: { calcModNameKey: name => name } };
+            sb.modHubGetGui = () => ({ gModUtils: { getModLoader: () => ({ getIndexDBLoader: () => loader }),
+                getIdbKeyValRef: () => ({ get: async name => ({ name }) }) } });
+            sb.modHubGetController = () => ({ checkModZipFileIndexDB: async data => {
+                checked++;
+                const until = performance.now() + 20;
+                while (performance.now() < until) {}
+                if (checked === 1) setTimeout(() => { active = false; left(checked); }, 0);
+                return { name: data.name, version: '1.0' };
+            } });
+            const pending = sb.modHubMarket.refreshLocalPackageProfiles(undefined, yielding ? () => active : undefined);
+            counts.push(await navigation);
+            await pending;
+            if (yielding) assert.equal(checked, 1, '页签切走后立即停止余下七个同步解包任务');
+        }
+        assert.deepEqual(counts, [8, 1], '连续微任务会阻塞页签事件；逐包让出后事件在第一包完成时执行');
+    }
+    // 超时覆盖响应体读取，保留镜像、缓存及 Wiki 回退；失败后可重新尝试。
+    for (const phase of ['mirror-cache', 'wiki-fetch', 'wiki-body']) {
+        const sb = loadMarket(), timers = new Map();
+        let timerId = 0, wikiStarted, mirrorRequests = 0;
+        const wikiReady = new Promise(resolve => { wikiStarted = resolve; });
+        sb.setTimeout = (callback, delay) => { const id = ++timerId; timers.set(id, { callback, delay }); return id; };
+        sb.clearTimeout = id => timers.delete(id);
+        const flush = async () => { for (let i = 0; i < 20; i++) await Promise.resolve(); };
+        if (phase === 'mirror-cache') sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ timestamp: 0,
+            data: [{ id: 'stale', name: '离线目录', version: '1.0' }] }));
+        sb.fetch = url => {
+            if (String(url).includes('release-index.json')) {
+                mirrorRequests++;
+                return phase === 'mirror-cache' ? new Promise(() => {}) : Promise.reject(new Error('测试镜像不可用'));
+            }
+            if (String(url).includes('mod-identities.json')) return Promise.resolve({ ok: true, json: async () => ({ schemaVersion: 1, mods: [] }) });
+            wikiStarted();
+            return phase === 'wiki-fetch' ? new Promise(() => {}) : Promise.resolve({ ok: true, json: () => new Promise(() => {}) });
+        };
+        const pending = sb.modHubMarket.loadMarketData(true);
+        const failure = phase === 'mirror-cache' ? null : assert.rejects(pending, /Wiki API请求超时/);
+        if (phase === 'mirror-cache') {
+            await flush();
+            for (let i = 0; i < 2; i++) {
+                assert.equal(timers.size, 1);
+                timers.values().next().value.callback(); await flush();
+            }
+            assert.equal((await pending)[0].name, '离线目录', '两份在线索引超时后仍保留最后成功目录');
+        } else {
+            await wikiReady; await flush();
+            assert.equal(timers.size, 1, '身份字典结束后仅保留 Wiki 读取的超时');
+            const timer = timers.values().next().value;
+            assert.equal(timer.delay, 8000);
+            timer.callback(); await failure;
+            sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [{ id: 'retry', name: '重试成功' }] }) });
+            assert.equal((await sb.modHubMarket.loadMarketData())[0].name, '重试成功', '失败请求不得登记会话成功，普通重进仍允许重试');
+        }
+        assert.equal(mirrorRequests, 2, '仍按主索引、备用索引顺序回退');
+        assert.equal(timers.size, 0, '成功或失败后均清理请求超时');
+    }
+    // 刷新沿用原卡片，按钮圆环随请求结束清理；离页后的旧按钮不影响新页面。
+    for (const leaving of [false, true]) {
+        const sb = loadMarket();
+        sb.modHubLoadModManageState = async () => {};
+        sb.modHubLoadDisabledModInfo = async () => {};
+        const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketBtnRefresh'].map(id => [id, createStubElement()]));
+        sb.document.getElementById = id => elements.get(id) || null;
+        const refresh = elements.get('modHubMarketBtnRefresh'), attributes = new Map();
+        refresh.setAttribute = (name, value) => attributes.set(name, value);
+        refresh.removeAttribute = name => attributes.delete(name);
+        Object.defineProperty(refresh, 'textContent', { get: () => refresh.innerHTML.replace(/<[^>]*>/g, ''), set: value => { refresh.innerHTML = value; } });
+        const index = { schemaVersion: 1, mods: [{ id: 'refresh-loading', name: '刷新等待测试', version: '1.0.0', versionSource: 'wiki' }] };
+        sb.fetch = async () => ({ ok: true, json: async () => index });
+        await sb.modHubInitMarket(true);
+        const cards = elements.get('modHubMarketCardsContainer'), originalCards = cards.innerHTML;
+        let finish, started;
+        const fetching = new Promise(resolve => { started = resolve; });
+        sb.fetch = () => { started(); return new Promise(resolve => { finish = () => resolve({ ok: true, json: async () => index }); }); };
+        const pending = refresh.onclick();
+        assert.match(refresh.innerHTML, /modhub-progress-ring/);
+        assert.doesNotMatch(refresh.innerHTML, /is-determinate|aria-valuenow/);
+        assert.equal(attributes.get('aria-busy'), 'true');
+        assert.equal(cards.innerHTML, originalCards, '刷新等待期间保留已有卡片');
+        await fetching;
+        if (leaving) {
+            elements.set('modHubModMarketContainer', createStubElement());
+            elements.set('modHubMarketBtnRefresh', createStubElement());
+            elements.get('modHubMarketBtnRefresh').innerHTML = '新页面按钮';
+        } else sb.modHubMarket.batchInstallState.running = true;
+        finish(); await pending;
+        assert.equal(refresh.innerHTML, '刷新市场');
+        assert.equal(attributes.has('aria-busy'), false);
+        assert.equal(refresh.disabled, !leaving, '请求结束后仍服从当前批量任务锁');
+        if (leaving) assert.equal(elements.get('modHubMarketBtnRefresh').innerHTML, '新页面按钮');
+    }
+    // 批量总进度使用真实完成项比例，准备计划时使用不定圆环，终止后清理。
+    {
+        const sb = loadMarket(), toolbar = createStubElement(), market = sb.modHubMarket;
+        sb.document.getElementById = id => id === 'modHubMarketBatchToolbar' ? toolbar : null;
+        Object.assign(market.batchInstallState, { running: true, progressPhase: 'installing', completed: 1, total: 4, current: '<当前模组>' });
+        market.renderBatchInstallToolbar();
+        assert.equal((toolbar.innerHTML.match(/class="modhub-progress-ring/g) || []).length, 1);
+        assert.match(toolbar.innerHTML, /class="modhub-progress-ring is-determinate"[^>]*role="progressbar"[^>]*aria-label="批量安装总进度"[^>]*aria-valuemin="0"[^>]*aria-valuemax="100"[^>]*aria-valuenow="25"/);
+        assert.match(toolbar.innerHTML, /批量安装 1\/4/);
+        assert.doesNotMatch(toolbar.innerHTML, /<progress|modhub-batch-progress/);
+        assert.match(toolbar.innerHTML, /&lt;当前模组&gt;/);
+        Object.assign(market.batchInstallState, { progressPhase: 'preparing' });
+        market.renderBatchInstallToolbar();
+        assert.match(toolbar.innerHTML, /class="modhub-progress-ring"[^>]*role="progressbar"/);
+        assert.doesNotMatch(toolbar.innerHTML, /is-determinate|aria-valuenow/, '准备阶段即使已有项目总数，也不代表实际安装比例');
+        Object.assign(market.batchInstallState, { progressPhase: 'installing', completed: 0, total: 0 });
+        market.renderBatchInstallToolbar();
+        assert.doesNotMatch(toolbar.innerHTML, /is-determinate|aria-valuenow/, '没有实际项目总数时保留不定状态');
+        market.batchInstallState.running = false;
+        market.renderBatchInstallToolbar();
+        assert.doesNotMatch(toolbar.innerHTML, /modhub-progress-ring/);
+    }
+
+    // 帮助中心只按原生规则核对版本，不将无法判断误报为版本不符。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        const versions = sb.modHubMarketVersions;
+        assert.equal(versions.assessVersionRange('', '*').status, 'compatible', '任意版本只要求调用者确认提供者存在');
+        assert.equal(versions.assessVersionRange('', '').status, 'compatible', '空要求只核对提供者存在');
+        assert.equal(versions.assessVersionRange('1.2.3', '^1.0').status, 'unknown', '没有原生比较接口不得判定版本不符');
+        const parsedVersions = [], comparisons = [];
+        const api = {
+            parseVersion: value => {
+                parsedVersions.push(value);
+                const match = value.match(/^(\d+(?:\.\d+)*)(?:-([^+]+))?(?:\+(.+))?$/);
+                return { version: { version: match[1].split('.').map(Number), preRelease: match[2], buildMetadata: match[3] } };
+            },
+            parseRange: value => value.split('||').map(range => ({ range })),
+            satisfies: (version, ranges, ignorePostfix = false) => {
+                comparisons.push(ignorePostfix);
+                if (ranges[0].range.trim() === '>=1.2.3') return ignorePostfix || !version.preRelease;
+                return ranges[0].range.trim() !== '>=2.0';
+            }
+        };
+        sb.modSC2DataManager = { getDependenceChecker: () => ({ getInfiniteSemVerApi: () => api }) };
+        assert.equal(versions.assessVersionRange('v1.2.3-beta+build', '^1.0').status, 'compatible');
+        assert.equal(parsedVersions.at(-1), '1.2.3-beta+build', '通用比较必须保留预发布与构建标记');
+        assert.equal(versions.assessVersionRange('1.2.3-beta', '>=1.2.3').status, 'incompatible', '原生前置比较不能忽略预发布后缀');
+        assert.equal(comparisons.at(-1), false, '普通依赖沿用原生后缀比较');
+        assert.equal(versions.assessCompatibility('>=1.2.3', '1.2.3-beta').status, 'compatible', '游戏版本保持原有忽略后缀策略');
+        assert.equal(comparisons.at(-1), true, '游戏适配包装须显式使用原生忽略后缀策略');
+        assert.equal(versions.assessVersionRange('1.2.3', '>=2.0').status, 'incompatible');
+        assert.equal(versions.assessVersionRange('1.2.3', '>=1.0&&<2.0||=3.0').status, 'compatible');
+        for (const range of ['>=1.0 junk', '>=1.0 <2.0', '1.0 - 2.0', '~1.0', '^9007199254740992']) {
+            assert.equal(versions.assessVersionRange('1.2.3', range).status, 'unknown', `不支持的完整范围须保留未知：${range}`);
+        }
+        for (const version of ['', '1.2junk', '9007199254740992.0']) {
+            assert.equal(versions.assessVersionRange(version, '>=1.0').status, 'unknown', '未知或不完整版本不得参与比较');
+        }
+        assert.equal(versions.assessCompatibility('*', '0.5.12.13').status, 'unknown', '市场游戏适配不得把任意版本当作适配证据');
+        assert.equal(versions.assessCompatibility('', '0.5.12.13').reason, '适用的游戏版本尚未确定，下一步会核对安装包中的说明');
+        assert.equal(versions.assessCompatibility('>=1.0', '0.5.12.13').reason, '作者声明的支持范围包含当前 DoL 0.5.12.13；下一步会核对所选安装包');
+        api.satisfies = () => undefined;
+        assert.equal(versions.assessVersionRange('1.2.3', '>=1.0').status, 'unknown', '非布尔原生结果必须保留未知');
+        api.parseRange = () => [];
+        assert.equal(versions.assessVersionRange('1.2.3', '>=1.0').status, 'unknown', '不完整的原生解析必须保留未知');
+        api.parseRange = () => { throw new Error('范围读取失败'); };
+        assert.equal(versions.assessVersionRange('1.2.3', '>=1.0').status, 'unknown', '原生比较异常不得阻断帮助中心');
+    }
     await require('./reviewed-install-identities.test')();
     await require('./market-release-metadata.test')();
     // 发行标签与包内版本不同时，卡片必须用真实仓库包及官方摘要确认发行身份。
@@ -15,6 +495,7 @@ module.exports = async function() {
     ]) {
         const { webcrypto, createHash } = require('node:crypto');
         const sb = loadMarket();
+        sb.setTimeout = (callback, delay) => { if (delay === 0) callback(); return 0; };
         sb.crypto = webcrypto;
         sb.StartConfig = { version: '0.5.12.13' };
         const id = 'same-boot-published', githubUrl = `https://github.com/VersionTests/${id}`;
@@ -1827,6 +2308,9 @@ module.exports = async function() {
         const history = releases => ({ schemaVersion: 1, id: indexed.id, sourceUrl: githubUrl, page: 1, hasMore: false,
             communityRevision: market.getCommunityRevision(), fetchedAt: new Date().toISOString(), releases });
         sb.fetch = async url => {
+            if (String(url).endsWith('/mod-identities.json')) {
+                return { ok: true, json: async () => ({ schemaVersion: 1, mods: [indexed] }) };
+            }
             if (String(url).includes('/mod-releases?')) {
                 historyRequests++;
                 return { ok: true, json: async () => history([release(remoteVersion)]) };
@@ -1925,6 +2409,7 @@ module.exports = async function() {
             return { id: _mod.id, sourceUrl: mod.githubUrl, page, nextPage: page + 1, hasMore: page < pages.length,
                 fetchedAt: '2026-10-02T00:00:00Z', releases: [pages[page - 1]] };
         };
+        sb.localStorage.setItem('modhub_market_identities_v4', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
         sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
         [mod] = await market.loadMarketData();
         assert.notEqual(market.checkModInstallStatus(mod), 'update_available', '适配信息读取完成前不能用另一游戏版本误报更新');
@@ -2091,7 +2576,11 @@ module.exports = async function() {
             assets: [{ name: `WraithsReflection-v${remoteVersion}.zip`, size: 100,
                 downloadUrl: `${mod.githubUrl}/releases/download/v${remoteVersion}/WraithsReflection-v${remoteVersion}.zip` }] }] });
         versions.fetchReleases = async () => history();
-        sb.fetch = async () => { unexpectedDownloads++; throw new Error('更新入口不得绕过选版直接下载'); };
+        sb.fetch = async url => {
+            if (String(url).includes('release-index.json')) return { ok: true, json: async () => ({ schemaVersion: 1, mods: [mod] }) };
+            unexpectedDownloads++;
+            throw new Error('更新入口不得绕过选版直接下载');
+        };
         const elements = new Map(['modHubMarketCardsContainer', 'modHubMarketStats'].map(id => [id, createStubElement()]));
         const cards = elements.get('modHubMarketCardsContainer');
         const updateButton = createStubElement('button'), ignoreOnce = createStubElement('button'), ignoreAlways = createStubElement('button');
@@ -2103,6 +2592,7 @@ module.exports = async function() {
         sb.document.getElementById = id => elements.get(id) || null;
         const notifications = [];
         sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
+        sb.localStorage.setItem('modhub_market_identities_v4', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
         sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
         [mod] = await market.loadMarketData();
         market.checkModInstallStatus(mod);
@@ -2206,6 +2696,7 @@ module.exports = async function() {
             'Z-outdate-UCB-zedfix-1.0.2.zip', 'UCB-zedfix-1.0.3.zip'])];
         versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
             fetchedAt: '2026-10-02T00:00:00Z', releases });
+        sb.localStorage.setItem('modhub_market_identities_v4', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
         sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
         [mod] = await market.loadMarketData();
         market.checkModInstallStatus(mod);
