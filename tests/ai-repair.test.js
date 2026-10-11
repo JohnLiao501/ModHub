@@ -21,6 +21,7 @@ function fixture(options = {}) {
         modHubReadIndexDBModLists: async () => ({ ok: true, enabled: [...state.enabled], disabled: [...state.disabled] }),
         modHubReadInstalledModBoot: async name => ({ name, bootJson: { ...state.boot, name } }),
         modHubReadInstalledModPackage: async name => ({ name, bootJson: { ...state.boot, name }, data: new Uint8Array(state.data) }),
+        modHubRestore: { getRecoveryInfo: () => ({ protectedNames: [] }) },
         modHubGetRawModLoaderLogs: () => [],
         modHubAnalyzeLogs: () => ({ lines: options.logs || [{ level: 'error', message: 'broken is not defined' }, { level: 'info', message: '不会发送的信息' }] }),
         modHubAiPackage: {
@@ -89,6 +90,88 @@ function patchBootFixture(content = '旧版选项\n<<if $money >= 300>>\n购买�
 
 module.exports = async function () {
     assert.equal(fixture().api.maxRounds, 5, '默认五轮预算，供界面读取');
+    {
+        const f = fixture();
+        f.sb.modHubGetRawModLoaderLogs = () => { throw new Error('远程读取声明源码不得顺带读取日志'); };
+        const prepared = await f.api.prepare('Example', '不会发送的描述', { paths: ['javascript/example.js'], source: 'remoteRepair' });
+        const material = JSON.parse(prepared.material);
+        assert.deepEqual(Object.keys(material), ['name', 'version', 'files']);
+        assert.equal(material.files.length, 1);
+        assert.equal(material.files[0].content, JSON.parse(new TextDecoder().decode(f.state.data))['javascript/example.js']);
+        await assert.rejects(f.api.analyze(prepared, f.connection), /不能转发至 AI/);
+        const plan = await f.api.previewResponse(prepared, f.state.answer, { source: 'remoteRepair' });
+        assert.equal(plan.canContinue, false);
+        assert.equal(f.state.requests.length, 0, '本地预览远程 JSON 不访问 AI 或其他网络');
+        const check = await f.api.getVerification(plan);
+        assert.equal(check.beforeHash, prepared.hash);
+        assert.equal(check.afterHash, await f.sb.modHubAiPackage.hash(plan.data));
+        assert.deepEqual(plain(check.enabled), ['Example']);
+        check.enabled.push('伪造模组');
+        assert.deepEqual(plain((await f.api.getVerification(plan)).enabled), ['Example'], '核验资料不暴露可修改的私有配置');
+        plan.source = 'aiRepair';
+        assert.equal((await f.api.apply(plan)).ok, true);
+        assert.equal(f.state.writes[0].source, 'remoteRepair', '应用来源来自私有计划，不信任公开对象上的来源字段');
+        assert.equal((await f.api.apply(plan)).ok, false, '同一已应用方案不能重复写包');
+        assert.equal(f.state.writes.length, 1);
+    }
+    {
+        const f = fixture();
+        const prepared = await f.api.prepare('Example', '', { paths: ['javascript/example.js'], source: 'remoteRepair' });
+        for (const source of [undefined, null, '', 'auto', 'aiRepair', 'manual']) {
+            await assert.rejects(f.api.previewResponse(prepared, f.state.answer, { source }), /来源无效/);
+        }
+        await assert.rejects(f.api.previewResponse({ ...prepared }, f.state.answer, { source: 'remoteRepair' }), /未经本机准备/);
+        const options = { source: 'remoteRepair' };
+        for (const answer of [
+            { ...f.state.answer, readRequest: { name: 'Example', paths: ['other.js'] } },
+            { ...f.state.answer, script: 'window.alert(1)' },
+            { ...f.state.answer, changes: [] },
+            { ...f.state.answer, changes: [{ ...f.state.answer.changes[0], path: 'other.js' }] },
+            { ...f.state.answer, changes: [{ ...f.state.answer.changes[0], before: '不存在的原文' }] },
+            { ...f.state.answer, changes: [f.state.answer.changes[0], f.state.answer.changes[0]] },
+        ]) await assert.rejects(f.api.previewResponse(prepared, answer, options));
+        const plan = await f.api.previewResponse(prepared, f.state.answer, options);
+        plan.summary = '更改已预览说明';
+        await assert.rejects(f.api.getVerification(plan), /预览已改变/);
+        assert.equal((await f.api.apply(plan)).ok, false);
+        prepared.files[0].content = '伪造的本机原文';
+        await assert.rejects(f.api.previewResponse(prepared, f.state.answer, options), /材料已改变/);
+        assert.equal(f.state.writes.length, 0);
+    }
+    {
+        const f = patchBootFixture();
+        await assert.rejects(f.api.prepare('Example', '', { paths: ['boot.json'], source: 'remoteRepair' }), /不能读取或修改 boot.json/);
+        const prepared = await f.api.prepare('Example', '', { paths: ['patch/ocean.txt'], source: 'remoteRepair' });
+        const plan = await f.api.previewResponse(prepared, { ...f.state.answer,
+            changes: [{ path: 'patch/ocean.txt', before: '购买选项', after: '新购买选项', reason: '保留已声明的文本补丁。' }] }, { source: 'remoteRepair' });
+        assert.equal((await f.api.apply(plan)).ok, true, '远程修复保留 TweeReplacer 声明的 .txt 文件');
+        assert.equal(f.gameReads.length, 0, '远程源码材料不额外读取游戏段落');
+    }
+    {
+        for (const content of ['const apiKey = "secret-token";', 'const marker = "remembered-private-value";', 'const key = "sk-testsecret12345";']) {
+            const f = fixture({ files: { 'javascript/example.js': content }, boot: { styleFileList: [] } });
+            f.sb.localStorage = { getItem: () => JSON.stringify({ key: 'remembered-private-value' }) };
+            assert.equal(f.api.sanitizeText('裸密钥 remembered-private-value'), '裸密钥 [已隐去密钥]');
+            await assert.rejects(f.api.prepare('Example', '', { paths: ['javascript/example.js'], source: 'remoteRepair' }), /疑似密钥或凭证/);
+            assert.equal(f.state.requests.length, 0);
+            assert.equal(f.state.writes.length, 0);
+        }
+        const f = fixture();
+        f.sb.modHubRestore.getRecoveryInfo = () => ({ protectedNames: ['Example'] });
+        await assert.rejects(f.api.prepare('Example', '', { paths: ['javascript/example.js'], source: 'remoteRepair' }), /必要前置/);
+        await assert.rejects(f.api.prepare('Example', '', { source: 'manual' }), /材料来源无效/);
+        await assert.rejects(f.api.prepare('Example', '', { source: 'remoteRepair', includeSources: true }), /只能包含本次指定/);
+        assert.ok(!f.api.sanitizeText('Authorization: Bearer private-token').includes('private-token'));
+    }
+    {
+        const f = fixture();
+        const prepared = await f.api.prepare('Example', '', { paths: ['javascript/example.js'], source: 'remoteRepair' });
+        const plan = await f.api.previewResponse(prepared, f.state.answer, { source: 'remoteRepair' });
+        f.state.enabled.push('NewMod');
+        assert.equal((await f.api.apply(plan)).ok, false, '确认后配置变化不能应用旧远程方案');
+        await assert.rejects(f.api.previewResponse(prepared, f.state.answer, { source: 'remoteRepair' }), /配置或安装包已改变/);
+        assert.equal(f.state.writes.length, 0);
+    }
     {
         const f = fixture();
         assert.equal(f.api.normalizeMaxRounds(), 5);

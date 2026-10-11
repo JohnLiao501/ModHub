@@ -3561,3 +3561,17 @@ button.modhub-btn-primary:active,
 
 /* 样式守卫用此标记确认本文件已实际生效。 */
 :root { --modhub-base-styles: 1; }
+.modhub-remote { min-width: 0; padding-bottom: 60px; overflow-wrap: anywhere; }
+.modhub-remote section { margin: 16px 0; padding: 12px; border: 1px solid var(--700); background: var(--850); }
+.modhub-remote h4 { margin: 0 0 8px; color: var(--100); }
+.modhub-remote pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--900); padding: 12px; }
+.modhub-remote label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.modhub-remote input { box-sizing: border-box; min-width: 0; max-width: 100%; min-height: 32px; color: var(--100); background: var(--900); border: 1px solid var(--600); }
+.modhub-remote .modhub-help-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.modhub-remote .modhub-help-actions > button { flex: 0 1 auto; min-width: 0; min-height: 32px; white-space: normal; }
+.modhub-remote .modhub-help-report { box-sizing: border-box; width: 100%; min-height: 220px; max-height: 55vh; resize: vertical; }
+.modhub-remote :focus-visible { outline: 2px solid var(--gold, #d2aa4b); outline-offset: 2px; }
+@media (max-width: 768px) {
+    .modhub-remote .modhub-help-actions > button { flex: 1 1 140px; }
+    .modhub-remote section { padding: 8px; }
+}

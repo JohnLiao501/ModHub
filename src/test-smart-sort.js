@@ -26,6 +26,7 @@ process.on('beforeExit', () => {
     await require('../tests/ai-repair.test')();
     await require('../tests/help.test')();
     await require('../tests/help-ai.test')();
+    await require('../tests/remote-help.test')();
     await require('../tests/market-install.test')();
     await require('../tests/market-versions.test')();
     await require('../tests/market-preparation.test')();
@@ -34,7 +35,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.4.0 全部测试通过');
+    console.log('ModHub v1.5.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

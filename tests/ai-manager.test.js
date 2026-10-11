@@ -36,6 +36,34 @@ async function setup(options = {}) {
 }
 
 module.exports = async function() {
+    for (const failProtection of [false, true]) {
+        const h = await setup({ confirm: () => true });
+        await h.api.saveConfig({ autoCreate: false, maxPoints: 5 });
+        if (failProtection) h.mod.failPut = key => key === 'modhub_restore_points_v1' ? new Error('远程修复前保护失败') : null;
+        const result = await h.sb.modHubApplyAiPackage({ ...h.plan, source: 'remoteRepair' });
+        assert.equal(result.ok, !failProtection, result.reason);
+        assert.equal(text(h.mod.data.get(packageKey)), failProtection ? 'A 旧包' : 'A 修复包');
+        assert.ok(!h.dialogs.some(dialog => dialog.title === '未能建立还原点'), '远程保护失败绝不能提供跳过备份');
+        if (!failProtection) {
+            const point = h.mod.data.get('modhub_restore_points_v1').find(item => item.id === result.pointId);
+            assert.equal(point.kind, 'auto');
+            assert.equal(point.operation, 'remoteRepair');
+            assert.equal(point.label, '远程协助修复前：A');
+            assert.equal((await h.api.getPanelState()).points.find(item => item.id === point.id).systemProtected, true);
+            assert.equal(await h.api.restore(result.pointId), true);
+            assert.equal(text(h.mod.data.get(packageKey)), 'A 旧包');
+        }
+    }
+    {
+        const h = await setup();
+        for (const source of ['', null, 'auto', 'manual']) {
+            const result = await h.sb.modHubApplyAiPackage({ ...h.plan, source });
+            assert.equal(result.ok, false);
+            assert.match(result.reason, /来源无效/);
+        }
+        assert.equal((await h.api.list()).length, 0);
+        assert.equal(text(h.mod.data.get(packageKey)), 'A 旧包');
+    }
     {
         const h = await setup();
         const raw = await h.sb.modHubReadInstalledModPackage('A');

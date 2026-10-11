@@ -199,6 +199,16 @@ module.exports = async function() {
 
     // 共享包体读取器只读真实仓库，并明确区分缺包与无法核验。
     {
+        const f = loadHelp();
+        const input = createStubElement('input'); input.value = 'unsaved-plain-credential';
+        f.elements.set('modHubAiKey', input);
+        assert.equal(f.help.redactRemoteCredentials('日志正文 unsaved-plain-credential'), '日志正文 [已隐去密钥]');
+        f.sb.localStorage.getItem = key => key === 'modhub_ai_connection' ? JSON.stringify({ key: 'remembered-plain-credential' }) : null;
+        assert.equal(f.help.redactRemoteCredentials('源码 remembered-plain-credential'), '源码 [已隐去密钥]');
+        assert.equal(f.help.redactRemoteCredentials('普通源码保留原文'), '普通源码保留原文');
+    }
+
+    {
         const data = new Map([['包:Example', { bytes: '真实包体' }]]);
         const store = {};
         const calls = [];
@@ -695,6 +705,48 @@ module.exports = async function() {
         assert.equal(fixture.state.reloadMessages?.length || 0, 0);
         assert.equal(Boolean(fixture.sb._modHubManagerBusy), false);
     };
+
+    // 远程配置只接收本机检查标识，预览不能直接写入，保存沿用真实管理器保护。
+    {
+        const f = enableFixture();
+        const prepare = f.sb.modHubRestore.prepare;
+        f.sb.modHubRestore.prepare = async context => { const result = await prepare(context); context.pointId = 'remote-point'; return result; };
+        const snapshot = await f.help.check();
+        const preview = await f.help.previewRemoteConfiguration(repairIssue(snapshot).id);
+        assert.equal(writes(f).length, 0);
+        const result = await f.help.applyRemoteConfiguration(preview);
+        assert.equal(result.ok, true);
+        assert.equal(result.pointId, 'remote-point');
+        assert.deepEqual(f.controller.store.enabled, ['Required', 'Consumer']);
+        assert.equal(f.state.restoreContexts[0].kind, 'remoteRepair');
+        assert.equal(f.state.reloadMessages?.length || 0, 0, '由远程界面单独控制重载，不打断结果回传');
+        await assert.rejects(() => f.help.applyRemoteConfiguration(preview), /预览已改变/);
+    }
+    {
+        const f = enableFixture();
+        const snapshot = await f.help.check();
+        const preview = await f.help.previewRemoteConfiguration(repairIssue(snapshot).id);
+        preview.after.enabled.reverse();
+        await assert.rejects(() => f.help.applyRemoteConfiguration(preview), /预览已改变/);
+        assert.equal(writes(f).length, 0);
+    }
+    {
+        const f = enableFixture();
+        const snapshot = await f.help.check();
+        const preview = await f.help.previewRemoteConfiguration(repairIssue(snapshot).id);
+        f.state.installed.Required.version = '2.0.0';
+        await assert.rejects(() => f.help.applyRemoteConfiguration(preview), /安装包已改变/);
+        assert.equal(writes(f).length, 0);
+    }
+    {
+        const f = enableFixture();
+        const snapshot = await f.help.check();
+        const preview = await f.help.previewRemoteConfiguration(repairIssue(snapshot).id);
+        const result = await f.help.applyRemoteConfiguration(preview);
+        assert.equal(result.ok, false);
+        assert.match(result.reason, /未建立远程修复前还原点/);
+        assert.equal(writes(f).length, 0);
+    }
 
     // 预览复用真实排序器，启用唯一 alias 提供者并排到消费者之前，预览本身零写入。
     {

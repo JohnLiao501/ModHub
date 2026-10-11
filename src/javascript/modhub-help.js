@@ -337,6 +337,40 @@
         } finally { repairing = false; }
     }
 
+    const remotePlans = new WeakMap();
+
+    async function previewRemoteConfiguration(issueId) {
+        const snapshot = await check();
+        const plan = await buildRepairPlan(snapshot, issueId);
+        const protectedNames = window.modHubRestore?.getRecoveryInfo?.(snapshot.lists.enabled, snapshot.packages)?.protectedNames || [];
+        if (plan.type === 'enable' && (plan.enableName === 'ModHub' || protectedNames.includes(plan.enableName))) {
+            throw new Error('远程协助不能启用恢复工具及其必要前置，请在本机模组管理中处理。');
+        }
+        const preview = { issueId, type: plan.type, enableName: plan.enableName || '',
+            before: plan.before, after: { enabled: plan.enabled, disabled: plan.disabled } };
+        remotePlans.set(preview, { plan, stamp: JSON.stringify(preview), snapshot: configurationStamp(snapshot) });
+        return preview;
+    }
+
+    async function applyRemoteConfiguration(preview) {
+        const record = remotePlans.get(preview);
+        if (!record || record.stamp !== JSON.stringify(preview)) throw new Error('配置修复预览已改变，请重新检查。');
+        if (repairing || busy()) throw new Error('另一项操作尚未完成，请稍后再试。');
+        repairing = true;
+        try {
+            const fresh = await check();
+            if (fresh.stale || configurationStamp(fresh) !== record.snapshot) throw new Error('配置或安装包已改变，请重新检查。');
+            const result = await window.modHubApplyHelpConfiguration(record.plan, { source: 'remoteRepair' });
+            if (!result?.ok) return result;
+            const after = await check();
+            if (after.stale || !after.lists.ok || JSON.stringify(after.lists.enabled) !== JSON.stringify(record.plan.enabled)
+                || JSON.stringify(after.lists.disabled) !== JSON.stringify(record.plan.disabled)
+                || after.issues.some(item => item.id === preview.issueId)) return { ok: false, pointId: result.pointId, reason: '配置已提交，但回读检查未通过。请核对配置或使用修复前时间点。' };
+            remotePlans.delete(preview);
+            return { ...result, status: 'saved' };
+        } finally { repairing = false; }
+    }
+
     function buildReport(snapshot, { allLogs = false } = {}) {
         if (!snapshot || snapshot.stale) return '';
         const runtime = snapshot.runtime || [];
@@ -401,6 +435,15 @@
         + 'AI 建议可能错误。代码改动须经您预览并确认，保存前强制建立时间点还原点；修改普通旁加载 ZIP 中选定的源码，保留启禁与顺序，不修改游戏 HTML、内嵌模组或 ModHub 恢复工具。重新导入或更新目标模组会覆盖修改。\n'
         + '保存成功不代表问题已解决。请重新载入并重复原操作验证；撤销使用修复前时间点，会一并还原该点覆盖的旁加载包和管理配置，确认页将列出影响。';
     const aiConnection = { endpoint: '', model: '', key: '', remember: false, maxRounds: 5, finiteRounds: 5 };
+    function redactRemoteCredentials(value) {
+        let remembered = '';
+        try { remembered = JSON.parse(localStorage.getItem('modhub_ai_connection') || '{}').key; } catch (_) {}
+        const keys = new Set([aiConnection.key, document.getElementById('modHubAiKey')?.value, remembered]
+            .filter(key => typeof key === 'string' && key.length));
+        let text = String(value ?? '');
+        for (const key of keys) text = text.split(key).join('[已隐去密钥]');
+        return text;
+    }
     const roundLimitText = maxRounds => maxRounds === 0 ? '不限轮次' : '最多发送 ' + maxRounds + ' 轮';
     let aiConnectionLoaded = false;
     const aiDraft = { description: '', modName: '', error: '' };
@@ -1176,7 +1219,7 @@
         let snapshot = null;
         let request = 0;
         const notice = MODHUB_AI_NOTICE.split('\n');
-        container.innerHTML = '<section id="modHubHelpAi" class="modhub-help-section"></section><div class="modhub-help-footer"><details class="modhub-help-topic modhub-help-notice"><summary>使用声明、数据与撤销范围</summary><dl>'
+        container.innerHTML = '<details id="modHubHelpRemote" class="modhub-help-section modhub-help-topic"><summary>远程协助</summary><div id="modHubHelpRemoteContent"></div></details><section id="modHubHelpAi" class="modhub-help-section"></section><div class="modhub-help-footer"><details class="modhub-help-topic modhub-help-notice"><summary>使用声明、数据与撤销范围</summary><dl>'
             + ['发送内容', '密钥保存', '应用修改', '验证与撤销'].map((title, index) => '<dt>' + title + '</dt><dd>' + escape(notice[index]) + '</dd>').join('') + '</dl></details>'
             + '<details id="modHubHelpLocalDetails" class="modhub-help-section modhub-help-topic"><summary>常见问题与配置修复</summary><div class="modhub-help-local-content"><p class="grey">查看排查步骤，检查配置，再预览可以执行的修复。</p>'
             + '<section class="modhub-help-local-group" aria-labelledby="modHubHelpChoiceTitle"><h4 id="modHubHelpChoiceTitle">选择问题</h4><label class="modhub-help-choice" for="modHubHelpSymptom">遇到了什么问题？<select id="modHubHelpSymptom"><option value="">不确定，检查全部</option>'
@@ -1189,6 +1232,7 @@
             + '<button id="modHubHelpCopy" type="button" class="macro-button modhub-btn-secondary" disabled>复制求助信息</button></div>'
             + '<textarea id="modHubHelpReport" class="modhub-help-report" aria-label="求助信息预览，可选择文本手动复制" readonly placeholder="生成报告后可在此预览和选择文本。"></textarea></details></div>';
         initAi(container.querySelector('#modHubHelpAi'), mounted);
+        window.modHubRemoteHelp?.mount(container.querySelector('#modHubHelpRemoteContent'), container.querySelector('#modHubHelpRemote'));
         const results = container.querySelector('#modHubHelpResults');
         const preview = container.querySelector('#modHubHelpReport');
         const allLogs = container.querySelector('#modHubHelpAllLogs');
@@ -1300,5 +1344,5 @@
         };
     }
 
-    window.modHubHelp = { init, openProblem, suggestQuestions, check, buildRepairPlan, repair, buildReport, copyReport };
+    window.modHubHelp = { init, openProblem, suggestQuestions, check, buildRepairPlan, repair, buildReport, copyReport, previewRemoteConfiguration, applyRemoteConfiguration, redactRemoteCredentials };
 })();

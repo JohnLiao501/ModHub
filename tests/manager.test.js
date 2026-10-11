@@ -113,7 +113,7 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.4.0', 'boot.json 版本号必须为 1.4.0');
+    assert.equal(bootJson.version, '1.5.0', 'boot.json 版本号必须为 1.5.0');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
@@ -121,7 +121,7 @@ module.exports = async function() {
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
         'javascript/modhub-log.js', 'javascript/modhub-market-variants.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
-        'javascript/modhub-ai-package.js', 'javascript/modhub-ai-repair.js', 'javascript/modhub-help.js',
+        'javascript/modhub-ai-package.js', 'javascript/modhub-ai-repair.js', 'javascript/modhub-remote-help.js', 'javascript/modhub-help.js',
     ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志、市场与帮助');
     assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-style.js', 'javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '样式守卫必须先于弹窗、面板与恢复引擎注入，早期模块必须先于业务脚本');
     for (const file of [...bootJson.scriptFileList_inject_early, ...bootJson.scriptFileList]) {

@@ -705,9 +705,14 @@ async function run() {
     const old = createBaseSandbox();
     loadScripts(old, ['javascript/modhub-restore.js']);
     assert.ok(old.modHubRestore, '旧沙箱暴露接口且不自动访问数据库');
+    assert.throws(() => old.modHubRestore.getStorageIdentity(), /不支持真实模组存储事务/);
 
     const h = harness();
     await h.api.startupReady;
+    assert.deepEqual(JSON.parse(JSON.stringify(h.api.getStorageIdentity())), { dbName: h.mod.name, storeName: h.mod.storeName });
+    const identity = h.api.getStorageIdentity();
+    identity.dbName = '伪造的身份';
+    assert.equal(h.api.getStorageIdentity().dbName, h.mod.name, '会话存储身份返回独立数据，不泄露数据库对象');
     const noChange = await prepareChange(h, '空操作');
     await h.api.finish(noChange);
     assert.equal((await h.api.list()).length, 0, '无实际变化不留还原点');

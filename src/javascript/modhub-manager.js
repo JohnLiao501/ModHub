@@ -2531,8 +2531,9 @@ window.modHubSmartSortAll = async function() {
 };
 
 // 帮助中心只应用已经预览的启用或加载顺序调整，保护与保存仍由管理器协调。
-window.modHubApplyHelpConfiguration = async function(plan) {
+window.modHubApplyHelpConfiguration = async function(plan, { source } = {}) {
     let failureReason = '';
+    let pointId = null;
     const sameNames = (left, right) => JSON.stringify(left) === JSON.stringify(right);
     const fail = message => { throw new Error(message); };
     const readNames = (names, label) => {
@@ -2543,6 +2544,7 @@ window.modHubApplyHelpConfiguration = async function(plan) {
     };
     const sameMembers = (left, right) => left.length === right.length && left.every(name => right.includes(name));
     try {
+        if (source !== undefined && source !== 'remoteRepair') fail('配置修复来源无效，请重新预览。');
         const restore = window.modHubRestore;
         if (!restore || ['createOperation', 'claim', 'release', 'prepare', 'finish', 'isRestoring', 'isOperationBlocked', 'keepRecoveryOrder']
             .some(name => typeof restore[name] !== 'function')) fail('时间点还原尚未就绪，无法保护修复前配置。请重新载入后重试。');
@@ -2573,6 +2575,11 @@ window.modHubApplyHelpConfiguration = async function(plan) {
             return { name: item.name, bootJson: JSON.stringify(item.bootJson) };
         });
         const profiles = packages.map(item => ({ name: item.name, bootJson: JSON.parse(item.bootJson) }));
+        if (source === 'remoteRepair' && type === 'enable') {
+            if (typeof restore.getRecoveryInfo !== 'function') fail('恢复工具保护接口尚未就绪，无法继续远程修复。');
+            const protectedNames = restore.getRecoveryInfo(beforeNames, profiles).protectedNames || [];
+            if (['modhub', 'tweereplacer', ...protectedNames.map(name => name.toLowerCase())].includes(enableName.toLowerCase())) fail('远程修复不能更改恢复工具或必要前置的启用状态，请在模组管理中自行处理。');
+        }
         if (!sameNames(window.modHubKeepRecoveryOrder(enabled, profiles), enabled)) fail('修复计划不符合恢复工具及其必要前置的加载顺序，请重新检查。');
         if (typeof window.modHubReadInstalledModBoot !== 'function') fail('包体读取接口尚未就绪，请重新载入后重试。');
         if (window._modHubManagerBusy || window._modHubModLoading || restore.isRestoring() || restore.isOperationBlocked()) fail('已有模组操作尚未完成，请稍候再试。');
@@ -2616,7 +2623,11 @@ window.modHubApplyHelpConfiguration = async function(plan) {
                 throw error;
             }
         }, '正在保护并保存帮助中心修复...', {
-            trackReload: true, immediateReload: true, restoreLabel: '帮助中心修复前', restoreKind: 'manual',
+            trackReload: true, immediateReload: true, restoreLabel: source === 'remoteRepair' ? '远程协助修复前' : '帮助中心修复前', restoreKind: source || 'manual',
+            onRestoreContext: context => {
+                pointId = context?.pointId || null;
+                if (source === 'remoteRepair' && !pointId) fail('未建立远程修复前还原点，已停止写入。');
+            },
             onError: error => {
                 const reason = error?.message || String(error);
                 if (!failureReason) failureReason = reason;
@@ -2624,15 +2635,15 @@ window.modHubApplyHelpConfiguration = async function(plan) {
             }
         });
         if (saved !== true || window._modHubManagerSaveFailed || window._modHubManagerStateUncertain) {
-            return { ok: false, reason: failureReason || window._modHubManagerStatus || '修复未完成，请核实配置后重试。' };
+            return { ok: false, pointId, reason: failureReason || window._modHubManagerStatus || '修复未完成，请核实配置后重试。' };
         }
-        return { ok: true };
+        return { ok: true, pointId };
     } catch (error) {
-        return { ok: false, reason: error?.message || String(error) };
+        return { ok: false, pointId, reason: error?.message || String(error) };
     }
 };
 
-// AI 只能替换已确认的单个旁加载包，事务不修改启禁配置。
+// 代码修复只能替换已确认的单个旁加载包，事务不修改启禁配置。
 window.modHubApplyAiPackage = async function(plan) {
     let pointId = null, reason = '', committed = false;
     const fail = message => { throw new Error(message); };
@@ -2653,6 +2664,9 @@ window.modHubApplyAiPackage = async function(plan) {
         return [...value];
     };
     try {
+        const source = plan?.source === undefined ? 'aiRepair' : plan.source;
+        if (!['aiRepair', 'remoteRepair'].includes(source)) fail('代码修复来源无效，请重新预览。');
+        const repairLabel = source === 'remoteRepair' ? '远程协助' : 'AI';
         const name = plan?.name;
         if (typeof name !== 'string' || !name.trim() || name !== name.trim()) fail('修复模组技术名无效。');
         const enabled = names(plan.enabled, '启用列表'), disabled = names(plan.disabled, '禁用列表');
@@ -2663,7 +2677,7 @@ window.modHubApplyAiPackage = async function(plan) {
         const restore = window.modHubRestore;
         if (!restore || ['createOperation', 'prepare', 'finish', 'claim', 'release', 'getRecoveryInfo', 'isRestoring', 'isOperationBlocked']
             .some(key => typeof restore[key] !== 'function')) fail('时间点还原尚未就绪，无法保护修复前包体。');
-        if (['modhub', 'tweereplacer'].includes(name.toLowerCase())) fail('不能通过 AI 改写 ModHub 或必要恢复前置，请使用作者提供的安装包。');
+        if (['modhub', 'tweereplacer'].includes(name.toLowerCase())) fail(`不能通过 ${repairLabel} 改写 ModHub 或必要恢复前置，请使用作者提供的安装包。`);
         const utils = window.modHubGetGui()?.gModUtils;
         const loader = utils?.getModLoader?.()?.getIndexDBLoader?.(), schema = loader?.constructor;
         if (typeof loader?.customStore !== 'function' || typeof schema?.calcModNameKey !== 'function' ||
@@ -2705,10 +2719,11 @@ window.modHubApplyAiPackage = async function(plan) {
                 profiles.push(profile);
             }
             const protectedNames = restore.getRecoveryInfo([...enabled, ...disabled], profiles).protectedNames || [];
-            if (protectedNames.some(value => value.toLowerCase() === name.toLowerCase())) fail('修复目标属于恢复工具的必要前置，不能通过 AI 改写，请使用作者提供的安装包。');
+            if (protectedNames.some(value => value.toLowerCase() === name.toLowerCase())) fail(`修复目标属于恢复工具的必要前置，不能通过 ${repairLabel} 改写，请使用作者提供的安装包。`);
             const originalBoot = await controller.checkModZipFileIndexDB(original.data), newBoot = await controller.checkModZipFileIndexDB(nextBytes);
             if (!originalBoot || originalBoot.name !== name || !newBoot || newBoot.name !== name) fail('修复包体更改了模组清单或技术名，已停止写入。');
             if (!same(originalBoot, newBoot)) {
+                if (source === 'remoteRepair') fail('远程修复不能修改 boot.json 包体声明。');
                 if (!window.modHubAiPackage?.validatePatchBoot) fail('无法核验补丁查找串修改，已停止写入。');
                 window.modHubAiPackage.validatePatchBoot(originalBoot, newBoot);
             }
@@ -2738,8 +2753,8 @@ window.modHubApplyAiPackage = async function(plan) {
                 }
             }
             return true;
-        }, '正在保护并保存 AI 修复包体...', {
-            restoreLabel: `AI 修复前：${name}`, restoreKind: 'aiRepair', immediateReload: true,
+        }, `正在保护并保存 ${repairLabel} 修复包体...`, {
+            restoreLabel: `${source === 'remoteRepair' ? '远程协助' : 'AI '}修复前：${name}`, restoreKind: source, immediateReload: true,
             onRestoreContext: context => { pointId = context?.pointId || null; if (!pointId) fail('未建立修复前还原点，已停止写入。'); },
             onError: error => { reason = error?.message || String(error); }
         });

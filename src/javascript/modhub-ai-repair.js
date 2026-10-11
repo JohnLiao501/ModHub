@@ -40,8 +40,8 @@
         return { enabled: [...lists.enabled], disabled: [...lists.disabled] };
     }
 
-    async function readPackage(name) {
-        if (protectedName(name)) fail('当前不允许 AI 改写 ModHub 或 TweeReplacer，以保留修复和还原入口。');
+    async function readPackage(name, source) {
+        if (protectedName(name)) fail('当前不允许 ' + (source === 'remoteRepair' ? '远程协助' : 'AI') + ' 改写 ModHub 或 TweeReplacer，以保留修复和还原入口。');
         const result = await window.modHubReadInstalledModPackage?.(name);
         if (result?.error) throw result.error;
         if (!result || result.missing || !result.data || result.bootJson?.name !== name) fail('无法读取选定旁加载模组的原安装包，请刷新列表后重试。');
@@ -183,11 +183,32 @@
         for (const source of sources.sourcePackages.values()) source.files = source.files.filter(file => file.path !== 'boot.json' || canReadPatchBoot(source.boot, evidence));
     }
 
-    function sanitize(value) {
+    function redactSecrets(value) {
         return String(value ?? '').replace(/\bBearer\s+[^\s"'<>]+/gi, 'Bearer [已隐去]')
             .replace(/(["']?(?:api[\s_-]?key|(?:access|refresh|auth)[_-]?token|token|authorization|password|(?:client[_-]?)?secret)["']?\s*[=:]\s*)(?:"[^"]*"|'[^']*'|[^\s,;}]+)/gi, '$1[已隐去]')
-            .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[已隐去密钥]')
-            .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[已隐去邮箱]');
+            .replace(/\bsk-[A-Za-z0-9_-]{8,}\b/g, '[已隐去密钥]');
+    }
+
+    function sanitize(value) {
+        return redactSecrets(value).replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, '[已隐去邮箱]');
+    }
+
+    function rememberedKey() {
+        try { const key = JSON.parse(window.localStorage?.getItem('modhub_ai_connection') || '{}').key; return typeof key === 'string' ? key : ''; }
+        catch (_) { return ''; }
+    }
+
+    function sanitizeText(value) {
+        const key = rememberedKey();
+        const text = sanitize(value);
+        return key ? text.split(key).join('[已隐去密钥]') : text;
+    }
+
+    function remoteMaterial(name, version, files) {
+        const material = json({ name, version, files });
+        const key = rememberedKey();
+        if (redactSecrets(material) !== material || key && material.includes(key)) fail('所选源码包含疑似密钥或凭证，无法发送。请移除凭证后重新整理；本次未修改源码。');
+        return material;
     }
 
     function selectedLog(logError) {
@@ -433,7 +454,9 @@
         return { paths, reason, omitted, matchedPaths, ambiguousNames, totalSize: chosen.reduce((size, file) => size + file.size, 0) };
     }
 
-    async function prepare(name, description, { paths, logError = '', includeSources = false, maxRounds } = {}, continuationPlan) {
+    async function prepare(name, description, { paths, logError = '', includeSources = false, maxRounds, source } = {}, continuationPlan) {
+        if (source !== undefined && source !== 'remoteRepair') fail('材料来源无效，请重新预览。');
+        if (source === 'remoteRepair' && (includeSources || continuationPlan || logError)) fail('远程源码材料只能包含本次指定的声明文件。');
         maxRounds = normalizeMaxRounds(maxRounds);
         const currentRevision = ++revision;
         checkDescription(description);
@@ -441,7 +464,18 @@
         if (typeof includeSources !== 'boolean') fail('源码目录选项格式无效，请重新整理材料。');
         const lists = await readLists();
         if (![...lists.enabled, ...lists.disabled].includes(name)) fail('选定模组不在已保存的旁加载配置中。');
-        const installed = await readPackage(name);
+        const installed = await readPackage(name, source);
+        if (source === 'remoteRepair') {
+            if (typeof window.modHubRestore?.getRecoveryInfo !== 'function') fail('恢复工具保护接口尚未就绪，无法准备远程源码。');
+            const profiles = [];
+            for (const target of [...lists.enabled, ...lists.disabled]) {
+                const profile = await window.modHubReadInstalledModBoot(target);
+                if (profile?.error || !profile?.bootJson) fail('无法核验恢复工具及必要前置，请刷新模组列表后重试。');
+                profiles.push(profile);
+            }
+            const protectedNames = window.modHubRestore.getRecoveryInfo([...lists.enabled, ...lists.disabled], profiles).protectedNames || [];
+            if (protectedNames.some(target => target.toLowerCase() === name.toLowerCase())) fail('远程协助不能读取或改写恢复工具的必要前置，请使用作者提供的安装包。');
+        }
         const archive = await window.modHubAiPackage.read(installed.data);
         const hash = await window.modHubAiPackage.hash(archive.bytes);
         const sources = includeSources ? await readSourceCatalog(lists, currentRevision)
@@ -458,6 +492,7 @@
         if (!Array.isArray(selected) || selected.some(path => typeof path !== 'string' || !fileNames.some(item => item.path === path))
             || new Set(selected).size !== selected.length) fail('请选择安装包中已声明的源码文件，不能指定其他路径。');
         if (selected.length > 20) fail('一次最多发送 20 个文件，请选择与异常有关的文件。');
+        if (source === 'remoteRepair' && selected.includes('boot.json')) fail('远程协助不能读取或修改 boot.json 包体声明。');
         if (selected.includes('boot.json') && !canReadPatchBoot(installed.bootJson, game.gameEvidence)) fail('boot.json 补丁修复需要本次已确认的对应游戏段落原文证据，请重新整理带源码目录的材料。');
         const files = [];
         let total = evidenceSize(game);
@@ -471,8 +506,8 @@
             if (total > MODHUB_AI_TOTAL_LIMIT) fail('选定源码合计超过 512 KiB，请减少文件数量。');
             files.push({ path, content });
         }
-        const baseMaterial = files.length || includeSources ? buildMaterial(name, installed.bootJson, lists, description, files, logError) : '';
-        const material = baseMaterial ? json({ ...JSON.parse(baseMaterial), ...(includeSources ? { sourceCatalog: sources.sourceCatalog, sourceUnavailable: sources.sourceUnavailable } : {}),
+        const baseMaterial = source !== 'remoteRepair' && (files.length || includeSources) ? buildMaterial(name, installed.bootJson, lists, description, files, logError) : '';
+        const material = source === 'remoteRepair' ? remoteMaterial(name, String(installed.bootJson.version || ''), files) : baseMaterial ? json({ ...JSON.parse(baseMaterial), ...(includeSources ? { sourceCatalog: sources.sourceCatalog, sourceUnavailable: sources.sourceUnavailable } : {}),
             gameEvidence: game.gameEvidence, gameEvidenceOmitted: game.gameEvidenceOmitted, diagnosisContext: { round: 1, maxRounds } }) : '';
         await assertSourcePackagesCurrent(sources.sourcePackages);
         if (currentRevision !== revision || listStamp(await readLists()) !== listStamp(lists)
@@ -486,7 +521,7 @@
             sourceUnavailable: copy(sources.sourceUnavailable), logsOnly: includeSources && !files.length,
             round: 1, maxRounds, history: [], readHistory: mergeReadHistory([], name, files.map(file => file.path)),
             sourceEvidence: [], sourceEvidenceOmitted: [], searchHistory: [], ...game,
-            revision: currentRevision, stamp: preparationStamp(prepared) });
+            revision: currentRevision, stamp: preparationStamp(prepared), source });
         return prepared;
     }
 
@@ -572,7 +607,7 @@
     async function assertCurrent(record) {
         if (record.revision !== revision) fail('材料已经过期，请重新预览后分析。');
         if (listStamp(await readLists()) !== listStamp(record.lists)
-            || record.name && await window.modHubAiPackage.hash((await readPackage(record.name)).data) !== record.hash) fail('模组配置或安装包已改变，请重新预览后分析。');
+            || record.name && await window.modHubAiPackage.hash((await readPackage(record.name, record.source)).data) !== record.hash) fail('模组配置或安装包已改变，请重新预览后分析。');
         await assertSourcePackagesCurrent(record.sourcePackages);
         for (const [passage, data] of record.gamePassages || []) {
             if (readGamePassage(passage)?.content !== data.content) fail('已确认的游戏段落原文发生变化：【' + passage + '】请重新整理并确认分析材料。');
@@ -887,11 +922,54 @@
         return { changes: changes.map(({ start, end, ...change }) => change), replacements };
     }
 
+    async function buildPlan(record, value, { changes, replacements }, details, checkPending = () => {}) {
+        const data = changes.length ? await window.modHubAiPackage.replace(record.archive, replacements) : null;
+        const resultHash = data && await window.modHubAiPackage.hash(data);
+        await assertCurrent(record);
+        checkPending();
+        const diff = changes.map(change => '文件：' + change.path + '\n原因：' + change.reason + '\n\n修改前：\n' + change.before + '\n\n修改后：\n' + change.after).join('\n\n--------------------\n\n');
+        const plan = { name: record.name, summary: value.summary, evidence: value.evidence, verification: value.verification,
+            changes, diff, data: data && new Uint8Array(data), revision: record.revision, ...details };
+        plans.set(plan, { ...record, data: data && new Uint8Array(data), stamp: planStamp(plan), ...details,
+            readRequest: details.readRequest && copy(details.readRequest),
+            diagnostic: { summary: sanitize(value.summary), evidence: sanitize(value.evidence), reason: sanitize(value.readRequest?.reason) },
+            lastDiagnostic: details.validationFeedback?.kind === 'response-format' ? record.lastDiagnostic
+                : { summary: sanitize(value.summary), evidence: sanitize(value.evidence), verification: sanitize(value.verification) }, resultHash });
+        return plan;
+    }
+
+    async function previewResponse(prepared, response, { source } = {}) {
+        if (source !== 'remoteRepair') fail('远程修复来源无效，请重新预览。');
+        const record = preparations.get(prepared);
+        if (!record || record.source !== source || record.stamp !== preparationStamp(prepared)) fail('远程修复材料已改变或未经本机准备，请重新预览。');
+        await assertCurrent(record);
+        if (!response || typeof response !== 'object' || Array.isArray(response)
+            || Object.keys(response).some(key => !['summary', 'evidence', 'verification', 'changes'].includes(key))) fail('远程修复须提供明确说明及原文替换，不能包含其他操作。');
+        if (byteLength(json(response)) > MODHUB_AI_RESPONSE_LIMIT) fail('远程修复方案超过 1 MiB，无法完整预览。');
+        const value = copy(response);
+        if (!record.files.length || record.files.some(file => file.path === 'boot.json') || Array.isArray(value.changes) && value.changes.some(change => change?.path === 'boot.json')) fail('远程修复只能修改已准备的声明源码，不能修改 boot.json。');
+        let validated;
+        try { validated = validateResponse(value, record.files, false, record); }
+        catch (error) { fail(String(error.message || error).replace(/^AI(?=\s)/, '远程协助')); }
+        if (!validated.changes.length) fail('远程修复方案没有实际修改。');
+        return buildPlan(record, value, validated, { mode: 'structured', notice: '', readRequest: null, repairTargets: [],
+            canTriage: false, responseCorrection: false, validationFeedback: null, canContinue: false, continuationReason: '' });
+    }
+
+    async function getVerification(plan) {
+        const record = plans.get(plan);
+        if (!record || record.stamp !== planStamp(plan) || !record.data || !plan.data
+            || await window.modHubAiPackage.hash(plan.data) !== record.resultHash) fail('修复预览已改变，无法核验记录。');
+        return { name: record.name, beforeHash: record.hash, afterHash: record.resultHash,
+            enabled: [...record.lists.enabled], disabled: [...record.lists.disabled] };
+    }
+
     async function analyze(prepared, { endpoint, model, key = '', signal, onProgress } = {}) {
         const progress = stage => emitProgress(onProgress, stage);
         progress('preflight');
         const record = preparations.get(prepared);
         if (!record || record.stamp !== preparationStamp(prepared)) fail('待发送材料已改变，请重新预览。');
+        if (record.source === 'remoteRepair') fail('远程协助材料不能转发至 AI 服务，请重新确认分析范围。');
         if (!record.files.length && !record.logsOnly && !record.sourceEvidence?.length) fail('请至少选择一个相关源码文件并预览材料。');
         if (!record.description.trim()) fail('请先描述实际现象、触发步骤和预期结果。');
         const url = validateConnection({ endpoint, model, key });
@@ -964,24 +1042,12 @@
                 mode = 'source-request';
                 notice = 'AI 需要补充已声明的源码继续定位。新增源码须在已确认范围内发送；代码修改需要单独确认。';
             }
-            const data = changes.length ? await window.modHubAiPackage.replace(record.archive, replacements) : null;
-            const resultHash = data && await window.modHubAiPackage.hash(data);
-            await assertCurrent(record);
-            if (controller.signal.aborted) fail(timedOut ? 'AI 分析超过 90 秒，请稍后重试。' : '已取消分析。');
-            const diff = changes.map(change => '文件：' + change.path + '\n原因：' + change.reason + '\n\n修改前：\n' + change.before + '\n\n修改后：\n' + change.after).join('\n\n--------------------\n\n');
             const targets = changes.length ? [] : repairTargets(record);
             const canTriage = !validationFeedback && !changes.length && !readRequest && !record.triaged && !record.repairIntent && targets.length > 0
                 && (!record.maxRounds || (record.round || 1) < record.maxRounds);
-            const plan = { name: record.name, summary: value.summary, evidence: value.evidence, verification: value.verification,
-                changes, diff, data: data && new Uint8Array(data), revision: record.revision, mode, notice, readRequest,
-                repairTargets: targets, canTriage, responseCorrection, validationFeedback, ...continuation };
-            plans.set(plan, { ...record, data: data && new Uint8Array(data), stamp: planStamp(plan),
-                readRequest: readRequest && copy(readRequest), canTriage, responseCorrection, validationFeedback,
-                diagnostic: { summary: sanitize(value.summary), evidence: sanitize(value.evidence), reason: sanitize(value.readRequest?.reason) },
-                lastDiagnostic: validationFeedback?.kind === 'response-format' ? record.lastDiagnostic
-                    : { summary: sanitize(value.summary), evidence: sanitize(value.evidence), verification: sanitize(value.verification) },
-                ...continuation, resultHash });
-            return plan;
+            return await buildPlan(record, value, { changes, replacements }, { mode, notice, readRequest,
+                repairTargets: targets, canTriage, responseCorrection, validationFeedback, ...continuation },
+            () => { if (controller.signal.aborted) fail(timedOut ? 'AI 分析超过 90 秒，请稍后重试。' : '已取消分析。'); });
         } catch (error) {
             if (controller.signal.aborted) fail(timedOut ? 'AI 分析超过 90 秒，请稍后重试。' : '已取消分析。');
             const message = String(error?.message || error);
@@ -1260,11 +1326,12 @@
                 || !record.data || !plan.data || await window.modHubAiPackage.hash(plan.data) !== record.resultHash) fail('修复预览已改变或没有可应用的代码修改，请重新分析。');
             await assertCurrent(record);
             const result = await window.modHubApplyAiPackage({ name: record.name, baselineData: new Uint8Array(record.archive.bytes),
-                data: new Uint8Array(record.data), enabled: [...record.lists.enabled], disabled: [...record.lists.disabled] });
+                data: new Uint8Array(record.data), enabled: [...record.lists.enabled], disabled: [...record.lists.disabled],
+                ...(record.source === 'remoteRepair' ? { source: record.source } : {}) });
             if (result?.ok) revision++;
             return result;
         } catch (error) { return { ok: false, reason: String(error?.message || error) }; }
     }
 
-    window.modHubAiRepair = { maxRounds: MODHUB_AI_MAX_ROUNDS, normalizeMaxRounds, listTargets, recommendFiles, prepare, prepareLogs, prepareRequestedSources, prepareInvestigation, prepareRepair, prepareTriage, validateConnection, testConnection, analyze, apply };
+    window.modHubAiRepair = { maxRounds: MODHUB_AI_MAX_ROUNDS, normalizeMaxRounds, listTargets, recommendFiles, prepare, prepareLogs, prepareRequestedSources, prepareInvestigation, prepareRepair, prepareTriage, validateConnection, testConnection, analyze, apply, previewResponse, getVerification, sanitizeText };
 })();
