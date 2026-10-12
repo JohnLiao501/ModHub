@@ -414,7 +414,7 @@
             const before = await snapshot(env, rows);
             const repair = ['aiRepair', 'remoteRepair'].includes(context.kind);
             const point = { version: 1, id: context.id, label: context.label, kind: repair ? 'auto' : context.kind,
-                ...(repair ? { operation: context.kind } : {}), userProtected: false, roundId: context.roundId, at: Date.now(), pending: context.kind === 'auto', source: sourceMetadata(env), state: before.state };
+                ...(repair ? { operation: context.kind } : {}), userProtected: context.kind === 'remoteRepair', roundId: context.roundId, at: Date.now(), pending: context.kind === 'auto', source: sourceMetadata(env), state: before.state };
             // 先保留原历史；无变化时撤销本点，不让空操作挤掉最旧的有效点。
             const next = [point, ...points];
             const values = [...before.blobs].filter(([hash]) => !before.rows.has(MODHUB_BLOB_PREFIX + hash)).map(([hash, data]) => [MODHUB_BLOB_PREFIX + hash, data]);
@@ -526,7 +526,7 @@
         }));
         return {
             config: { ...policyConfig },
-            points: points.map(({ id, label, roundId, at, state, summary, source, kind, operation, userProtected }) => ({ id, label, roundId, at, modCount: state.packages.length, summary, source, kind: displayPointKind({ id, label, kind, operation, summary }), protected: protectedIds.has(id), userProtected: userProtected === true, systemProtected: (reasons.get(id) || []).some(reason => reason !== '手动保护'), protectionReasons: reasons.get(id) || [] })),
+            points: points.map(({ id, label, roundId, at, state, summary, source, kind, operation, userProtected }) => ({ id, label, roundId, at, modCount: state.packages.length, summary, source, operation, kind: displayPointKind({ id, label, kind, operation, summary }), protected: protectedIds.has(id), userProtected: userProtected === true, systemProtected: (reasons.get(id) || []).some(reason => reason !== '手动保护'), protectionReasons: reasons.get(id) || [] })),
             usageBytes: [...sizes.values()].reduce((total, size) => total + size, 0),
             protectedIds: [...protectedIds],
             recommendedId: points.find(point => point.id === firstId)?.id || points.filter(point => point.roundId === points[0]?.roundId).at(-1)?.id || null,

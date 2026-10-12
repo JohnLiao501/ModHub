@@ -5,6 +5,62 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 旧索引的功能入口名称逐项隔离，只允许使用已经保留的 Wiki 标题恢复。
+    {
+        const market = loadMarket().modHubMarket;
+        const mods = [
+            { id: 'qq-only', name: 'QQ群', githubUrl: 'https://github.com/Owner/Project' },
+            { id: 'tieba-only', name: '百度贴吧', wikiName: '百度贴吧' },
+            { id: 'utilities', name: 'QQ / GitHub / 百度贴吧' },
+            { id: 'unresolved', name: '候选甲 / 候选乙', titleStatus: 'ambiguous' },
+            { id: 'missing', titleStatus: 'missing', wikiName: 'QQ群', wikiLegacyName: '不能用旧别名猜标题' },
+            { id: 'recovered', name: 'QQ群', wikiName: '[测试] Discord NPC 扩展' },
+            { id: 'retained', name: null, titleStatus: 'missing', wikiName: '保留的真实标题' },
+            { id: 'real-qq', name: 'QQ 互动增强' },
+            { id: 'community-qq', name: 'QQ群', catalogSource: 'community' },
+            { id: 'community-github', name: '[测试] GitHub NPC 扩展', catalogSource: 'community' },
+            null, '无效条目'
+        ];
+        const normalized = market.normalizeReleaseIndex({ schemaVersion: 1, mods });
+        assert.deepEqual(Array.from(normalized, mod => [mod.id, mod.name]), [
+            ['recovered', '[测试] Discord NPC 扩展'], ['retained', '保留的真实标题'],
+            ['real-qq', 'QQ 互动增强'], ['community-qq', 'QQ群'], ['community-github', '[测试] GitHub NPC 扩展']
+        ], '错误标题不能污染整个快照，也不能修改合法子串标题与社区审核原名');
+        assert.equal(mods[5].name, 'QQ群', '标题恢复不能改写输入快照');
+        assert.equal(mods[5].wikiName, '[测试] Discord NPC 扩展');
+        assert.equal(normalized[0].titleStatus, 'resolved');
+        assert.deepEqual(Array.from(market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 1,
+            withdrawnIds: ['recovered', 'community-qq'], mods }), mod => mod.id),
+            ['retained', 'real-qq', 'community-github'], '恢复标题及保留社区原名不能解除下架保护');
+    }
+    // 所有旧缓存读点共用标题校验，保留快照内容和时间，不让管理页复活污染项。
+    {
+        const sb = loadMarket(), market = sb.modHubMarket, key = 'modhub_market_wiki_v5';
+        const mods = [
+            { id: 'polluted', name: 'QQ群', bootNames: ['Polluted'], githubUrl: 'https://github.com/Owner/Polluted', version: '2.0', versionSource: 'github' },
+            { id: 'recovered', name: '百度贴吧', wikiName: '恢复后的真实标题', bootNames: ['Recovered'], githubUrl: 'https://github.com/Owner/Recovered', version: '2.0', versionSource: 'github' },
+            { id: 'real-qq', name: 'QQ 互动增强', bootNames: ['Legitimate'], githubUrl: 'https://github.com/Owner/Legitimate', version: '2.0', versionSource: 'github' },
+            { id: 'community', name: 'QQ群', catalogSource: 'community', bootNames: ['Community'], description: '审核说明' },
+            { id: 'unresolved', name: '候选标题', titleStatus: 'ambiguous', bootNames: ['Unresolved'] }
+        ];
+        const saved = JSON.stringify({ timestamp: Date.now(), data: mods });
+        sb.localStorage.setItem(key, saved);
+        sb.modHubGetGui = () => ({ gModUtils: { getModList: () => ['Polluted', 'Recovered', 'Legitimate', 'Community', 'Unresolved']
+            .map(name => ({ name, bootJson: { name, version: '1.0' } })) } });
+        assert.equal(market.findMarketModByLocalName('Polluted'), null, '身份反查不能读取污染缓存');
+        assert.equal(market.findMarketModByLocalName('Unresolved'), null);
+        assert.equal(market.findMarketModByLocalName('Recovered').name, '恢复后的真实标题');
+        assert.equal(market.getStaticMarketModSubtext('Polluted'), '', '静态简介不能直接显示旧联系标签');
+        assert.equal(market.getStaticMarketModSubtext('Recovered'), '恢复后的真实标题');
+        assert.equal(market.getStaticMarketModSubtext('Community'), 'QQ群', '社区审核原名仍可查询');
+        assert.deepEqual(Array.from(market.getUpdatableMods(), item => item.marketMod.id), ['recovered', 'real-qq'],
+            '更新查询预热缓存时同样隔离污染条目');
+        market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 2, withdrawnIds: ['recovered'], mods: [] });
+        sb.fetch = async () => { throw new Error('模拟旧缓存离线'); };
+        assert.deepEqual(Array.from(await market.loadMarketData(), mod => mod.id), ['real-qq', 'community'],
+            '离线列表继续过滤旧污染项及已撤回的恢复条目');
+        assert.equal(sb.localStorage.getItem(key), saved, '只读修复不刷新旧快照内容或时间');
+    }
     // 普通加载共用在途请求，多个强制刷新顺序获取一份新目录。
     {
         const sb = loadMarket(), market = sb.modHubMarket;
@@ -694,7 +750,7 @@ module.exports = async function() {
         const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketSections',
             'modHubMarketStats', 'modHubCategoryCapsules', 'modHubMarketFilterFooter', 'modHubMarketSpellNote',
             'modHubMarketSearch', 'modHubStatusSelect', 'modHubSortSelect', 'modHubMirrorSelect',
-            'modHubMarketBatchToolbar', 'modHubMarketBtnResetFilter'].map(id => [id, createStubElement()]));
+            'modHubMarketBatchToolbar', 'modHubMarketBtnResetFilter', 'modHubMarketBtnSubmit', 'modHubMarketBtnFeedback', 'modHubMarketBtnMy'].map(id => [id, createStubElement()]));
         sb.document.getElementById = id => elements.get(id) || null;
         const record = { id: 'external-v1', fileName: 'external.zip', format: 'ModLoader Zip', bootName: 'External',
             version: '1.0', gameVersionRange: '', dependencies: [{ id: 'Replace', version: '^1.0' }],
@@ -717,7 +773,7 @@ module.exports = async function() {
         const cards = () => elements.get('modHubMarketCardsContainer').innerHTML;
         const sections = () => elements.get('modHubMarketSections').innerHTML;
         const search = elements.get('modHubMarketSearch');
-        assert.ok(sections().includes('MOD 与美化（2）') && sections().includes('咒语（1）'), '板块入口直接显示两区数量');
+        assert.ok(sections().includes('MOD 与美化（2）') && sections().includes('言灵（1）'), '板块入口直接显示两区数量');
         assert.ok(sections().includes('data-section="packages" aria-pressed="true"'), '默认明确选中 MOD 与美化');
         const externalCard = cards().split('data-mod-name="外部资料"')[1].split('<div class="childItem modhub-market-card')[0];
         assert.ok(!externalCard.includes('>主页</a>') && !externalCard.includes('外部主页') && !externalCard.includes('获取与适配说明'));
@@ -746,7 +802,7 @@ module.exports = async function() {
         assert.equal((sb.modHubMarketSpells.acquisitionHtml(sameGithub).match(/href="https:\/\/github\.com\/Owner\/Only"/g) || []).length, 1,
             '同一来源的原帖和下载地址相同时只显示一个链接');
         assert.ok(cards().includes('btn-market-install'), '普通 GitHub 条目仍可进入原有安装入口');
-        assert.ok(!cards().includes('独立咒语') && !elements.get('modHubCategoryCapsules').innerHTML.includes('咒语配方'), '咒语独立于模组卡片和分类');
+        assert.ok(!cards().includes('独立咒语') && !elements.get('modHubCategoryCapsules').innerHTML.includes('言灵配方'), '言灵独立于模组卡片和分类');
 
         search.value = '外部资料';
         sb.modHubMarket.selectMarketSection('packages');
@@ -762,8 +818,10 @@ module.exports = async function() {
         sb.modHubMarket.setBatchModSelected(selectedKey, true);
         assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '用例先明确勾选可安装 MOD');
         assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
-        assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话进入咒语不清除 MOD 勾选');
+        assert.equal(elements.get('modHubMarketBtnSubmit').textContent, '投稿候选言灵', '言灵板块提供明确投稿入口');
+        assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话进入言灵不清除 MOD 勾选');
         assert.equal(sb.modHubMarket.selectMarketSection('packages'), true);
+        assert.equal(elements.get('modHubMarketBtnSubmit').textContent, '推荐模组', '原模组推荐入口保持不变');
         assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话返回 MOD 区恢复原勾选');
         assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
         let finishManagerRead, startedManagerRead;
@@ -772,14 +830,14 @@ module.exports = async function() {
         sb.modHubLoadModManageState = () => { startedManagerRead(); return new Promise(resolve => { finishManagerRead = resolve; }); };
         const reopening = sb.modHubInitMarket();
         await managerReadStarted;
-        assert.equal(elements.get('modHubMarketBatchToolbar').hidden, true, '重新进入咒语区时，管理状态读取未完成也必须立即隐藏批量栏');
-        assert.ok(elements.get('modHubModMarketContainer').innerHTML.includes('aria-label="模组多选安装" hidden'), '初始DOM就隐藏咒语板块的批量入口');
-        assert.equal(await sb.modHubMarket.installSelectedMods(), false, '咒语期间残留的批量动作不能安装已勾选 MOD');
+        assert.equal(elements.get('modHubMarketBatchToolbar').hidden, true, '重新进入言灵区时，管理状态读取未完成也必须立即隐藏批量栏');
+        assert.ok(elements.get('modHubModMarketContainer').innerHTML.includes('aria-label="模组多选安装" hidden'), '初始DOM就隐藏言灵板块的批量入口');
+        assert.equal(await sb.modHubMarket.installSelectedMods(), false, '言灵期间残留的批量动作不能安装已勾选 MOD');
         assert.equal(sb.modHubMarket.isInstallBusy(), false, '阻止动作不建立安装或恢复上下文');
         finishManagerRead();
         await reopening;
         sb.modHubLoadModManageState = originalManagerRead;
-        assert.equal(search.value, '', '首次进入咒语区不继承 MOD 搜索');
+        assert.equal(search.value, '', '首次进入言灵区不继承 MOD 搜索');
         assert.ok(cards().includes('独立咒语') && !cards().includes('btn-market-install'));
         assert.ok(sections().includes('data-section="spells" aria-pressed="true"'));
         assert.equal(elements.get('modHubMarketBatchToolbar').hidden, true);
@@ -790,9 +848,9 @@ module.exports = async function() {
         assert.equal(elements.get('modHubCategoryCapsules').style.display, 'none');
         search.value = '不匹配';
         search.oninput();
-        assert.ok(cards().includes('没有匹配的咒语配方'));
+        assert.ok(cards().includes('没有匹配的言灵配方'));
         sb.modHubMarket.resetFilters();
-        assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'spells', '清除咒语搜索保持当前板块');
+        assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'spells', '清除言灵搜索保持当前板块');
         assert.ok(cards().includes('独立咒语'));
         search.value = '原文';
         search.oninput();
@@ -801,14 +859,14 @@ module.exports = async function() {
         assert.equal(elements.get('modHubMarketBatchToolbar').hidden, false);
         assert.equal(elements.get('modHubMarketStats').hidden, false);
         assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
-        assert.equal(search.value, '原文', '返回咒语区恢复该区搜索');
+        assert.equal(search.value, '原文', '返回言灵区恢复该区搜索');
         sb.modHubMarket.filterInstalledOnly();
         assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'packages', '已安装快捷入口明确返回 MOD 区');
         assert.equal(elements.get('modHubStatusSelect').value, 'installed');
         assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
         sb.modHubMarketSpells.applyIndex({ communityRevision: 22, spells: [] });
         sb.modHubMarket.resetFilters();
-        assert.ok(sections().includes('咒语（0）') && cards().includes('当前暂无咒语配方'), '空板块保留可发现的入口及原因');
+        assert.ok(sections().includes('言灵（0）') && cards().includes('当前暂无言灵配方'), '空板块保留可发现的入口及原因');
         sb.modHubMarket.batchInstallState.running = true;
         assert.equal(sb.modHubMarket.selectMarketSection('packages'), false, '安装处理中不切换板块或混入其他操作');
         assert.equal(sb.modHubMarket.getCurrentMarketSection(), 'spells');
@@ -931,17 +989,33 @@ module.exports = async function() {
         sb.navigator = { clipboard: { writeText: async value => { copied = value; } } };
         assert.equal(await api.copyBody(spell), true);
         assert.equal(copied, body, '复制正文不能裁剪换行或执行正文');
-        let renderedBody;
+        let renderedBody, renderedFields;
         sb.modHubConfirm = async options => {
             const host = createStubElement();
             options.onRender({ querySelector: () => host });
             renderedBody = host.children.find(element => element.tagName === 'PRE');
+            renderedFields = host.children.filter(element => element.tagName === 'P').map(element => element.textContent);
             return false;
         };
         await api.showDetails(spell);
         assert.ok(renderedBody, '配方详情必须真实构建可选择的 pre 节点');
         assert.equal(renderedBody.textContent, body, '详情只写 textContent 并逐字保留正文');
         assert.equal(renderedBody.innerHTML, '', '正文不能写入 HTML 或执行');
+        assert.ok(renderedFields.some(value => value.includes('未游戏实测')), '旧言灵不提升为提交者环境已验证');
+        const publicCandidate = { ...spell, id: 'spell-public-candidate', name: '已审核候选', spell: { ...spell.spell,
+            modVersions: 'Example 2.0.0，限定环境', verificationMethod: '复现指定步骤并检查参数', submittedEnvironmentVerified: true, generalCompatibility: 'unverified' } };
+        api.applyIndex({ communityRevision: 6, spells: [spell, publicCandidate] });
+        assert.equal(api.filter('限定环境').length, 1, '适用模组及版本可搜索');
+        assert.equal(api.filter('复现指定步骤').length, 1, '验证方法可搜索');
+        const spellCards = createStubElement();
+        api.render(spellCards);
+        assert.ok(spellCards.innerHTML.includes('未游戏实测') && spellCards.innerHTML.includes('提交者环境已验证（自述），通用适配待核验'), '公开卡片区分历史未实测与提交者自述');
+        await api.showDetails(publicCandidate);
+        assert.ok(renderedFields.includes('适用模组及版本：Example 2.0.0，限定环境'));
+        assert.ok(renderedFields.includes('验证方法：复现指定步骤并检查参数'));
+        assert.ok(renderedFields.some(value => value.includes('提交者自述') && value.includes('通用适配尚未验证')));
+        assert.equal(renderedBody.textContent, body);
+        assert.equal(renderedBody.innerHTML, '', '候选正文仍只写textContent，不自动执行');
         sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, communityRevision: 7, mods: [mod], spells: [spell] }) });
         await sb.modHubMarket.fetchReleaseIndex();
         loadScripts(sb, ['javascript/modhub-market-spells.js']);
@@ -1360,8 +1434,12 @@ module.exports = async function() {
         sb.removeEventListener = (name, handler) => { if (name === 'message' && listener === handler) listener = null; };
         const opened = [];
         function makeDialog() {
-            const inputs = Object.fromEntries(Object.entries({ name: 100, author: 100, sourceUrl: 1000, description: 1000, notes: 1000 })
-                .map(([name, maxLength]) => [name, { value: '', maxLength, disabled: false, addEventListener() {} }]));
+            const inputs = Object.fromEntries(Object.entries({ name: 100, author: 100, sourceUrl: 1000, description: 1000, notes: 1000,
+                body: 64000, syntax: 200, inputLocation: 1000, instructions: 8000, parameters: 4000, prerequisites: 4000,
+                gameVersionRange: 200, modVersions: 4000, verificationMethod: 4000, submittedEnvironmentVerified: 0, publicationConsent: 0 })
+                .map(([name, maxLength]) => [name, { value: '', maxLength, disabled: false, checked: false,
+                    type: ['submittedEnvironmentVerified', 'publicationConsent'].includes(name) ? 'checkbox' : 'text',
+                    addEventListener(event, handler) { this['on' + event] = handler; } }]));
             const form = { elements: { namedItem: name => inputs[name] }, onsubmit: null };
             const frame = { src: '', contentWindow: {}, dataset: {} };
             const result = { hidden: true };
@@ -1410,6 +1488,7 @@ module.exports = async function() {
         });
         const origin = new URL(market.RELEASE_WORKER_API_BASE).origin;
         let attempts = 0;
+        let dropSpellSubmission = false;
         let queriedStatus = 'needs_info';
         let queriedKind = 'add';
         let queriedApprovedKind = '';
@@ -1418,6 +1497,7 @@ module.exports = async function() {
         let queriedActiveDelistStatus = '';
         let queriedCanRequestDelist = false;
         let queriedDuplicate = false;
+        let queriedContentType = 'package', queriedSpell = null, queriedCatalogId = 'community-a', queriedSourceUrl = 'https://tieba.baidu.com/p/123';
         let queryErrorStatus = 0;
         const posted = [];
         sb.fetch = async (url, options) => {
@@ -1425,6 +1505,7 @@ module.exports = async function() {
             const body = JSON.parse(options.body);
             posted.push({ path, body });
             if (path === '/community-submissions') {
+                if (body.contentType === 'spell' && dropSpellSubmission) throw new Error('候选响应丢失');
                 attempts++;
                 if (attempts === 1) throw new Error('模拟响应丢失');
                 return { ok: true, json: async () => ({ id: 'sub-1', revision: 1, status: 'pending' }) };
@@ -1432,15 +1513,17 @@ module.exports = async function() {
             if (path === '/community-submissions/query') {
                 if (queryErrorStatus) return { ok: false, status: queryErrorStatus,
                     json: async () => ({ error: '投稿记录不存在' }) };
-                return { ok: true, json: async () => ({ id: 'sub-1', kind: queriedKind, catalogId: 'community-a',
-                    name: '测试模组', author: '作者', sourceUrl: 'https://tieba.baidu.com/p/123',
+                return { ok: true, json: async () => ({ id: 'sub-1', kind: queriedKind, catalogId: queriedCatalogId,
+                    name: '测试模组', author: '作者', sourceUrl: queriedSourceUrl, contentType: queriedContentType, spell: queriedSpell, sources: [], packageRecords: [],
+                    targetName: null, targetAuthor: null,
                     description: '简介', notes: '', revision: queriedStatus === 'withdrawn' ? 2 : 1,
-                    status: queriedStatus, approvedCatalogId: queriedStatus === 'approved' || queriedPublished ? 'community-a' : null,
+                    status: queriedStatus, approvedCatalogId: queriedStatus === 'approved' || queriedPublished ? queriedCatalogId : null,
                     approvedKind: queriedApprovedKind || null,
                     targetStatus: queriedTargetStatus || null, activeDelistStatus: queriedActiveDelistStatus || null,
                     canRequestDelist: queriedCanRequestDelist,
                     ...(queriedDuplicate ? { duplicateOf: 'older-submission', mergedProgress: { status: 'pending', updatedAt: '2026-09-29T00:00:00Z' } } : {}) }) };
             }
+            if (path === '/community-submissions/target-status') return { ok: true, json: async () => ({ targetStatus: 'active', activeDelistStatus: null, canRequestDelist: true }) };
             if (path === '/community-submissions/query-batch') return { ok: true, json: async () => ({
                 results: body.receipts.map((value, index) => ({ index, submission: {
                     id: `batch-${index}-${value.slice(0, 4)}`, kind: 'add', name: `批量记录 ${index + 1}`,
@@ -1779,6 +1862,236 @@ module.exports = async function() {
         assert.ok(missingNewSource.status.textContent.includes('推荐模组须填写'));
         missingNewSource.close(false);
         await missingNewSourceTask;
+
+        const candidateValues = { name: '公开候选', author: '手工提交者', sourceUrl: '', description: '通用用途说明', notes: '',
+            body: '\n  <<set $公开参数 to "替换参数">>\n原文尾行\n', syntax: 'SugarCube', inputLocation: '指定言灵输入框',
+            instructions: '先备份游戏，再填入参数并输入正文', parameters: '$公开参数：由使用者自行填写，不包含原玩家变量值',
+            prerequisites: '已启用支持该语法的输入功能', gameVersionRange: '0.5.12.13', modVersions: '无', verificationMethod: '按原操作复现并核对参数结果' };
+        const verifyChallenge = (dialog, token) => listener({ origin, source: dialog.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce: new URL(dialog.frame.src).searchParams.get('nonce'), token } });
+        const candidateTask = market.openCommunitySubmission('spell', { name: '私人名称', description: '私人聊天', spell: { body: '私人源码' } });
+        const candidate = opened.at(-1);
+        assert.equal(candidate.options.title, '投稿候选言灵');
+        assert.equal(candidate.inputs.name.value, '', '候选入口不能使用调用方预填资料');
+        assert.equal(candidate.inputs.body.value, '', '不会载入协助源码或此前普通模组草稿');
+        assert.equal(candidate.inputs.submittedEnvironmentVerified.checked, false);
+        assert.equal(candidate.inputs.publicationConsent.checked, false);
+        assert.ok(candidate.html.includes('通用适配尚无结论') && candidate.html.includes('不会自动公开'));
+        Object.entries(candidateValues).forEach(([name, value]) => { candidate.inputs[name].value = value; });
+        verifyChallenge(candidate, '候选挑战');
+        const beforeCandidate = posted.length;
+        await candidate.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, beforeCandidate, '未主动确认不得提交');
+        assert.ok(!JSON.parse(sb.localStorage.getItem('modhub_market_submission_drafts_v1'))['spell:']?.pending, '未确认不得生成pending凭证');
+        candidate.inputs.submittedEnvironmentVerified.checked = true;
+        candidate.inputs.publicationConsent.checked = true;
+        candidate.inputs.body.oninput();
+        assert.equal(candidate.inputs.submittedEnvironmentVerified.checked, false, '正文改动使旧验证确认失效');
+        assert.equal(candidate.inputs.publicationConsent.checked, false, '正文改动使旧公开同意失效');
+        assert.equal(JSON.parse(sb.localStorage.getItem('modhub_market_submission_drafts_v1'))['spell:'].fields.body, candidateValues.body, '手工公共草稿保留完整正文');
+        candidate.close(false); await candidateTask;
+
+        const restoredCandidateTask = sb.modHubOpenSpellSubmission({ session: '不得读取的协助记录' });
+        const restoredCandidate = opened.at(-1);
+        assert.equal(restoredCandidate.inputs.body.value, candidateValues.body, '只恢复候选的手工草稿');
+        assert.equal(restoredCandidate.inputs.publicationConsent.checked, false, '恢复草稿不能恢复公开同意');
+        assert.equal(restoredCandidate.inputs.submittedEnvironmentVerified.checked, false, '恢复草稿不能恢复验证确认');
+        verifyChallenge(restoredCandidate, '候选新挑战');
+        restoredCandidate.inputs.submittedEnvironmentVerified.checked = true;
+        restoredCandidate.inputs.publicationConsent.checked = true;
+        dropSpellSubmission = true;
+        await restoredCandidate.form.onsubmit({ preventDefault() {} });
+        const candidatePayload = posted.at(-1).body;
+        assert.equal(candidatePayload.kind, 'add');
+        assert.equal(candidatePayload.contentType, 'spell');
+        assert.equal(candidatePayload.sourceUrl, '', '原创候选不伪造公开来源');
+        assert.equal(candidatePayload.spell.body, candidateValues.body, '正文不trim或转换语法');
+        assert.equal(candidatePayload.spell.submittedEnvironmentVerified, true);
+        assert.equal(candidatePayload.spell.generalCompatibility, 'unverified');
+        assert.equal(candidatePayload.spell.verificationMethod, candidateValues.verificationMethod);
+        assert.equal(candidatePayload.spell.modVersions, candidateValues.modVersions);
+        assert.equal(candidatePayload.publicationConsent, undefined, '本机公开确认不是服务端公开资料字段');
+        assert.equal(candidatePayload.session, undefined);
+        assert.equal(candidatePayload.spell.verifiedAt, undefined, '不能把提交者自述提升为维护者核验');
+        assert.equal(candidatePayload.spell.gameTested, undefined);
+        assert.equal(restoredCandidate.inputs.publicationConsent.checked, false, '失败重试不能复用公开同意');
+        assert.equal(restoredCandidate.inputs.submittedEnvironmentVerified.checked, false, '失败重试不能复用验证确认');
+        const candidateReceipt = candidatePayload.receipt;
+        restoredCandidate.close(false); await restoredCandidateTask;
+
+        dropSpellSubmission = false;
+        const retryCandidateTask = sb.modHubOpenSpellSubmission();
+        const retryCandidate = opened.at(-1);
+        assert.equal(retryCandidate.inputs.body.disabled, true, '响应丢失后原payload保持锁定避免重复不同内容');
+        assert.equal(retryCandidate.inputs.publicationConsent.disabled, false, '重开后必须可主动重新确认');
+        verifyChallenge(retryCandidate, '候选重试挑战');
+        const beforeCandidateRetry = posted.length;
+        await retryCandidate.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, beforeCandidateRetry, '重开未确认不重试提交');
+        retryCandidate.inputs.submittedEnvironmentVerified.checked = true;
+        retryCandidate.inputs.publicationConsent.checked = true;
+        await retryCandidate.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.receipt, candidateReceipt, '重试沿用安全凭证');
+        assert.deepEqual(posted.at(-1).body.spell, candidatePayload.spell, '重试不改变正文及版本范围');
+        assert.equal(JSON.parse(sb.localStorage.getItem('modhub_market_submission_receipts_v1'))[0].contentType, 'spell', '我的投稿保留候选类型');
+        retryCandidate.close(false); await retryCandidateTask;
+
+        const candidateAmendTask = market.openCommunitySubmission('amend', { ...candidatePayload, id: 'candidate-sub', revision: 2 }, candidateReceipt);
+        const candidateAmend = opened.at(-1);
+        assert.equal(candidateAmend.inputs.body.value, candidateValues.body, '补充资料保持完整候选正文');
+        assert.equal(candidateAmend.inputs.publicationConsent.checked, false);
+        assert.equal(candidateAmend.inputs.submittedEnvironmentVerified.checked, false);
+        verifyChallenge(candidateAmend, '候选补充挑战');
+        candidateAmend.inputs.submittedEnvironmentVerified.checked = true;
+        candidateAmend.inputs.publicationConsent.checked = true;
+        await candidateAmend.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).path, '/community-submissions/amend');
+        assert.equal(posted.at(-1).body.spell.body, candidateValues.body);
+        assert.equal(posted.at(-1).body.revision, 2);
+        candidateAmend.close(false); await candidateAmendTask;
+
+        const externalCandidateTask = sb.modHubOpenSpellSubmission();
+        const externalCandidate = opened.at(-1);
+        Object.entries({ ...candidateValues, sourceUrl: 'https://tieba.baidu.com/p/987654321' })
+            .forEach(([name, value]) => { externalCandidate.inputs[name].value = value; });
+        verifyChallenge(externalCandidate, '外部来源候选挑战');
+        externalCandidate.inputs.submittedEnvironmentVerified.checked = true;
+        externalCandidate.inputs.publicationConsent.checked = true;
+        dropSpellSubmission = true;
+        await externalCandidate.form.onsubmit({ preventDefault() {} });
+        assert.deepEqual(posted.at(-1).body.sources, [{ platform: 'tieba', url: 'https://tieba.baidu.com/p/987654321' }],
+            '外部来源候选保留锁定原帖来源，供审核匹配');
+        verifyChallenge(externalCandidate, '改动后重新挑战');
+        externalCandidate.inputs.body.value = '程序性改动正文';
+        externalCandidate.inputs.submittedEnvironmentVerified.checked = true;
+        externalCandidate.inputs.publicationConsent.checked = true;
+        const beforeChangedPending = posted.length;
+        await externalCandidate.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, beforeChangedPending, '即使未派发input事件，也不能用改变的字段重发旧payload');
+        assert.equal(externalCandidate.inputs.body.disabled, false, '旧pending释放后允许重新编辑核对');
+        assert.equal(externalCandidate.inputs.submittedEnvironmentVerified.checked, false);
+        assert.equal(externalCandidate.inputs.publicationConsent.checked, false);
+        assert.equal(JSON.parse(sb.localStorage.getItem('modhub_market_submission_drafts_v1'))['spell:'].pending, undefined,
+            '内容已改变时先清空旧pending，不消费挑战或生成新查询凭证');
+        externalCandidate.close(false); await externalCandidateTask;
+        dropSpellSubmission = false;
+
+        queriedContentType = 'spell';
+        queriedSpell = candidatePayload.spell;
+        queriedCatalogId = 'spell-original-candidate';
+        queriedSourceUrl = '';
+        queriedKind = 'add';
+        queriedStatus = 'needs_info';
+        queriedApprovedKind = '';
+        queriedPublished = false;
+        queriedTargetStatus = '';
+        queriedActiveDelistStatus = '';
+        queriedCanRequestDelist = false;
+        queryErrorStatus = 0;
+        const candidateMineTask = market.openCommunitySubmission('my');
+        const candidateMine = opened.at(-1);
+        candidateMine.queryInput.value = candidateReceipt;
+        await candidateMine.query.onclick();
+        assert.ok(candidateMine.detail.children.some(child => child.textContent === '补充资料'));
+        const candidateRetracting = clickAction(candidateMine.detail.children.find(child => child.textContent === '撤回投稿'));
+        opened.at(-1).close(true); await candidateRetracting;
+        assert.equal(posted.at(-1).path, '/community-submissions/withdraw', '候选仍复用原撤回接口');
+        assert.deepEqual(posted.at(-1).body, { receipt: candidateReceipt, revision: 1 });
+        await candidateMine.query.onclick();
+        const candidateDeleting = clickAction(candidateMine.detail.children.find(child => child.textContent === '删除候选言灵'));
+        opened.at(-1).close(true); await candidateDeleting;
+        assert.equal(posted.at(-1).path, '/community-submissions/delete', '候选仍复用原删除接口');
+        assert.deepEqual(posted.at(-1).body, { receipt: candidateReceipt, revision: 2 });
+        assert.ok(!sb.localStorage.getItem('modhub_market_submission_receipts_v1').includes(candidateReceipt));
+
+        loadScripts(sb, ['javascript/modhub-market-spells.js']);
+        const originalSpell = { id: 'spell-original-candidate', name: '公开原创言灵', author: '公开提交者', contentType: 'spell',
+            sourcePlatform: 'original', sourceUrl: '', sources: [], description: '公开用途说明', spell: { ...candidatePayload.spell } };
+        const legacySpell = { id: 'spell-legacy-external', name: '既有外部言灵', author: '原作者', contentType: 'spell',
+            sourceUrl: 'https://tieba.baidu.com/p/1122334455', sources: [{ platform: 'tieba', url: 'https://tieba.baidu.com/p/1122334455' }],
+            description: '原公开用途', spell: { ...candidatePayload.spell, body: '原公开正文', gameTested: false,
+                submittedEnvironmentVerified: false, evidenceUrl: 'https://tieba.baidu.com/p/1122334455', verifiedAt: '2026-10-10T00:00:00Z' } };
+        sb.modHubMarketSpells.applyIndex({ communityRevision: 100, spells: [originalSpell, legacySpell] });
+        queriedStatus = 'approved';
+        queriedTargetStatus = 'active';
+        queriedCanRequestDelist = true;
+        candidateMine.queryInput.value = candidateReceipt;
+        await candidateMine.query.onclick();
+        assert.ok(!candidateMine.detail.children.some(child => ['删除候选言灵', '撤回投稿'].includes(child.textContent)),
+            '已发布候选不能直接删除或撤回');
+        const candidateDelisting = clickAction(candidateMine.detail.children.find(child => child.textContent === '申请下架'));
+        const candidateDelist = opened.at(-1);
+        assert.equal(candidateDelist.inputs.name.value, originalSpell.name, '我的投稿申请下架使用当前公开目录，不用查询记录的过期名称');
+        candidateDelist.inputs.notes.value = '申请暂停收录';
+        verifyChallenge(candidateDelist, '已发布候选下架挑战');
+        await candidateDelist.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).path, '/community-submissions');
+        assert.equal(posted.at(-1).body.kind, 'withdraw');
+        assert.equal(posted.at(-1).body.contentType, 'spell');
+        assert.equal(posted.at(-1).body.catalogId, originalSpell.id);
+        assert.equal(posted.at(-1).body.targetName, originalSpell.name, '服务query的null指纹不能覆盖当前目录指纹');
+        assert.equal(posted.at(-1).body.targetAuthor, originalSpell.author);
+        assert.deepEqual(posted.at(-1).body.spell, originalSpell.spell, '原创下架携带原公开资料，不改变正文和验证状态');
+        candidateDelist.close(false); await candidateDelisting;
+        candidateMine.close(false); await candidateMineTask;
+
+        market.selectMarketSection('spells', false);
+        const originalConfirm = sb.modHubConfirm;
+        let feedbackMode = 'withdraw', feedbackIndex = '1';
+        sb.modHubConfirm = options => {
+            if (options.title === '纠错与下架申请') {
+                assert.equal(options.confirmText, '选择言灵');
+                return Promise.resolve(feedbackMode);
+            }
+            if (['选择下架言灵', '选择纠错言灵'].includes(options.title)) {
+                assert.equal(options.selectLabel, '目标言灵');
+                assert.equal(options.selectOptions.length, 3, '言灵分区只从公开言灵目录选择目标');
+                assert.ok(options.selectOptions.some(option => option.label.includes(legacySpell.name)));
+                return Promise.resolve(feedbackIndex);
+            }
+            return originalConfirm(options);
+        };
+        const publicDelistTask = market.openCommunityFeedback();
+        await new Promise(resolve => setImmediate(resolve));
+        const publicDelist = opened.at(-1);
+        assert.equal(publicDelist.options.title, '申请下架');
+        publicDelist.inputs.notes.value = '公开言灵资料已不适用';
+        verifyChallenge(publicDelist, '外部言灵下架挑战');
+        await publicDelist.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.kind, 'withdraw');
+        assert.equal(posted.at(-1).body.contentType, 'spell');
+        assert.equal(posted.at(-1).body.catalogId, legacySpell.id);
+        assert.deepEqual(posted.at(-1).body.spell, legacySpell.spell, '历史外部言灵下架保持原证据和正文');
+        assert.deepEqual(posted.at(-1).body.sources.map(source => ({ platform: source.platform, url: source.url })), legacySpell.sources);
+        publicDelist.close(false); await publicDelistTask;
+
+        feedbackMode = 'correct';
+        const publicCorrectTask = market.openCommunityFeedback();
+        await new Promise(resolve => setImmediate(resolve));
+        const publicCorrect = opened.at(-1);
+        assert.equal(publicCorrect.options.title, '纠错');
+        assert.equal(publicCorrect.inputs.body.value, legacySpell.spell.body, '纠错可手动编辑公开言灵正文');
+        assert.equal(publicCorrect.inputs.submittedEnvironmentVerified.checked, false);
+        assert.equal(publicCorrect.inputs.publicationConsent.checked, false);
+        publicCorrect.inputs.body.value = '本次手动纠正的公开正文';
+        publicCorrect.inputs.body.oninput();
+        publicCorrect.inputs.submittedEnvironmentVerified.checked = true;
+        publicCorrect.inputs.publicationConsent.checked = true;
+        verifyChallenge(publicCorrect, '言灵纠错挑战');
+        await publicCorrect.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.at(-1).body.kind, 'correct');
+        assert.equal(posted.at(-1).body.contentType, 'spell');
+        assert.equal(posted.at(-1).body.catalogId, legacySpell.id);
+        assert.equal(posted.at(-1).body.targetName, legacySpell.name);
+        assert.equal(posted.at(-1).body.targetAuthor, legacySpell.author);
+        assert.equal(posted.at(-1).body.spell.body, '本次手动纠正的公开正文');
+        assert.equal(posted.at(-1).body.spell.evidenceUrl, undefined, '新正文不能继承旧证据链接');
+        assert.equal(posted.at(-1).body.spell.verifiedAt, undefined, '新正文不能继承旧验证日期');
+        assert.equal(posted.at(-1).body.spell.submittedEnvironmentVerified, true);
+        assert.equal(posted.at(-1).body.spell.generalCompatibility, 'unverified');
+        assert.deepEqual(posted.at(-1).body.sources, legacySpell.sources);
+        publicCorrect.close(false); await publicCorrectTask;
+        sb.modHubConfirm = originalConfirm;
     }
 
     // 社区自动安装必须先拿到权威 Worker 的实时审核确认。
@@ -2008,8 +2321,14 @@ module.exports = async function() {
     // Wiki 回退也必须只采用名称列来源，拆分独立项目并识别共享仓库。
     {
         const sb = loadMarket();
-        const anchor = (textContent, href) => ({ textContent, getAttribute: () => href });
-        const cell = (textContent, links = []) => ({ textContent, querySelectorAll: () => links, cloneNode: () => cell(textContent, links) });
+        loadScripts(sb, ['javascript/modhub-wiki-title.js']);
+        const plainTextNode = textContent => ({ nodeType: 3, nodeValue: textContent, textContent });
+        const anchor = (textContent, href) => ({ nodeType: 1, tagName: 'A', textContent,
+            childNodes: [plainTextNode(textContent)], getAttribute: name => name === 'href' ? href : null });
+        const cell = (textContent, links = []) => ({ nodeType: 1, tagName: 'TD', textContent,
+            childNodes: links.length ? links.flatMap((link, index) => index ? [plainTextNode(' / '), link] : [link])
+                : [plainTextNode(textContent)],
+            querySelectorAll: () => links, cloneNode: () => cell(textContent, links) });
         const cells = [
             [cell('主模组', [anchor('主模组', 'https://github.com/Owner/Shared')]), cell('介绍', [anchor('依赖', 'https://github.com/Other/Dependency')]), cell('作者'), cell('2026-09-27 (v1.0)')],
             [cell('扩展 / 独立工具', [anchor('扩展', 'https://github.com/Owner/Shared'), anchor('独立工具', 'https://github.com/Owner/Tool')]), cell('介绍'), cell('作者'), cell('2026-09-27')],

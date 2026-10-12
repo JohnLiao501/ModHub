@@ -16,6 +16,7 @@ function loadHelp(options = {}) {
         installed,
         reads: [],
         toasts: [],
+        scrolls: [], focuses: [],
     };
     const runtime = options.runtime || enabled.map(name => ({ name, bootJson: installed[name], source: 'IndexDB' }));
     const cache = runtime.map(item => ({ mod: { name: item.name, bootJson: item.bootJson }, from: item.source || 'IndexDB' }));
@@ -25,6 +26,8 @@ function loadHelp(options = {}) {
         const element = createStubElement(id === 'modHubHelpReport' ? 'textarea' : 'div');
         element.id = id;
         element.isConnected = true;
+        element.scrollIntoView = () => state.scrolls.push(id);
+        element.focus = () => state.focuses.push(id);
         element.select = () => {};
         element.setSelectionRange = () => {};
         elements.set(id, element);
@@ -35,6 +38,8 @@ function loadHelp(options = {}) {
             const element = createStubElement('button');
             element.id = id;
             element.isConnected = true;
+            element.scrollIntoView = () => state.scrolls.push(id);
+            element.focus = () => state.focuses.push(id);
             elements.set(id, element);
         }
         return elements.get(id);
@@ -190,11 +195,85 @@ module.exports = async function() {
     // 自有 AI 界面不依赖枫叶原生服务，进入页面不会自动发送请求。
     {
         const f = loadHelp();
+        const mounts = [];
+        let back;
+        let unmounts = 0;
+        f.sb.modHubRemoteAssist = {
+            mount: (host, role, onBack) => {
+                mounts.push({ host, role }); back = onBack;
+                const header = host.querySelector('.modhub-assist-header');
+                header.scrollIntoView = () => f.state.scrolls.push('协助工作区标题');
+                header.focus = () => f.state.focuses.push('协助工作区标题');
+            },
+            unmount: () => { unmounts++; },
+            getSummary: () => ({ unread: 0, pending: 0 }),
+        };
+        f.sb.modHubRemoteHelp = { mount: () => { throw new Error('帮助首页不得挂载旧版远程界面'); }, pause: () => { throw new Error('新版远程不得调用旧版暂停'); } };
         f.help.init();
-        assert.match(f.elements.get('modHubHelpContainer').innerHTML, /modHubHelpAi/);
+        const container = f.elements.get('modHubHelpContainer');
+        assert.match(container.innerHTML, /modHubHelpAi/);
+        assert.deepEqual([...container.innerHTML.matchAll(/<section\b[^>]*\bid="(modHubHelpCommon|modHubHelpAi|modHubHelpRemoteEntry)"[^>]*>/g)].map(match => match[1]), ['modHubHelpCommon', 'modHubHelpAi', 'modHubHelpRemoteEntry'], '首页依次展示常见问题、AI协助、远程协助');
+        assert.equal((container.innerHTML.match(/class="modhub-help-section modhub-help-home-block(?: modhub-help-remote-entry)?"/g) || []).length, 3, '三个入口采用同级板块');
+        assert.doesNotMatch(container.innerHTML, /旧版协助记录与修复码|id="modHubHelpRemote(?:Content)?"/);
+        for (const [id, role] of [['modHubHelpGetAssist', 'player'], ['modHubHelpGiveAssist', 'helper']]) {
+            assert.match(container.innerHTML, new RegExp('<button id="' + id + '"[^>]*class="macro-button modhub-help-remote-card"[^>]*data-help-role="' + role + '"[^>]*><strong>[^<]+</strong><span>[^<]+</span></button>'), '远程入口须明确标题、作用与角色');
+        }
+        const draft = container.querySelector('#modHubAiDescription');
+        draft.value = '尚未提交的问题草稿';
+        for (const role of ['player', 'helper']) {
+            await container.onclick({ target: { closest: selector => selector === '[data-help-open]' ? { dataset: { helpOpen: 'remote', helpRole: role } } : null } });
+            assert.equal(mounts.at(-1).role, role, '双角色入口必须进入对应工作区');
+            assert.equal(f.elements.get('modHubHelpHome').hidden, true);
+            assert.equal(f.elements.get('modHubHelpRemoteWorkspace').hidden, false);
+            assert.equal(f.state.scrolls.at(-1), '协助工作区标题', '远程入口跳转到协助页实际内容');
+            back();
+            assert.equal(f.elements.get('modHubHelpHome').hidden, false);
+            assert.equal(f.elements.get('modHubHelpRemoteWorkspace').hidden, true);
+            assert.equal(draft.value, '尚未提交的问题草稿', '返回帮助首页不能重建并丢弃草稿');
+        }
+        assert.equal(unmounts, 3, '初始化和两次返回都释放工作区，后台生命周期由运行时负责');
+        await container.onclick({ target: { closest: selector => selector === '[data-help-open]' ? { dataset: { helpOpen: 'report' } } : null } });
+        assert.equal(f.elements.get('modHubHelpReportDetails').open, true, '求助信息仍使用本机预览入口');
         assert.doesNotMatch(f.elements.get('modHubHelpContainer').innerHTML, /data-help-maple/);
         assert.equal(f.help.openMapleRepair, undefined);
         assert.equal(f.state.reads.length, 0);
+    }
+    {
+        const styles = readStyles();
+        const cards = styles.match(/#modHubHelpContainer \.modhub-help-remote-card\s*\{([^}]*)\}/)?.[1];
+        assert.ok(cards, '远程操作卡必须有独立样式');
+        assert.match(cards, /min-height:\s*104px\s*!important/);
+        assert.match(cards, /border:\s*1px solid var\(--gold\)\s*!important/);
+        assert.match(cards, /min-width:\s*0/);
+        assert.match(styles, /@media \(max-width: 480px\)\s*\{[^}]*\}[^}]*\.modhub-help-remote-cards\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\)/, '窄屏远程卡必须纵向完整展示');
+    }
+
+    // 未读入口使用独立按钮，保持原入口并回到当前角色；读完后隐藏且不重复创建。
+    {
+        const f = loadHelp();
+        const entry = createStubElement('div');
+        const original = createStubElement('button');
+        const count = createStubElement('span');
+        entry.appendChild(original);
+        entry.querySelector = () => entry.children.find(item => item.className === 'modhub-assist-entry-badge') || null;
+        f.sb.document.querySelectorAll = selector => selector === '.modhub-sidebar-entry' ? [entry] : selector === '.modhub-remote-entry-count' ? [count] : [];
+        let summary = { role: 'helper', unread: 2, pending: 1 };
+        let mountedRole;
+        f.sb.modHubRemoteAssist = { unmount() {}, mount: (_host, role) => { mountedRole = role; }, getSummary: () => summary };
+        f.sb.modHubOpenManager = tab => { assert.equal(tab, '帮助中心'); f.help.init(); return true; };
+        f.help.init();
+        const badge = entry.querySelector();
+        assert.equal(entry.children[0], original);
+        assert.equal(badge.textContent, '3');
+        assert.equal(badge.hidden, false);
+        assert.match(count.textContent, /2 条未读消息，1 项待处理操作/);
+        badge.onclick();
+        assert.equal(mountedRole, 'helper');
+        assert.equal(entry.children.length, 2);
+        summary = { role: 'helper', unread: 0, pending: 0 };
+        f.help.init();
+        assert.equal(badge.hidden, true);
+        assert.equal(count.textContent, '');
     }
 
     // 共享包体读取器只读真实仓库，并明确区分缺包与无法核验。
@@ -714,13 +793,39 @@ module.exports = async function() {
         const snapshot = await f.help.check();
         const preview = await f.help.previewRemoteConfiguration(repairIssue(snapshot).id);
         assert.equal(writes(f).length, 0);
-        const result = await f.help.applyRemoteConfiguration(preview);
+        let preparedId;
+        const result = await f.help.applyRemoteConfiguration(preview, { onPrepared: async pointId => {
+            await Promise.resolve(); preparedId = pointId;
+            assert.equal(writes(f).length, 0, '转传的建点回调须在配置写入前等待完成');
+        } });
         assert.equal(result.ok, true);
         assert.equal(result.pointId, 'remote-point');
+        assert.equal(preparedId, 'remote-point', '远程配置回传建点编号供本机持久登记');
         assert.deepEqual(f.controller.store.enabled, ['Required', 'Consumer']);
         assert.equal(f.state.restoreContexts[0].kind, 'remoteRepair');
         assert.equal(f.state.reloadMessages?.length || 0, 0, '由远程界面单独控制重载，不打断结果回传');
         await assert.rejects(() => f.help.applyRemoteConfiguration(preview), /预览已改变/);
+    }
+    {
+        const f = enableFixture();
+        const prepare = f.sb.modHubRestore.prepare;
+        f.sb.modHubRestore.prepare = async context => { const result = await prepare(context); context.pointId = 'remote-point'; return result; };
+        const snapshot = await f.help.check();
+        const preview = await f.help.previewRemoteConfiguration(repairIssue(snapshot).id);
+        const apply = f.sb.modHubApplyHelpConfiguration;
+        f.sb.modHubApplyHelpConfiguration = async (...args) => {
+            const result = await apply(...args);
+            f.sb.modHubAnalyzeLogs = () => { throw new Error('本机回读具体异常'); };
+            return result;
+        };
+        const result = await f.help.applyRemoteConfiguration(preview);
+        assert.equal(result.ok, false, '保存后回读异常不得声称成功');
+        assert.equal(result.committed, true, '保留已经提交的事实');
+        assert.equal(result.uncertain, true, '保存后回读异常必须待核验');
+        assert.equal(result.pointId, 'remote-point');
+        assert.match(result.reason, /本机回读具体异常/);
+        assert.deepEqual(f.controller.store.enabled, ['Required', 'Consumer']);
+        await assert.rejects(() => f.help.applyRemoteConfiguration(preview), /本机回读具体异常/, '回读异常后释放帮助中心操作锁');
     }
     {
         const f = enableFixture();
@@ -746,6 +851,64 @@ module.exports = async function() {
         assert.equal(result.ok, false);
         assert.match(result.reason, /未建立远程修复前还原点/);
         assert.equal(writes(f).length, 0);
+    }
+
+    for (const rejectPrepared of [false, true]) {
+        const f = enableFixture();
+        const prepare = f.sb.modHubRestore.prepare;
+        f.sb.modHubRestore.prepare = async context => { const saved = await prepare(context); context.pointId = 'remote-config-point'; return saved; };
+        const snapshot = await f.help.check();
+        const plan = await f.help.buildRepairPlan(snapshot, repairIssue(snapshot).id);
+        let entered, release;
+        const prepared = new Promise(resolve => { entered = resolve; });
+        const gate = new Promise(resolve => { release = resolve; });
+        let settled = false;
+        const saving = f.sb.modHubApplyHelpConfiguration(plan, { source: 'remoteRepair', onPrepared: async pointId => {
+            assert.equal(pointId, 'remote-config-point');
+            assert.equal(writes(f).length, 0, '备份编号回调之前不得写入配置');
+            assert.equal(f.sb._modHubManagerBusy, true);
+            entered();
+            await gate;
+            if (rejectPrepared) throw new Error('前台核验已失效');
+        } }).finally(() => { settled = true; });
+        await prepared;
+        assert.equal(settled, false, '配置保存必须等待异步备份编号回调');
+        assert.equal(writes(f).length, 0);
+        release();
+        const result = await saving;
+        assert.equal(result.ok, !rejectPrepared, result.reason);
+        assert.equal(result.pointId, 'remote-config-point', '回调拒绝也保留保护编号');
+        assert.equal(result.committed, !rejectPrepared);
+        assert.equal(Boolean(result.uncertain), false);
+        assert.deepEqual(f.controller.store.enabled, rejectPrepared ? ['Consumer'] : ['Required', 'Consumer']);
+        assert.equal(f.sb._modHubManagerBusy, false);
+        assert.equal(f.sb.modHubRestore.isOperationBlocked(), false);
+        assert.ok(f.events.includes('整理还原点') && f.events.includes('释放还原锁'));
+        if (rejectPrepared) { assert.match(result.reason, /前台核验已失效/); assert.equal(writes(f).length, 0); }
+    }
+    for (const failure of ['prepare', 'readback', 'after-save', 'finish', 'cancel-finish']) {
+        const f = enableFixture({ prepareFailure: failure === 'prepare', finishFailure: ['finish', 'cancel-finish'].includes(failure) });
+        const prepare = f.sb.modHubRestore.prepare;
+        f.sb.modHubRestore.prepare = async context => { const saved = await prepare(context); context.pointId = 'remote-config-point'; return saved; };
+        const snapshot = await f.help.check();
+        const plan = await f.help.buildRepairPlan(snapshot, repairIssue(snapshot).id);
+        if (failure === 'readback') {
+            const save = f.controller.overwriteModIndexDBModList;
+            f.controller.overwriteModIndexDBModList = async names => { await save(names); f.controller.store.enabled.reverse(); return true; };
+        }
+        if (failure === 'after-save') f.sb.modHubLoadBeautyState = async () => { throw new Error('保存后同步失败'); };
+        const result = await f.sb.modHubApplyHelpConfiguration(plan, { source: 'remoteRepair', onPrepared: async () => {
+            if (failure === 'cancel-finish') throw new Error('前台核验已失效');
+        } });
+        assert.equal(result.ok, false, failure);
+        assert.equal(result.committed, !['prepare', 'cancel-finish'].includes(failure), '提交事实来自保存成功或失败恢复后的真实列表');
+        assert.equal(Boolean(result.uncertain), failure !== 'prepare', '无写入普通失败不标待核验，提交或收尾失败必须待核验');
+        assert.equal(f.sb._modHubManagerBusy, false);
+        assert.equal(f.sb.modHubRestore.isOperationBlocked(), false);
+        if (['prepare', 'cancel-finish'].includes(failure)) assert.equal(writes(f).length, 0);
+        else assert.ok(writes(f).length > 0);
+        if (failure !== 'prepare') assert.equal(result.pointId, 'remote-config-point');
+        assertNoSuccess(f);
     }
 
     // 预览复用真实排序器，启用唯一 alias 提供者并排到消费者之前，预览本身零写入。

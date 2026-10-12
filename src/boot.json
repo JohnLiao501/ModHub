@@ -21,13 +21,16 @@
     "javascript/modhub-readme.js",
     "javascript/modhub-log.js",
     "javascript/modhub-market-variants.js",
+    "javascript/modhub-wiki-title.js",
     "javascript/modhub-market.js",
     "javascript/modhub-market-spells.js",
     "javascript/modhub-market-versions.js",
     "javascript/modhub-market-install.js",
     "javascript/modhub-ai-package.js",
     "javascript/modhub-ai-repair.js",
-    "javascript/modhub-remote-help.js",
+    "javascript/modhub-remote-protocol.js",
+    "javascript/modhub-game-command.js",
+    "javascript/modhub-remote-assist.js",
     "javascript/modhub-help.js"
   ],
   "tweeFileList": [

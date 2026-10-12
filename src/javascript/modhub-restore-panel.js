@@ -299,7 +299,9 @@
                 if (point.summary?.orderChanged) summary.push('加载顺序调整');
                 if (summary.length) info.appendChild(element('small', `相关操作：${summary.join('；')}`, 'grey'));
                 if (point.protected) (point.protectionReasons?.length ? point.protectionReasons : ['此还原点正在被系统使用，暂时无法删除。']).forEach(reason => {
-                    const [heading, detail] = protectionHints.get(reason) || ['受保护', reason];
+                    const [heading, detail] = reason === '手动保护' && point.operation === 'remoteRepair'
+                        ? ['远程协助保护', '此还原点保留了远程协助执行前的模组状态，不包含游戏存档。重新载入不会自动解除此保护。验证修改后，可使用“取消手动保护”解除此项保护。']
+                        : protectionHints.get(reason) || ['受保护', reason];
                     const protection = element('span', undefined, 'modhub-restore-panel-protection');
                     protection.appendChild(element('strong', heading, 'gold'));
                     protection.appendChild(element('small', detail, 'grey')); info.appendChild(protection);

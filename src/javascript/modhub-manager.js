@@ -1787,7 +1787,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
             window._modHubManagerStatus = '已取消操作，配置保持不变';
             return false;
         }
-        options.onRestoreContext?.(restoreContext);
+        await options.onRestoreContext?.(restoreContext);
         const result = await action();
         const modChanged = beforeReload !== modHubReloadConfigSnapshot(window._modHubModState);
         window._modHubManagerStatus = result === false ? previousStatus : (modChanged ? '模组配置已保存，重新载入后生效；美化配置即时应用' : '配置已保存，美化配置即时应用');
@@ -2531,9 +2531,9 @@ window.modHubSmartSortAll = async function() {
 };
 
 // 帮助中心只应用已经预览的启用或加载顺序调整，保护与保存仍由管理器协调。
-window.modHubApplyHelpConfiguration = async function(plan, { source } = {}) {
+window.modHubApplyHelpConfiguration = async function(plan, { source, onPrepared } = {}) {
     let failureReason = '';
-    let pointId = null;
+    let pointId = null, restoreContext = null, committed = false, writeAttempted = false;
     const sameNames = (left, right) => JSON.stringify(left) === JSON.stringify(right);
     const fail = message => { throw new Error(message); };
     const readNames = (names, label) => {
@@ -2612,7 +2612,9 @@ window.modHubApplyHelpConfiguration = async function(plan, { source } = {}) {
                     ? { ...byName.get(enabled[enabledIndex++]), enabled: true }
                     : { ...item, enabled: false });
                 window.modHubEnsureModStateSync(state);
+                writeAttempted = true;
                 if (!await window.modHubSaveModManageState(false)) fail('模组配置保存失败。');
+                committed = true;
                 if (type === 'enable') await window.modHubLoadBeautyState();
                 const after = await window.modHubReadIndexDBModLists();
                 if (!after.ok) throw after.error || new Error('无法回读修复后的模组配置。');
@@ -2625,8 +2627,10 @@ window.modHubApplyHelpConfiguration = async function(plan, { source } = {}) {
         }, '正在保护并保存帮助中心修复...', {
             trackReload: true, immediateReload: true, restoreLabel: source === 'remoteRepair' ? '远程协助修复前' : '帮助中心修复前', restoreKind: source || 'manual',
             onRestoreContext: context => {
+                restoreContext = context;
                 pointId = context?.pointId || null;
                 if (source === 'remoteRepair' && !pointId) fail('未建立远程修复前还原点，已停止写入。');
+                return onPrepared?.(pointId);
             },
             onError: error => {
                 const reason = error?.message || String(error);
@@ -2634,18 +2638,22 @@ window.modHubApplyHelpConfiguration = async function(plan, { source } = {}) {
                 else if (failureReason !== reason) failureReason += '；' + reason;
             }
         });
-        if (saved !== true || window._modHubManagerSaveFailed || window._modHubManagerStateUncertain) {
-            return { ok: false, pointId, reason: failureReason || window._modHubManagerStatus || '修复未完成，请核实配置后重试。' };
+        if (writeAttempted && !committed && !window._modHubManagerStateUncertain) {
+            const actual = window._modHubModState;
+            committed = Boolean(actual && (!sameNames(actual.sideEnabled, beforeEnabled) || !sameNames(actual.sideDisabled, beforeDisabled)));
         }
-        return { ok: true, pointId };
+        if (saved !== true || window._modHubManagerSaveFailed || window._modHubManagerStateUncertain) {
+            return { ok: false, pointId, committed, ...(committed || restoreContext?.finishError || window._modHubManagerStateUncertain ? { uncertain: true } : {}), reason: failureReason || window._modHubManagerStatus || '修复未完成，请核实配置后重试。' };
+        }
+        return { ok: true, pointId, committed };
     } catch (error) {
-        return { ok: false, pointId, reason: error?.message || String(error) };
+        return { ok: false, pointId, committed, ...(committed || restoreContext?.finishError ? { uncertain: true } : {}), reason: error?.message || String(error) };
     }
 };
 
 // 代码修复只能替换已确认的单个旁加载包，事务不修改启禁配置。
-window.modHubApplyAiPackage = async function(plan) {
-    let pointId = null, reason = '', committed = false;
+window.modHubApplyAiPackage = async function(plan, { onPrepared } = {}) {
+    let pointId = null, restoreContext = null, reason = '', committed = false;
     const fail = message => { throw new Error(message); };
     const same = (left, right) => JSON.stringify(left) === JSON.stringify(right);
     const bytes = value => {
@@ -2735,8 +2743,8 @@ window.modHubApplyAiPackage = async function(plan) {
             } else if (Object.prototype.toString.call(original.data) === '[object ArrayBuffer]') replacement = nextBytes.buffer;
             else replacement = new original.data.constructor(nextBytes.buffer);
             await transaction(original, replacement);
-            window.modHubMarket?.invalidateLocalPackageProfiles?.();
             committed = true;
+            window.modHubMarket?.invalidateLocalPackageProfiles?.();
             try {
                 const after = await transaction();
                 if (!equalBytes(after.data, replacement) || !same(after.enabledRaw, original.enabledRaw) || !same(after.disabledRaw, original.disabledRaw)) fail('修复保存后的实际包体或启禁配置与预览不一致。');
@@ -2755,16 +2763,25 @@ window.modHubApplyAiPackage = async function(plan) {
             return true;
         }, `正在保护并保存 ${repairLabel} 修复包体...`, {
             restoreLabel: `${source === 'remoteRepair' ? '远程协助' : 'AI '}修复前：${name}`, restoreKind: source, immediateReload: true,
-            onRestoreContext: context => { pointId = context?.pointId || null; if (!pointId) fail('未建立修复前还原点，已停止写入。'); },
-            onError: error => { reason = error?.message || String(error); }
+            onRestoreContext: context => {
+                restoreContext = context;
+                pointId = context?.pointId || null;
+                if (!pointId) fail('未建立修复前还原点，已停止写入。');
+                return onPrepared?.(pointId);
+            },
+            onError: error => {
+                const detail = error?.message || String(error);
+                if (!reason) reason = detail;
+                else if (reason !== detail) reason += '；' + detail;
+            }
         });
         if (saved !== true || window._modHubManagerSaveFailed || window._modHubManagerStateUncertain) {
-            return { ok: false, pointId, reason: committed ? `包体已经写入，但后续核验或还原点整理未完成。${reason ? ` 具体原因：${reason}` : ''} 请使用修复前还原点核对并恢复。` : reason || window._modHubManagerStatus || '修复未完成。' };
+            return { ok: false, pointId, committed, ...(committed || restoreContext?.finishError || window._modHubManagerStateUncertain ? { uncertain: true } : {}), reason: committed ? `包体已经写入，但后续核验或还原点整理未完成。${reason ? ` 具体原因：${reason}` : ''} 请使用修复前还原点核对并恢复。` : reason || window._modHubManagerStatus || '修复未完成。' };
         }
         window._modHubReloadRevision++;
-        return { ok: true, pointId, reason: '' };
+        return { ok: true, pointId, committed, reason: '' };
     } catch (error) {
-        return { ok: false, pointId, reason: error?.message || String(error) };
+        return { ok: false, pointId, committed, ...(committed || restoreContext?.finishError ? { uncertain: true } : {}), reason: error?.message || String(error) };
     }
 };
 

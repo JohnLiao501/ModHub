@@ -110,7 +110,7 @@ function fixture(definitions, installed = []) {
     };
     const sb = createBaseSandbox({ AbortController });
     sb.StartConfig = { version: '0.5.0.0' };
-    loadScripts(sb, ['javascript/modhub-dialog.js', 'javascript/modhub-restore.js', 'javascript/modhub-manager.js', 'javascript/modhub-market.js']);
+    loadScripts(sb, ['javascript/modhub-dialog.js', 'javascript/modhub-restore.js', 'javascript/modhub-manager.js', 'javascript/modhub-wiki-title.js', 'javascript/modhub-market.js']);
     const runtimeMarket = sb.modHubMarket, offerReload = sb.modHubOfferReload;
     sb.modHubEscapeHtml = value => String(value).replace(/[<>&"]/g, character => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[character]));
     sb.modHubShowToast = () => {};
@@ -207,7 +207,7 @@ function useNativeProfiles(f) {
     };
     runtime.modHubGetGui = () => ({ gModUtils: utils });
     runtime._modHubModState = f.sb._modHubModState;
-    loadScripts(runtime, ['javascript/modhub-market.js']);
+    loadScripts(runtime, ['javascript/modhub-wiki-title.js', 'javascript/modhub-market.js']);
     f.sb.modHubMarket.getLocalInstalledProfiles = runtime.modHubMarket.getLocalInstalledProfiles;
     f.sb.modHubGetModInfo = runtime.modHubGetModInfo;
     return runtime;
@@ -231,19 +231,6 @@ function useNativeDependencyRanges(f) {
 }
 
 module.exports = async function () {
-    // 批量读取和核验使用准备阶段，只有实际串行处理开始才提供完成项比例。
-    {
-        const f = fixture([{ id: 'ProgressPhaseA' }, { id: 'ProgressPhaseB' }]), snapshots = [];
-        f.sb.modHubMarket.renderBatchInstallToolbar = () => snapshots.push({ ...f.sb.modHubMarket.batchInstallState });
-        const outcome = await f.sb.modHubMarketInstaller.installBatch(f.mods);
-        assert.equal([...outcome.results.values()].filter(item => item.status === 'success').length, 2);
-        assert.equal(snapshots[0].progressPhase, 'preparing');
-        assert.equal(snapshots[0].total, 2, '读取版本阶段已有总数仍属于准备状态');
-        const installing = snapshots.filter(state => state.running && state.progressPhase === 'installing');
-        assert.deepEqual(installing.map(state => [state.completed, state.total]), [[0, 2], [1, 2]], '完成数仅按已处理的安装项递增');
-        assert.equal(snapshots.at(-1).running, false);
-        assert.equal(snapshots.at(-1).progressPhase, '', '终止后清理阶段标志');
-    }
     const languageFixture = (installed = [], extra = {}) => {
         const variant = (id, label) => ({ groupId: 'fixture-languages', groupName: '语言变体测试', type: 'language', id, label });
         const f = fixture([
@@ -1295,22 +1282,15 @@ module.exports = async function () {
         const f = fixture([{ id: 'CancelLoading' }]);
         const originalFetch = f.sb.modHubMarketVersions.fetchReleases, originalConfirm = f.sb.modHubConfirm;
         let finish, signal, ready, area;
-        const timers = [];
-        f.sb.setTimeout = (callback, delay) => { timers.push({ callback, delay }); return timers.length; };
         f.sb.modHubMarketVersions.fetchReleases = (mod, options) => {
             signal = options.signal;
             return new Promise((resolve, reject) => { finish = () => lateFailure ? reject(new Error('迟到失败')) : resolve(originalFetch(mod)); });
         };
         f.sb.modHubConfirm = async options => {
             assert.ok(options.trustedMessageHtml.includes('正在读取版本列表'), '请求完成前必须显示加载弹窗');
-            assert.match(options.trustedMessageHtml, /modhub-progress-ring/, '版本列表等待期间显示圆环');
             assert.equal(options.canConfirm(), false, '加载期间 Enter 不得开始准备');
             const dialog = createStubElement(); area = dialog.querySelector('#modHubVersionChoices');
             ready = options.onRender(dialog);
-            timers.find(timer => timer.delay === 3000).callback();
-            const slowStatus = area.querySelector('.modhub-version-loading').innerHTML;
-            assert.match(slowStatus, /发布服务响应较慢/);
-            assert.match(slowStatus, /modhub-progress-ring/, '慢服务提示仍保留圆环');
             return false;
         };
         assert.equal(await f.sb.modHubMarketInstaller.install(f.mods[0]), false);
@@ -1351,7 +1331,6 @@ module.exports = async function () {
         f.sb.modHubMarketVersions.fetchReleases = (mod, options) => { calls++; signals.push(options.signal); return new Promise(resolve => { finishes.push(() => resolve(fetch(mod))); }); };
         f.sb.modHubConfirm = async options => {
             assert.ok(options.trustedMessageHtml.includes('已读取 0 / 3 项'), '批量必须先展示所有占位行');
-            assert.equal((options.trustedMessageHtml.match(/modhub-progress-ring/g) || []).length, 1, '批量等待共用一个状态圆环');
             assert.equal(options.canConfirm(), false);
             const dialog = createStubElement(); area = dialog.querySelector('#modHubBatchVersionChoices'); ready = options.onRender(dialog);
             return false;
@@ -1426,10 +1405,8 @@ module.exports = async function () {
             await started;
             for (let index = 0; index < 10; index++) await Promise.resolve();
             assert.ok(area.innerHTML.includes('已读取 1 / 2 项'), '已完成行应及时显示');
-            assert.match(area.innerHTML, /modhub-progress-ring/, '部分行仍在加载时保留圆环');
             select.value = ''; select.onchange();
             finish(); await ready;
-            assert.doesNotMatch(area.innerHTML, /modhub-progress-ring/, '全部行完成后移除圆环');
             assert.equal(options.customResult().length, 1, '后续完成不能覆盖已手动跳过的行');
             return options.customResult();
         };

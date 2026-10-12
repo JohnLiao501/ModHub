@@ -54,6 +54,50 @@ module.exports = async function() {
             assert.equal(text(h.mod.data.get(packageKey)), 'A 旧包');
         }
     }
+    for (const rejectPrepared of [false, true]) {
+        const h = await setup();
+        let release, entered;
+        const gate = new Promise(resolve => { release = resolve; });
+        const prepared = new Promise(resolve => { entered = resolve; });
+        let protectedId, settled = false;
+        const saving = h.sb.modHubApplyAiPackage({ ...h.plan, source: 'remoteRepair' }, { onPrepared: async pointId => {
+            protectedId = pointId;
+            assert.ok(pointId);
+            assert.equal(text(h.mod.data.get(packageKey)), 'A 旧包', '备份编号回调必须先于包体写入');
+            assert.equal(h.sb.modHubIsReloadBusy(), true, '回调等待期间仍持有操作锁');
+            assert.equal(h.mod.data.get('modhub_restore_points_v1').find(point => point.id === pointId).userProtected, true);
+            entered();
+            await gate;
+            if (rejectPrepared) throw new Error('前台核验已失效');
+        } }).finally(() => { settled = true; });
+        await prepared;
+        assert.equal(settled, false, '异步回调未完成时不能提前返回或写包');
+        assert.equal(text(h.mod.data.get(packageKey)), 'A 旧包');
+        release();
+        const result = await saving;
+        assert.equal(result.ok, !rejectPrepared, result.reason);
+        assert.equal(result.pointId, protectedId, '回调拒绝后仍返回已保存的保护编号');
+        assert.equal(result.committed, !rejectPrepared);
+        assert.equal(Boolean(result.uncertain), false, '回调拒绝但未写入且收尾正常时不是待核验提交');
+        assert.equal(text(h.mod.data.get(packageKey)), rejectPrepared ? 'A 旧包' : 'A 修复包');
+        assert.equal(h.sb.modHubIsReloadBusy(), false);
+        if (rejectPrepared) assert.match(result.reason, /前台核验已失效/);
+    }
+    {
+        const h = await setup();
+        const result = await h.sb.modHubApplyAiPackage({ ...h.plan, source: 'remoteRepair' }, { onPrepared: async () => {
+            h.mod.failPut = key => key === 'modhub_restore_points_v1' ? new Error('取消后整理失败') : null;
+            throw new Error('前台核验已失效');
+        } });
+        assert.equal(result.ok, false);
+        assert.equal(result.committed, false);
+        assert.equal(result.uncertain, true, '无包体写入但还原点收尾失败仍须核验保护记录');
+        assert.match(result.reason, /前台核验已失效/);
+        assert.match(result.reason, /取消后整理失败/, '收尾失败不得覆盖此前前台核验拒绝的具体原因');
+        assert.ok(result.pointId);
+        assert.equal(text(h.mod.data.get(packageKey)), 'A 旧包');
+        assert.equal(h.sb.modHubIsReloadBusy(), false);
+    }
     {
         const h = await setup();
         for (const source of ['', null, 'auto', 'manual']) {
@@ -74,6 +118,8 @@ module.exports = async function() {
         const beforeEnabled = h.mod.data.get(enabledKey), beforeDisabled = h.mod.data.get(disabledKey);
         const result = await h.sb.modHubApplyAiPackage(h.plan);
         assert.equal(result.ok, true, result.reason);
+        assert.equal(result.committed, true);
+        assert.equal(Boolean(result.uncertain), false);
         assert.ok(result.pointId);
         assert.equal(text(h.mod.data.get(packageKey)), 'A 修复包');
         assert.equal(h.mod.data.get(enabledKey), beforeEnabled);
@@ -204,10 +250,24 @@ module.exports = async function() {
         const result = await h.sb.modHubApplyAiPackage(h.plan);
         assert.equal(result.ok, false);
         assert.match(result.reason, /包体已经写入/);
+        assert.equal(result.committed, true);
+        assert.equal(result.uncertain, true);
         assert.match(result.reason, /模拟还原点整理失败/);
         assert.equal(text(h.mod.data.get(packageKey)), 'A 修复包', '还原点整理失败不能谎称包体已经撤销');
         assert.deepEqual(h.invalidations, ['A 修复包'], '写后还原点整理失败也必须使市场档案缓存失效');
         assert.equal(h.sb._modHubReloadRevision, 0, '缓存失效不能依赖成功收尾才增长的重载版本');
+        assert.ok(result.pointId);
+        assert.equal(h.sb.modHubIsReloadBusy(), false);
+    }
+    {
+        const h = await setup();
+        h.sb.modHubMarket.invalidateLocalPackageProfiles = () => { throw new Error('缓存失效失败'); };
+        const result = await h.sb.modHubApplyAiPackage(h.plan);
+        assert.equal(result.ok, false);
+        assert.equal(result.committed, true, '事务提交后附加回调失败不能丢失实际写入事实');
+        assert.equal(result.uncertain, true);
+        assert.match(result.reason, /缓存失效失败/);
+        assert.equal(text(h.mod.data.get(packageKey)), 'A 修复包');
         assert.ok(result.pointId);
         assert.equal(h.sb.modHubIsReloadBusy(), false);
     }
@@ -243,6 +303,8 @@ module.exports = async function() {
         const result = await h.sb.modHubApplyAiPackage(h.plan);
         assert.equal(result.ok, false);
         assert.equal(text(h.mod.data.get(packageKey)), externalWrite ? 'A 外部再次修改' : 'A 旧包', '撤销只允许覆盖本次提交的包体');
+        assert.equal(result.committed, externalWrite, '已原子撤销并回读通过时不保留提交标记');
+        assert.equal(Boolean(result.uncertain), externalWrite, '安全撤销已核实的失败无需待核验，外部变化导致不能撤销则须核验');
         assert.deepEqual(h.invalidations, ['A 修复包'], '写后回读失败或安全撤销不能恢复旧的市场档案缓存');
         assert.ok(result.pointId);
     }

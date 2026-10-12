@@ -79,18 +79,25 @@ function check() {
     const inPanel = rectangle => rectangle.left >= bounds.left - 1 && rectangle.right <= bounds.right + 1;
     const assert = (condition, message) => { if (!condition) throw new Error(message); };
     try {
-        assert(rectangles.every(inPanel), '标签超出了面板左右边界。');
         if (innerWidth <= 768) {
+            const tabBounds = tabs.getBoundingClientRect();
+            assert(inPanel(tabBounds), '横向标签栏超出了面板左右边界。');
             assert(rectangles.every(rectangle => rectangle.height >= 32), '标签触控高度不足。');
-            assert(getComputedStyle(tabs).flexWrap === 'wrap', '窄屏标签没有启用自动换行。');
+            assert(getComputedStyle(tabs).flexWrap === 'nowrap' && getComputedStyle(tabs).overflowX === 'auto', '窄屏标签没有启用单行横向滚动。');
+            assert(rectangles.every(rectangle => Math.abs(rectangle.top - rectangles[0].top) < 1), '窄屏标签没有保持单行。');
             const ordinaryRectangles = buttons.filter(button => !button.classList.contains('modhub-mobile-close-tab')).map(button => button.getBoundingClientRect());
-            assert(ordinaryRectangles.every(rectangle => Math.abs(rectangle.width - ordinaryRectangles[0].width) < 1 && rectangle.width <= 120), '普通页签宽度不一致或发生拉伸。');
+            assert(ordinaryRectangles.every(rectangle => rectangle.width >= 96), '普通页签发生收缩，无法保留舒适触控宽度。');
+            const previousScroll = tabs.scrollLeft;
+            tabs.scrollLeft = tabs.scrollWidth;
+            const lastBounds = buttons.at(-1).getBoundingClientRect();
+            assert(lastBounds.left >= tabBounds.left - 1 && lastBounds.right <= tabBounds.right + 1, '末页签无法通过横向滚动完整显示。');
+            tabs.scrollLeft = previousScroll;
             if (!mobile.checked) {
                 const rectangle = close.getBoundingClientRect();
                 assert(inPanel(rectangle) && rectangle.top >= bounds.top && rectangle.height >= 32 && rectangle.width >= 32, '关闭按钮越界或触控面积不足。');
-                assert(rectangles.every(button => button.right <= rectangle.left || button.left >= rectangle.right || button.bottom <= rectangle.top || button.top >= rectangle.bottom), '关闭按钮覆盖了标签。');
+                assert(tabBounds.right <= rectangle.left || tabBounds.left >= rectangle.right || tabBounds.bottom <= rectangle.top || tabBounds.top >= rectangle.bottom, '关闭按钮覆盖了可见标签栏。');
             }
-        }
+        } else assert(rectangles.every(inPanel), '桌面标签超出了面板左右边界。');
         result.textContent = '通过：' + innerWidth + 'px；' + new Set(rectangles.map(rectangle => Math.round(rectangle.top))).size + ' 行标签；' + (mobile.checked ? '左侧关闭标签' : '右上角关闭按钮') + '；' + (fullscreen.checked ? '日志全屏' : '普通面板') + '。';
     } catch (error) { result.textContent = '失败：' + error.message; }
 }

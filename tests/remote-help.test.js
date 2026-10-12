@@ -1,303 +1,160 @@
-// 远程协助客户端：确认边界、凭据隔离、暂停与中断不重放。
-const { assert, createBaseSandbox, createStubElement, loadScripts } = require('./helpers');
+// 远程协助协议工具：摘要与字段校验、响应限额及脱敏拒绝边界。
+const { assert, createBaseSandbox, loadScripts } = require('./helpers');
 const { webcrypto, createHash } = require('node:crypto');
-const plain = value => JSON.parse(JSON.stringify(value));
-const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 
-function fixture(options = {}) {
-    const command = { id: 'command-1', seq: 1, kind: options.kind || 'collectDiagnostics', payload: options.payload || { allLogs: false }, status: options.commandStatus || 'queued', claimId: options.claimId || null };
-    command.digest = digest({ kind: command.kind, payload: command.payload });
-    const helper = { id: 'helper-1', displayName: '测试开发者' };
-    const repair = { id: 'repair-1', code: '12345678', title: '测试协助', description: '检查问题', helper, initialCommand: plain(command) };
-    const session = { id: 'session-1', repairId: repair.id, repairCode: repair.code, helper, status: 'active', pairing: 'unpaired' };
-    const state = { requests: [], applies: 0, preparations: [], confirmations: [], saves: [], results: [], pairings: [], checks: 0 };
-    const storage = options.storage || new Map();
-    const host = createStubElement(); host.isConnected = true;
-    const panel = createStubElement('details'); panel.open = true;
-    const timers = new Map(); let timerId = 0;
-    const identity = { dbName: 'game', storeName: 'mods' };
+const digest = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
+const command = (kind, payload) => ({ kind, payload, digest: digest({ kind, payload }) });
+const limit = 1024 * 1024;
+
+function fixture(overrides = {}) {
+    const calls = [];
     const sb = createBaseSandbox({
-        crypto: webcrypto, TextEncoder, TextDecoder, AbortController, Uint8Array,
-        setTimeout: (fn, delay) => { timers.set(++timerId, { fn, delay }); return timerId; }, clearTimeout: id => timers.delete(id),
-        localStorage: { getItem: key => storage.get(key) || null, setItem: (key, value) => {
-            if (options.storageFails) throw new Error('本机存储空间不足');
-            if (options.resultStoreFails && Object.values(JSON.parse(value).entries || {}).some(entry => entry.result)) throw new Error('结果正文保存失败');
-            storage.set(key, value); state.saves.push(JSON.parse(value));
-        } },
-        modHubEscapeHtml: value => String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'),
-        modHubRestore: { getStorageIdentity: () => identity, showHistory: async () => {} },
-        modHubConfirm: async value => { state.confirmations.push(value); return options.confirm !== false; },
-        modHubReadInstalledModPackage: async () => ({ data: new Uint8Array([2]) }),
-        modHubReadIndexDBModLists: async () => ({ ok: true, enabled: ['Example'], disabled: [] }),
-        modHubAiPackage: { hash: async () => 'b'.repeat(64) },
-        modHubHelp: {
-            redactRemoteCredentials: value => options.knownKey ? String(value).split(options.knownKey).join('[已隐去密钥]') : String(value),
-            check: async () => { state.checks++; return { issues: [{ id: 'dependency-X', title: '前置缺失', repair: {} }] }; },
-            buildReport: () => options.report || '诊断报告 token=private',
-            previewRemoteConfiguration: async issueId => { state.configIssue = issueId; return { issueId, before: { enabled: ['Example'], disabled: [] }, after: { enabled: ['Required', 'Example'], disabled: [] } }; },
-            applyRemoteConfiguration: async () => { state.applies++; return { ok: true, pointId: 'point-1' }; }
-        },
-        modHubAiRepair: {
-            sanitizeText: text => text.replace('private', '[已隐藏]'),
-            prepare: async (name, description, settings) => {
-                state.preparations.push({ name, settings });
-                return { name, bootJson: { version: '1.0.0' }, hash: 'a'.repeat(64), baselineData: '不可上传的原包',
-                    material: JSON.stringify({ name, version: '1.0.0', files: [{ path: 'main.js', content: options.source || 'const test = 1;' }] }) };
-            },
-            previewResponse: async (prepared, response, settings) => { state.previewSource = settings.source; return { response }; },
-            getVerification: async () => ({ name: 'Example', beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64), enabled: ['Example'], disabled: [] }),
-            apply: async () => { state.applies++; options.onApply?.(); return { ok: true, pointId: 'point-1' }; }
-        },
-        fetch: async (url, init) => {
-            const endpoint = url.split('/remote-assistance')[1];
-            const body = init.body ? JSON.parse(init.body) : undefined;
-            state.requests.push({ endpoint, ...init, parsed: body });
-            let result, status = 200;
-            if (endpoint === '/repairs/12345678') result = { repair };
-            else if (endpoint === '/sessions') { state.join = body; result = { session, continuationCode: '1234567890', command }; }
-            else if (endpoint.endsWith('/resume')) { session.status = 'active'; result = { session }; }
-            else if (endpoint.endsWith('/pause')) { session.status = 'paused'; result = { session }; }
-            else if (endpoint.endsWith('/claim')) {
-                state.claimJournal = [...storage.values()].map(JSON.parse)[0]?.entries[command.id];
-                if (options.claimDropBefore && !state.claimDropped) { state.claimDropped = true; throw new Error('领取请求未到达服务端'); }
-                if (options.claimFails) { status = options.claimStatus || 403; result = { error: '权限已撤销', details: '开发者授权已停止' }; }
-                else if (command.status === 'claimed' && command.claimId !== body.claimId) { status = 409; result = { error: '已由其他编号领取' }; }
-                else { command.status = 'claimed'; command.claimId = body.claimId; result = { command }; }
-                if (options.claimDropAfter && !state.claimDropped) { state.claimDropped = true; throw new Error('领取响应在返回途中丢失'); }
-            } else if (endpoint.endsWith('/result')) {
-                if (options.resultFails) throw new Error('回传网络中断');
-                state.results.push(body); command.status = 'completed'; result = { saved: true };
-            } else if (endpoint.endsWith('/pair')) { state.pairings.push(body); session.pairing = body.accept ? 'paired' : 'unpaired'; result = { session, ...(!body.accept ? { continuationCode: '9876543210' } : {}) }; }
-            else if (endpoint.endsWith('/close') || endpoint.endsWith('/verify')) { session.status = 'closed'; result = { session }; }
-            else if (endpoint.includes('/commands/')) result = { command };
-            else if (endpoint.includes('?after=')) result = { session, messages: [{ ...command, type: 'command', payload: undefined }], nextCursor: null };
-            else throw new Error('未预期请求：' + endpoint);
-            if (options.stream && endpoint.startsWith('/repairs/')) {
-                let read = 0;
-                return { ok: true, status: 200, body: { getReader: () => ({
-                    read: async () => { state.streamReads = ++read; return { done: false, value: new Uint8Array(600000) }; },
-                    cancel: async () => { state.streamCancelled = true; }
-                }) }, text: () => { throw new Error('禁止完整读取响应'); } };
-            }
-            return { ok: status === 200, status, text: async () => JSON.stringify(result) };
-        }
+        crypto: webcrypto, TextEncoder, TextDecoder, Uint8Array,
+        localStorage: { getItem: () => { calls.push('storage'); }, setItem: () => { calls.push('storage'); } },
+        addEventListener: () => { calls.push('window-listener'); },
+        setTimeout: () => { calls.push('timer'); },
+        fetch: async () => { calls.push('fetch'); throw new Error('协议工具不能联网'); },
+        modHubAiRepair: { sanitizeText: text => text.replace('token=private', 'token=[已隐藏]') },
+        modHubHelp: { redactRemoteCredentials: text => text.replaceAll('known-memory-key', '[已隐去密钥]') },
+        ...overrides
     });
-    sb.document.getElementById = id => id === 'modHubHelpRemoteContent' ? host : null;
-    loadScripts(sb, ['javascript/modhub-remote-help.js']);
-    sb.modHubRemoteHelp.mount(host, panel);
-    const action = async name => host.onclick({ target: { closest: () => ({ dataset: { remoteAction: name } }) } });
-    const join = async () => { host.querySelector('#modHubRemoteCode').value = '12345678'; await action('lookup'); await action('join'); };
-    const tick = async () => { const timer = [...timers.values()].find(item => item.delay !== 30000) || [...timers.values()][0]; await timer?.fn(); await new Promise(resolve => setImmediate(resolve)); };
-    return { sb, state, storage, host, panel, command, session, identity, action, join, tick, options };
+    sb.document.addEventListener = () => { calls.push('document-listener'); };
+    sb.document.getElementById = () => { calls.push('document-read'); };
+    loadScripts(sb, ['javascript/modhub-remote-protocol.js']);
+    return { sb, protocol: sb.modHubRemoteProtocol, calls };
 }
 
-module.exports = async function runRemoteHelpTests() {
+module.exports = async function runRemoteProtocolTests() {
+    const { sb, protocol, calls } = fixture();
+    assert.deepEqual(Object.keys(protocol).sort(), ['describeCommand', 'inspectCodeSources', 'readResponse', 'redactResultText', 'validateCommand']);
+    assert.equal(sb.modHubRemoteHelp, undefined, '旧客户端工作流不能由协议工具恢复');
+    assert.deepEqual(calls, [], '协议工具加载不读存储、DOM，不注册监听或启动联网');
+
     {
-        const f = fixture();
-        assert.equal(f.state.requests.length, 0, '打开帮助不发网络请求');
-        await f.join();
-        assert.equal(f.state.checks, 0, '加入不读取或上传诊断');
-        assert.equal(f.state.join.token.length, 64);
-        assert.match([...f.storage.keys()][0], /game.*mods/);
-        assert.ok(f.state.saves[0].joinRequest, '建会话前保存幂等凭据');
-        assert.ok(!f.host.innerHTML.includes(f.state.join.token), '凭据不呈现到页面');
-        await f.action('preview');
-        assert.equal(f.state.results.length, 0, '本机预览未发送');
-        assert.match(f.host.innerHTML, /已隐藏/);
-        await f.action('execute');
-        assert.equal(f.state.results[0].status, 'sent');
-        assert.ok(!JSON.stringify(f.state.results).includes('private'));
-        assert.equal(f.state.claimJournal.stage, 'started', '领取前登记执行记录');
-        const claim = f.state.requests.find(item => item.endpoint.endsWith('/claim'));
-        assert.equal(claim.headers.Authorization, 'Bearer ' + f.state.join.token);
-        assert.ok(f.state.requests.every(item => item.credentials === 'omit' && item.cache === 'no-store'));
-        assert.equal(f.state.confirmations.length, 2);
-        await f.tick();
-        assert.equal(f.state.results.length, 1, '重复指令不重发或重执行');
+        const clean = [{ path: '指令.js', content: 'V.test = 1;\nState.variables.test = 2;' }];
+        assert.equal(protocol.inspectCodeSources(clean).length, 0, '普通游戏变量修改不命中所检查的特征');
+        const files = [
+            { path: 'main.js', content: 'V.test = 1;\r\nfetch("https://example.invalid"); fetch("再次访问");\nlocalStorage.clear();\neval("V.test = 2");\nsetTimeout(() => {}, 0);' },
+            { path: 'patch.twee', content: '段落正文\n<<script>>document.body.innerHTML = "<script>";<</script>>' },
+            { path: 'replace.txt', content: '<div onclick="fetch()">文本</div>' }
+        ];
+        const original = JSON.stringify(files);
+        const findings = JSON.parse(JSON.stringify(protocol.inspectCodeSources(files)));
+        assert.deepEqual(findings.map(item => [item.path, item.category, item.line]), [
+            ['main.js', '网络相关文本', 2], ['main.js', '本机数据相关文本', 3],
+            ['main.js', '动态求值文本', 4], ['main.js', '异步调度文本', 5],
+            ['patch.twee', '脚本或 HTML 注入文本', 2],
+            ['replace.txt', '网络相关文本', 1], ['replace.txt', '脚本或 HTML 注入文本', 1]
+        ], '每个文件和类别合并重复命中，保留稳定顺序与原文行号');
+        assert.ok(findings.every(item => item.excerpt.length <= 180 && item.reason.startsWith('文本中包含')));
+        assert.equal(JSON.stringify(files), original, '检查不能修改源码原文');
+        const comments = protocol.inspectCodeSources([{ path: 'notes.html', content: '// fetch 仅是注释\rconst note = "indexedDB";' }]);
+        assert.equal(comments.length, 2, '注释和字符串也保留文本线索，不能假装完成语法或行为判定');
+        assert.equal(comments[1].line, 2, '独立回车也按原文行号处理');
+        for (const source of ['new XMLHttpRequest()', 'new WebSocket()', 'new EventSource()', 'navigator.sendBeacon()']) {
+            assert.equal(protocol.inspectCodeSources([{ path: 'script', content: source }])[0].category, '网络相关文本');
+        }
+        for (const source of ['document["cookie"]', 'sessionStorage.clear()', 'indexedDB.deleteDatabase("game")', 'caches.delete("game")']) {
+            assert.equal(protocol.inspectCodeSources([{ path: 'script', content: source }])[0].category, '本机数据相关文本');
+        }
+        for (const source of ['new Function("return 1")', 'import("./code.js")']) {
+            assert.equal(protocol.inspectCodeSources([{ path: 'script', content: source }])[0].category, '动态求值文本');
+        }
+        for (const source of ['document.createElement("script")', '<script>正文</script>', 'javascript:void(0)', 'document.write("正文")']) {
+            assert.equal(protocol.inspectCodeSources([{ path: 'script', content: source }])[0].category, '脚本或 HTML 注入文本');
+        }
+        for (const source of ['queueMicrotask(() => {})', 'Promise.resolve(1)', 'async function test() {}', 'setInterval(() => {}, 1)']) {
+            assert.equal(protocol.inspectCodeSources([{ path: 'script', content: source }])[0].category, '异步调度文本');
+        }
+        assert.deepEqual(calls, [], '扫描不执行、联网、采集本机数据或注册监听');
+        assert.throws(() => protocol.inspectCodeSources([{ path: 'broken', content: null }]), /完整的文件路径和文本/);
+        assert.throws(() => protocol.inspectCodeSources(null), /完整的文件路径和文本/);
     }
-    {
-        const f = fixture({ confirm: false });
-        await f.join();
-        assert.equal(f.state.requests.filter(item => item.endpoint === '/sessions').length, 0, '取消加入不建会话');
+
+    const patch = { name: 'Example', version: '1.0.0', baselineHash: 'a'.repeat(64), summary: '修正取值', evidence: '源码依据', verification: '重新载入核验', changes: [{ path: 'main.js', before: '= 1', after: '= 2', reason: '修复' }] };
+    for (const [kind, payload] of [
+        ['collectDiagnostics', {}], ['collectDiagnostics', { allLogs: false }], ['collectDiagnostics', { allLogs: true }],
+        ['readSources', { name: 'Example', paths: ['main.js'] }],
+        ['readSources', { name: '名'.repeat(256), paths: Array.from({ length: 20 }, (_, index) => index + '.js') }],
+        ['applyPatch', patch], ['applyPatch', { ...patch, changes: Array.from({ length: 8 }, (_, index) => ({ ...patch.changes[0], path: index + '.js' })) }],
+        ['applyConfiguration', { issueId: 'dependency-X' }], ['applyConfiguration', { issueId: 'x'.repeat(1024) }]
+    ]) await protocol.validateCommand(command(kind, payload));
+
+    const quick = { summary: '修正当前游戏状态', script: '\nV.test = 1;\n', verification: '检查状态后自行存档' };
+    await protocol.validateCommand(command('runJavaScript', quick));
+    assert.match(protocol.describeCommand(command('runJavaScript', quick)), /须先备份游戏/);
+    for (const payload of [{ ...quick, script: ' ' }, { ...quick, script: 'x'.repeat(16001) }, { ...quick, summary: 'x'.repeat(2001) }, { ...quick, verification: '' }, { ...quick, script: 1 }, { ...quick, save: '额外字段' }]) {
+        await assert.rejects(protocol.validateCommand(command('runJavaScript', payload)), /快速指令|未支持的字段/);
     }
+    await assert.rejects(protocol.validateCommand({ ...command('runJavaScript', quick), payload: { ...quick, script: 'V.test = 2;' } }), /摘要不一致/);
+    await assert.rejects(protocol.validateCommand(null), /不受支持/);
+    await assert.rejects(protocol.validateCommand(command('constructor', {})), /不受支持/, '继承属性不能成为支持的操作类型');
+    await assert.rejects(protocol.validateCommand(command('collectDiagnostics', [])), /不受支持/);
+    await assert.rejects(protocol.validateCommand(command('collectDiagnostics', null)), /不受支持/);
+    await assert.rejects(protocol.validateCommand({ ...command('collectDiagnostics', { allLogs: false }), payload: { allLogs: true } }), /摘要不一致/, '校验篡改正文，不能沿用原摘要');
+    await assert.rejects(protocol.validateCommand({ ...command('collectDiagnostics', {}), digest: 'A'.repeat(64) }), /摘要不一致/);
+    for (const [kind, payload, error] of [
+        ['collectDiagnostics', { allLogs: false, token: '不允许' }, /未支持的字段/],
+        ['collectDiagnostics', { allLogs: 'true' }, /日志选择格式无效/],
+        ['readSources', { name: '', paths: ['main.js'] }, /精确模组技术名/],
+        ['readSources', { name: 1, paths: ['main.js'] }, /精确模组技术名/],
+        ['readSources', { name: 'x'.repeat(257), paths: ['main.js'] }, /精确模组技术名/],
+        ['readSources', { name: 'Example', paths: [] }, /1 至 20/],
+        ['readSources', { name: 'Example', paths: Array(21).fill('main.js') }, /1 至 20/],
+        ['readSources', { name: 'Example', paths: [1] }, /1 至 20/],
+        ['applyPatch', { ...patch, version: '' }, /版本、路径或包体摘要/],
+        ['applyPatch', { ...patch, changes: [] }, /版本、路径或包体摘要/],
+        ['applyPatch', { ...patch, changes: Array(9).fill(patch.changes[0]) }, /版本、路径或包体摘要/],
+        ['applyPatch', { ...patch, changes: [null] }, /版本、路径或包体摘要/],
+        ['applyPatch', { ...patch, changes: [{ path: 1 }] }, /版本、路径或包体摘要/],
+        ['applyPatch', { ...patch, baselineHash: 'A'.repeat(64) }, /版本、路径或包体摘要/],
+        ['applyConfiguration', { issueId: '' }, /条目标识无效/],
+        ['applyConfiguration', { issueId: 'x'.repeat(1025) }, /条目标识无效/],
+        ['applyConfiguration', { issueId: 1 }, /条目标识无效/],
+        ['applyConfiguration', { issueId: 'dependency-X', enabled: ['Example'] }, /未支持的字段/]
+    ]) await assert.rejects(protocol.validateCommand(command(kind, payload)), error);
+    assert.deepEqual(calls, [], '内容校验只计算摘要，不采集本机环境或发送请求');
+
+    assert.equal(await protocol.readResponse({ text: async () => 'x'.repeat(limit) }), 'x'.repeat(limit));
+    await assert.rejects(protocol.readResponse({ text: async () => '中'.repeat(Math.floor(limit / 3) + 1) }), /超过 1 MiB/, '按 UTF-8 字节计算响应限额');
     {
-        const f = fixture({ kind: 'readSources', payload: { name: 'Example', paths: ['main.js'] } });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.preparations[0].settings.source, 'remoteRepair');
-        assert.deepEqual(f.state.results[0].result.files, [{ path: 'main.js', content: 'const test = 1;' }]);
-        assert.ok(!JSON.stringify(f.state.results).includes('baselineData'));
-        assert.ok(!JSON.stringify(f.state.results).includes('不可上传'));
-    }
-    const patch = { name: 'Example', version: '1.0.0', summary: '修正取值', evidence: '源码依据', verification: '重新载入核验', changes: [{ path: 'main.js', before: '= 1', after: '= 2', reason: '修复' }] };
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch });
-        await f.join(); await f.action('preview');
-        assert.equal(f.state.applies, 0);
-        assert.equal(f.state.previewSource, 'remoteRepair');
-        await f.action('execute');
-        assert.equal(f.state.applies, 1);
-        assert.equal(f.state.results[0].status, 'saved');
-        assert.equal(f.state.results[0].result.pointId, 'point-1');
-        assert.equal(f.state.results[0].result.verification, 'pending-reload');
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: { ...patch, baselineHash: 'c'.repeat(64) } });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.applies, 0);
-        assert.match(f.host.innerHTML, /包体已改变/);
-    }
-    {
-        const f = fixture({ kind: 'applyConfiguration', payload: { issueId: 'dependency-X' } });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.configIssue, 'dependency-X');
-        assert.equal(f.state.applies, 1);
-        assert.ok(f.state.claimJournal.verification.after, '持久保存本机配置核验依据');
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch });
-        await f.join(); await f.action('preview');
-        f.panel.open = false; f.panel.dispatch('toggle');
-        await f.action('execute');
-        assert.equal(f.state.applies, 0, '折叠撤销旧预览');
-        f.panel.open = true; await f.action('resume'); await f.action('execute');
-        assert.equal(f.state.applies, 0, '继续后不能恢复旧确认');
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch, claimFails: true });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.applies, 0, '服务撤销权限后不能写入');
-        assert.match(f.host.innerHTML, /权限已撤销/);
-        assert.match(f.host.innerHTML, /开发者授权已停止/);
-        assert.match(f.host.innerHTML, /结束本机连接/);
-        await f.action('detach');
-        assert.equal(JSON.parse([...f.storage.values()][0]).session.status, 'closed');
-        assert.match(f.host.innerHTML, /未确认服务器结案/);
-        await f.join();
-        assert.equal(f.state.requests.filter(item => item.endpoint === '/sessions').length, 2, '拒绝授权后仍可结束本机连接并加入其他协助');
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch, resultFails: true });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.applies, 1);
-        assert.ok(JSON.parse([...f.storage.values()][0]).entries['command-1'].result, '回传失败保留原结果');
-        assert.equal(JSON.parse([...f.storage.values()][0]).entries['command-1'].pointId, 'point-1', '回传失败保留本机还原点编号');
-        f.options.resultFails = false;
-        await f.tick();
-        assert.equal(f.state.applies, 1, '补传结果不重做修改');
-        assert.equal(f.state.results.length, 1);
-        assert.equal(JSON.parse([...f.storage.values()][0]).entries['command-1'].pointId, 'point-1', '回传成功删除正文后仍保留还原点编号');
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch });
-        await f.join();
-        const stored = JSON.parse([...f.storage.values()][0]);
-        stored.entries['command-1'] = { kind: 'applyPatch', stage: 'started', claimId: 'd'.repeat(64), pointId: 'crash-point', verification: { name: 'Example', beforeHash: 'a'.repeat(64), afterHash: 'b'.repeat(64), enabled: ['Example'], disabled: [] } };
-        f.storage.set([...f.storage.keys()][0], JSON.stringify(stored));
-        const next = fixture({ kind: 'applyPatch', payload: patch, storage: f.storage, commandStatus: 'claimed', claimId: 'd'.repeat(64) });
-        assert.equal(next.state.requests.length, 0, '重载后不自动联网');
-        await next.action('resume');
-        assert.equal(next.state.applies, 0, '中断执行不能重放');
-        assert.equal(next.state.results[0].status, 'uncertain');
-        assert.equal(next.state.results[0].result.pointId, 'crash-point');
-        assert.equal(JSON.parse([...next.storage.values()][0]).entries['command-1'].pointId, 'crash-point');
-        assert.match(next.state.results[0].result.message, /当前包体与预览后的包体一致/);
+        const encoded = new TextEncoder().encode('跨块中文');
+        const chunks = [encoded.slice(0, 1), encoded.slice(1)];
+        let reads = 0, cancelled = false;
+        assert.equal(await protocol.readResponse({ body: { getReader: () => ({
+            read: async () => reads < chunks.length ? { value: chunks[reads++], done: false } : { done: true },
+            cancel: async () => { cancelled = true; }
+        }) }, text: async () => { throw new Error('不能绕过流式读取'); } }), '跨块中文');
+        assert.equal(cancelled, true, '完成读取也释放响应流');
     }
     {
-        const f = fixture(); await f.join();
-        f.session.pairing = 'pending'; await f.tick(); await f.action('pair');
-        assert.equal(f.state.pairings[0].accept, true);
-        assert.match(f.state.confirmations.at(-1).title, /确认开发者连接/);
-        f.session.pairing = 'unpaired'; await f.action('renew-code');
-        assert.match(f.host.innerHTML, /9876543210/);
+        let reads = 0, cancelled = false;
+        await assert.rejects(protocol.readResponse({ body: { getReader: () => ({
+            read: async () => { reads++; return { value: new Uint8Array(600000), done: false }; },
+            cancel: async () => { cancelled = true; }
+        }) }, text: async () => { throw new Error('不能完整缓存超限响应'); } }), /超过 1 MiB/);
+        assert.equal(reads, 2, '读流超限立即停止，不等待其余正文');
+        assert.equal(cancelled, true, '超限时取消响应流');
     }
     {
-        const f = fixture(); await f.join(); await f.action('close');
-        assert.equal(JSON.parse([...f.storage.values()][0]).session.status, 'closed', '结案不能被本机暂停覆盖');
-        assert.match(f.host.innerHTML, /输入修复码/);
-        const other = fixture(); await other.join(); other.session.status = 'closed'; await other.tick();
-        assert.equal(JSON.parse([...other.storage.values()][0]).session.status, 'closed', '开发者结案同样释放加入入口');
+        let cancelled = false;
+        await assert.rejects(protocol.readResponse({ body: { getReader: () => ({
+            read: async () => { throw new Error('流读取中断'); },
+            cancel: async () => { cancelled = true; throw new Error('流已关闭'); }
+        }) } }), /流读取中断/);
+        assert.equal(cancelled, true, '读取异常仍释放响应流，保留原具体原因');
     }
-    {
-        const f = fixture();
-        f.command.payload.allLogs = true;
-        await f.join();
-        assert.equal(f.state.checks, 0, '篡改摘要拒绝本机读取');
-        assert.match(f.host.innerHTML, /摘要不一致/);
+
+    const sensitive = 'token=private，当前凭据 known-memory-key';
+    assert.equal(protocol.redactResultText(sensitive), 'token=[已隐藏]，当前凭据 [已隐去密钥]');
+    assert.equal(sensitive, 'token=private，当前凭据 known-memory-key', '脱敏返回新字符串，不修改用于匹配的源码原文');
+    for (const overrides of [{ modHubAiRepair: {} }, { modHubHelp: {} }]) {
+        assert.throws(() => fixture(overrides).protocol.redactResultText(sensitive), /脱敏模块尚未就绪/, '任一脱敏依赖缺失时拒绝处理，不能原文回退');
     }
-    {
-        const f = fixture(); await f.join(); await f.action('preview');
-        f.options.storageFails = true; await f.action('execute');
-        assert.equal(f.state.requests.filter(item => item.endpoint.endsWith('/claim')).length, 0, '执行记录不能保存时不能领取');
-    }
-    {
-        const f = fixture({ report: '大'.repeat(400000) });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.results.length, 0, '超限资料不截断发送');
-        assert.match(f.host.innerHTML, /超过 1 MiB/);
-    }
-    {
-        const f = fixture({ stream: true });
-        await f.join();
-        assert.equal(f.state.streamReads, 2, '读流超限立即停止，不完整缓存响应');
-        assert.equal(f.state.streamCancelled, true);
-        assert.match(f.host.innerHTML, /超过 1 MiB/);
-    }
-    for (const option of ['claimDropBefore', 'claimDropAfter']) {
-        const f = fixture({ kind: 'applyPatch', payload: patch, [option]: true });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.applies, 0, '领取结果未知时不执行本机修改');
-        assert.equal(JSON.parse([...f.storage.values()][0]).entries['command-1'].stage, 'claim-uncertain');
-        await f.tick();
-        assert.equal(f.state.applies, 0, '核验领取不重放本机修改');
-        assert.equal(f.state.results.length, 1, '领取失败核验后不会以错误编号永久阻塞回传');
-        assert.equal(f.state.results[0].status, option === 'claimDropBefore' ? 'cancelled' : 'uncertain');
-        assert.equal(f.state.results[0].claimId === '', option === 'claimDropBefore');
-        assert.doesNotMatch(f.host.innerHTML, /：cancelled|：uncertain/);
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch, claimFails: true, claimStatus: 410 });
-        await f.join();
-        assert.doesNotMatch(f.host.innerHTML, /digest|baselineHash|\bseq\b|command-1/, '默认只呈现玩家可读摘要');
-        await f.action('preview'); await f.action('execute');
-        assert.equal(JSON.parse([...f.storage.values()][0]).session.status, 'closed', '已到期会话释放加入入口');
-        assert.match(f.host.innerHTML, /本机连接已结束/);
-    }
-    {
-        const secret = 'plain-memory-credential';
-        const f = fixture({ report: '日志直接记录了 ' + secret, knownKey: secret });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.ok(!JSON.stringify(f.state.results).includes(secret), '没有key标签的当前内存密钥也不能上传');
-        assert.match(f.state.results[0].result.report, /已隐去密钥/);
-        const source = 'const text = "' + secret + '";';
-        const g = fixture({ kind: 'readSources', payload: { name: 'Example', paths: ['main.js'] }, source, knownKey: secret });
-        await g.join(); await g.action('preview'); await g.action('execute');
-        assert.equal(g.state.results.length, 0, '源码含当前密钥时拒传整个请求');
-        assert.equal(g.state.applies, 0);
-        assert.match(g.host.innerHTML, /源码含有您当前使用的 AI 密钥/);
-        assert.equal(g.options.source, source, '保护凭据不能改写用于匹配的源码原文');
-    }
-    {
-        const f = fixture({ kind: 'applyPatch', payload: patch, resultStoreFails: true });
-        await f.join(); await f.action('preview'); await f.action('execute');
-        assert.equal(f.state.applies, 1);
-        const record = JSON.parse([...f.storage.values()][0]).entries['command-1'];
-        assert.equal(record.pointId, 'point-1', '保存结果正文失败前已单独保存还原点编号');
-        assert.equal(record.stage, 'started', '记录仍保留为待核验而非假称结果已持久保存');
-    }
-    for (const throws of [false, true]) {
-        const secret = 'plain-error-credential';
-        const f = fixture({ kind: 'applyPatch', payload: patch, knownKey: secret });
-        f.sb.modHubAiRepair.apply = async () => {
-            f.state.applies++;
-            if (throws) throw new Error('回读错误：' + secret);
-            return { ok: false, pointId: 'failed-point', reason: '读取失败：' + secret };
-        };
-        await f.join(); await f.action('preview'); await f.action('execute'); await f.tick();
-        assert.equal(f.state.applies, 1, '失败和异常结果补传不重复修改');
-        assert.equal(f.state.results[0].status, throws ? 'uncertain' : 'failed');
-        assert.ok(!JSON.stringify(f.state.results).includes(secret), '执行错误文案也必须移除当前 AI 密钥');
-        assert.match(f.state.results[0].result.message, /已隐去密钥/);
-        assert.ok(![...f.storage.values()].some(value => value.includes(secret)), '远程持久结果不保留错误中的密钥');
-        if (!throws) assert.equal(f.state.results[0].result.pointId, 'failed-point');
-    }
+
+    assert.equal(protocol.describeCommand(command('collectDiagnostics', { allLogs: false })), '收集诊断：版本、模组清单、检查摘要及错误和警告日志。');
+    assert.match(protocol.describeCommand(command('collectDiagnostics', { allLogs: true })), /全部已捕获日志/);
+    assert.equal(protocol.describeCommand(command('readSources', { name: 'Example', paths: ['main.js', 'other.js'] })), '读取源码：Example\n文件：\nmain.js\nother.js');
+    assert.equal(protocol.describeCommand(command('applyPatch', { ...patch, changes: [patch.changes[0], patch.changes[0]] })), '应用补丁：Example 1.0.0\n修正取值\n文件：\nmain.js');
+    assert.equal(protocol.describeCommand(command('applyConfiguration', { issueId: 'dependency-X' })), '修复配置：根据本机重新检查，预览启用唯一前置或整理加载顺序的方案。');
 };

@@ -12,6 +12,7 @@ process.on('beforeExit', () => {
 });
 
 (async () => {
+    require('../tests/wiki-title-core.test.cjs');
     await require('../tests/style.test')();
     await require('../tests/manager.test')();
     await require('../tests/restore.test')();
@@ -27,6 +28,8 @@ process.on('beforeExit', () => {
     await require('../tests/help.test')();
     await require('../tests/help-ai.test')();
     await require('../tests/remote-help.test')();
+    await require('../tests/game-command.test')();
+    await require('../tests/remote-assist.test')();
     await require('../tests/market-install.test')();
     await require('../tests/market-versions.test')();
     await require('../tests/market-preparation.test')();

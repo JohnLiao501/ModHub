@@ -8,7 +8,7 @@ function fixture(options = {}) {
     const state = {
         enabled: ['Example'], disabled: [], data: encode(options.files || { 'javascript/example.js': 'const value = broken();\nconst other = 1;', 'style/example.css': '.sample { color: red; }' }),
         boot: { name: 'Example', version: '1.0.0', scriptFileList: ['javascript/example.js'], styleFileList: ['style/example.css'], ...options.boot },
-        requests: [], writes: [], timers: [], timerDelays: [], clearedTimers: [], aborts: 0,
+        requests: [], writes: [], writeOptions: [], timers: [], timerDelays: [], clearedTimers: [], aborts: 0,
         answer: { summary: '原函数不存在。', evidence: '源码调用 broken。', verification: '重新载入并重复原操作。', changes: [{ path: 'javascript/example.js', before: 'broken()', after: 'working()', reason: '使用有效函数。' }] },
     };
     const hash = async data => createHash('sha256').update(data).digest('hex');
@@ -33,7 +33,12 @@ function fixture(options = {}) {
             },
             replace: async (archive, replacements) => encode({ ...archive.fixtureFiles, ...Object.fromEntries(replacements) }),
         },
-        modHubApplyAiPackage: async plan => { state.writes.push(plan); state.data = new Uint8Array(plan.data); return { ok: true, pointId: 'repair-point' }; },
+        modHubApplyAiPackage: async (plan, options = {}) => {
+            state.writeOptions.push(options);
+            await options.onPrepared?.('repair-point');
+            state.writes.push(plan); state.data = new Uint8Array(plan.data);
+            return { ok: true, pointId: 'repair-point' };
+        },
         fetch: async (url, request) => {
             state.requests.push({ url, request });
             return { ok: true, status: 200, text: async () => JSON.stringify({ choices: [{ message: { content: JSON.stringify(state.answer) } }] }) };
@@ -109,10 +114,30 @@ module.exports = async function () {
         check.enabled.push('伪造模组');
         assert.deepEqual(plain((await f.api.getVerification(plan)).enabled), ['Example'], '核验资料不暴露可修改的私有配置');
         plan.source = 'aiRepair';
-        assert.equal((await f.api.apply(plan)).ok, true);
+        const preparedIds = [];
+        const onPrepared = async pointId => { preparedIds.push(pointId); await Promise.resolve(); };
+        assert.equal((await f.api.apply(plan, { onPrepared })).ok, true);
+        assert.deepEqual(preparedIds, ['repair-point']);
+        assert.equal(f.state.writeOptions[0].onPrepared, onPrepared, '备份编号回调经独立 options 转交管理器');
+        assert.equal(Object.hasOwn(f.state.writes[0], 'onPrepared'), false, '回调不能混入受核验的修复计划');
         assert.equal(f.state.writes[0].source, 'remoteRepair', '应用来源来自私有计划，不信任公开对象上的来源字段');
         assert.equal((await f.api.apply(plan)).ok, false, '同一已应用方案不能重复写包');
         assert.equal(f.state.writes.length, 1);
+    }
+    {
+        const f = fixture();
+        const prepared = await f.api.prepare('Example', '', { paths: ['javascript/example.js'], source: 'remoteRepair' });
+        const plan = await f.api.previewResponse(prepared, f.state.answer, { source: 'remoteRepair' });
+        const before = new Uint8Array(f.state.data);
+        const result = await f.api.apply(plan, { onPrepared: async () => { throw new Error('工作区已经离开'); } });
+        assert.equal(result.ok, false);
+        assert.match(result.reason, /工作区已经离开/);
+        assert.equal(f.state.writes.length, 0);
+        assert.deepEqual(f.state.data, before, '备份后前台核验拒绝不会写入修复包');
+        f.sb.modHubApplyAiPackage = async () => ({ ok: false, pointId: 'repair-point', committed: true, uncertain: true, reason: '收尾核验失败' });
+        const pending = await f.api.apply(plan);
+        assert.equal(pending.committed, true);
+        assert.equal(pending.uncertain, true, '计划层不改写管理器的实际提交与待核验结果');
     }
     {
         const f = fixture();

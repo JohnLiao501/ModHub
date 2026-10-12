@@ -167,6 +167,23 @@ async function run() {
     assert.ok(protection.get('modHubRestorePanelStatus').textContent.includes('仍受系统保护'));
     await protection.get('modHubRestorePanelCancel').onclick(); await protectionOpened;
 
+    const remoteProtection = fixture();
+    remoteProtection.state.points = [{ id: 'remote', label: '远程协助执行前', at: 3000, modCount: 2, kind: 'auto', operation: 'remoteRepair', protected: true, userProtected: true, systemProtected: false, protectionReasons: ['手动保护'] }];
+    remoteProtection.state.recommendedId = 'remote';
+    const remoteOpened = remoteProtection.open(); await tick();
+    await remoteProtection.get('modHubRestorePanelNext').onclick();
+    const remoteReason = all(remoteProtection.get('modHubRestorePoint_remote').parentNode).find(node => node.className === 'modhub-restore-panel-protection');
+    assert.deepEqual(remoteReason.children.map(node => [node.tagName, node.textContent, node.className]), [
+        ['STRONG', '远程协助保护', 'gold'], ['SMALL', '此还原点保留了远程协助执行前的模组状态，不包含游戏存档。重新载入不会自动解除此保护。验证修改后，可使用“取消手动保护”解除此项保护。', 'grey'],
+    ], '远程保护明确执行前状态范围、长期保留和手动解除路径');
+    selectPoint(remoteProtection, 'remote');
+    assert.equal(remoteProtection.get('modHubRestoreProtectPoint').textContent, '取消手动保护', '远程保护沿用既有解除接口');
+    await remoteProtection.get('modHubRestoreProtectPoint').onclick();
+    assert.deepEqual(remoteProtection.calls.at(-1), ['protect', 'remote', false]);
+    assert.equal(remoteProtection.get('modHubRestoreDeletePoint').disabled, false);
+    assert.ok(!remoteProtection.get('modHubRestorePoint_remote').parentNode.textContent.includes('远程协助保护'), '解除保护后不继续显示长期保护说明');
+    await remoteProtection.get('modHubRestorePanelCancel').onclick(); await remoteOpened;
+
     const reasonCases = fixture();
     reasonCases.state.points = [{ id: 'pending', label: '还原前状态', at: 3000, modCount: 2, kind: 'preRestore', protected: true, userProtected: false, systemProtected: true, protectionReasons: ['未完成还原引用的状态', '<img src=x onerror=alert(1)>'] }];
     const reasonOpened = reasonCases.open({ startup: true }); await tick();

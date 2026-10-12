@@ -1281,9 +1281,9 @@ module.exports = async function() {
         assert.ok(cssContent.includes('.modhub-mobile-close-tab'), 'CSS 中必须包含移动端关闭按钮样式定义');
         assert.ok(cssContent.includes('.modhub-has-mobile-close'), 'CSS 中必须包含带有移动端关闭按钮时的容器留白样式');
         const overridesCss = fs.readFileSync(path.join(srcRoot, 'stylesheet/modhub-overrides.css'), 'utf8');
-        const mobileTabsCss = overridesCss.slice(overridesCss.indexOf('/* 顶栏按可用宽度换行'), overridesCss.indexOf('@media (max-height: 600px)'));
-        assert.match(mobileTabsCss, /#overlayTabs\s*\{[^}]*display:\s*flex\s*!important;[^}]*flex-wrap:\s*wrap\s*!important;[^}]*padding-right:\s*40px\s*!important;[^}]*overflow:\s*visible\s*!important;/, '窄屏顶栏必须自动换行并为右上角关闭按钮预留空间');
-        assert.match(mobileTabsCss, /#overlayTabs button\s*\{[^}]*flex:\s*0 1 120px\s*!important;[^}]*min-width:\s*96px\s*!important;[^}]*min-height:\s*36px\s*!important;/, '窄屏页签必须保持同宽、不拉伸末行，并保留触控高度');
+        const mobileTabsCss = overridesCss.slice(overridesCss.indexOf('/* 顶栏保持单行横向滚动'), overridesCss.indexOf('@media (max-height: 600px)'));
+        assert.match(mobileTabsCss, /#overlayTabs\s*\{[^}]*display:\s*flex\s*!important;[^}]*flex-wrap:\s*nowrap\s*!important;[^}]*padding-right:\s*0\s*!important;[^}]*overflow-x:\s*auto\s*!important;[^}]*overflow-y:\s*hidden\s*!important;/, '窄屏顶栏必须单行横向滚动，不重复占用标题栏预留的关闭按钮空间');
+        assert.match(mobileTabsCss, /#overlayTabs button\s*\{[^}]*flex:\s*0 0 auto\s*!important;[^}]*min-width:\s*96px\s*!important;[^}]*min-height:\s*36px\s*!important;/, '窄屏页签不得缩成空块，必须保留舒适宽度和触控高度');
         assert.match(mobileTabsCss, /#overlayTabs\.modhub-has-mobile-close\s*\{[^}]*padding-right:\s*0\s*!important;/, '使用左侧关闭标签时不得留下右侧叉号占位');
         assert.match(mobileTabsCss, /\.customOverlayClose\s*\{[^}]*top:\s*0\.5rem\s*!important;[^}]*right:\s*8px\s*!important;[^}]*width:\s*36px\s*!important;[^}]*height:\s*36px\s*!important;[^}]*transform:\s*none\s*!important;/, '窄屏关闭按钮必须固定在面板右上角且具有完整触控面积');
 

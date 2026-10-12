@@ -192,6 +192,25 @@
 .modhub-help-suggestions > p { margin: 0 0 10px; font-size: 0.85em; }
 .modhub-help-suggestions .modhub-help-topics { grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); }
 .modhub-help-suggestions small { display: block; margin-top: 4px; font-size: 0.8em; font-weight: normal; }
+.modhub-help-contact { margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--750); }
+.modhub-help-contact p { margin: 8px 0; font-size: 0.9em; }
+
+.modhub-help-home-header { margin: 12px 0 20px; }
+.modhub-help-home-header h2 { margin: 0 0 8px; color: var(--100); font-size: 1.7em; }
+.modhub-help-home-header p, .modhub-help-block-heading p { margin: 8px 0 0; color: var(--300); font-size: .9em; }
+#modHubHelpContainer .modhub-help-home-block { margin: 0 0 24px; padding: 20px 0 0; border-top: 1px solid var(--600); }
+.modhub-help-block-heading { margin-bottom: 16px; }
+.modhub-help-block-heading h3 { margin: 0; color: var(--gold); font-size: 1.3em; }
+.modhub-help-remote-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+#modHubHelpContainer .modhub-help-remote-card { display: grid; gap: 8px; align-content: start; width: 100%; min-width: 0; min-height: 104px !important; padding: 16px !important; box-sizing: border-box; border: 1px solid var(--gold) !important; background: var(--850) !important; color: var(--100) !important; font: inherit; text-align: left !important; cursor: pointer; }
+.modhub-help-remote-card strong { color: var(--gold); font-size: 1.1em; }
+.modhub-help-remote-card span { color: var(--300); font-size: .85em; line-height: 1.5; }
+#modHubHelpContainer .modhub-help-remote-card:hover, #modHubHelpContainer .modhub-help-remote-card:focus-visible { background: var(--800) !important; border-color: var(--100) !important; }
+@media (max-width: 480px) {
+    .modhub-help-home-header h2 { font-size: 1.4em; }
+    .modhub-help-remote-cards { grid-template-columns: minmax(0, 1fr); }
+    #modHubHelpContainer .modhub-help-remote-card { padding: 14px !important; }
+}
 .modhub-ai-status { padding: 10px 12px; background: var(--800); border-left: 3px solid var(--600); }
 .modhub-ai-status:empty { display: none; }
 .modhub-ai-status.red { border-left-color: var(--red); }
@@ -296,12 +315,17 @@
 #modHubHelpContainer .modhub-ai-progress .modhub-help-actions { grid-column: 2; display: flex; margin: 4px 0 0; }
 .modhub-ai-footer { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 20px; margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--700); }
 #modHubHelpContainer .modhub-ai-footer .modhub-help-actions { display: flex; align-items: center; margin: 0; }
-#modHubHelpContainer .modhub-ai-footer .modhub-ai-history-actions { margin-left: auto; }
+#modHubHelpContainer .modhub-ai-footer .modhub-ai-history-actions { flex: 1 1 280px; min-width: 0; margin-left: auto; }
+#modHubHelpContainer .modhub-ai-restore-actions { align-items: center; }
+#modHubAiRestoreStatus { order: -1; flex: 1 1 240px; min-width: 0; margin: 0; }
+#modHubHelpContainer .modhub-ai-history-actions > button { flex: 0 0 auto; margin-left: auto; }
 @media (max-width: 600px) {
     .modhub-ai-footer { display: grid; grid-template-columns: minmax(0, 1fr); }
     #modHubHelpContainer .modhub-ai-footer .modhub-ai-navigation { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
     #modHubAiBack { grid-column: 1 / -1; }
     #modHubHelpContainer .modhub-ai-footer .modhub-ai-history-actions { margin-left: 0; }
+    #modHubHelpContainer .modhub-help-actions-links.modhub-ai-restore-actions { display: flex; }
+    #modHubAiRestoreStatus { flex-basis: 100%; }
     #modHubHelpContainer .modhub-ai-history-actions > button { flex: 1 1 100%; }
 }
 .modhub-ai-error { max-height: 200px; overflow: auto; margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--100); }
@@ -3561,17 +3585,78 @@ button.modhub-btn-primary:active,
 
 /* 样式守卫用此标记确认本文件已实际生效。 */
 :root { --modhub-base-styles: 1; }
-.modhub-remote { min-width: 0; padding-bottom: 60px; overflow-wrap: anywhere; }
-.modhub-remote section { margin: 16px 0; padding: 12px; border: 1px solid var(--700); background: var(--850); }
-.modhub-remote h4 { margin: 0 0 8px; color: var(--100); }
-.modhub-remote pre { max-height: 240px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--900); padding: 12px; }
-.modhub-remote label { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
-.modhub-remote input { box-sizing: border-box; min-width: 0; max-width: 100%; min-height: 32px; color: var(--100); background: var(--900); border: 1px solid var(--600); }
-.modhub-remote .modhub-help-actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.modhub-remote .modhub-help-actions > button { flex: 0 1 auto; min-width: 0; min-height: 32px; white-space: normal; }
-.modhub-remote .modhub-help-report { box-sizing: border-box; width: 100%; min-height: 220px; max-height: 55vh; resize: vertical; }
-.modhub-remote :focus-visible { outline: 2px solid var(--gold, #d2aa4b); outline-offset: 2px; }
-@media (max-width: 768px) {
-    .modhub-remote .modhub-help-actions > button { flex: 1 1 140px; }
-    .modhub-remote section { padding: 8px; }
+/* 匿名远程协助工作区与帮助中心入口。 */
+#modHubHelpRemoteWorkspace[hidden], #modHubHelpHome[hidden], .modhub-assist-entry-badge[hidden] { display: none !important; }
+.modhub-remote-entry-header { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 8px 14px; }
+.modhub-remote-entry-header h3 { margin: 0; }
+.modhub-remote-entry-count { color: var(--gold); font-size: .85em; overflow-wrap: anywhere; }
+.modhub-assist-entry-badge { display: inline-flex; align-items: center; justify-content: center; flex: 0 0 auto; min-width: 0; max-width: 100%; min-height: 32px; padding: 4px 9px; margin: 4px 6px; border: 1px solid var(--600); color: var(--gold); background: var(--850); font: inherit; font-size: .85em; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; cursor: pointer; }
+.modhub-assist-entry-badge:hover, .modhub-assist-entry-badge:focus-visible { border-color: var(--gold); }
+.modhub-assist { min-width: 0; padding-bottom: calc(60px + env(safe-area-inset-bottom)); overflow-wrap: anywhere; }
+.modhub-assist p { margin: 8px 0; }
+.modhub-assist-header, .modhub-assist-session-header { display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px 16px; }
+.modhub-assist-header { padding-bottom: 14px; border-bottom: 1px solid var(--600); margin-bottom: 16px; }
+.modhub-assist-header h2 { margin: 0 0 5px; color: var(--100); font-size: 1.45em; }
+.modhub-assist-header p { margin: 0; font-size: .9em; }
+.modhub-assist-session-header { margin: 16px 0; }
+.modhub-assist-session-header > div { min-width: 0; }
+.modhub-assist-session-header .modhub-help-actions { margin: 0; }
+.modhub-assist h3 { margin: 0 0 10px; color: var(--gold); font-size: 1.05em; }
+.modhub-assist h4 { color: var(--100); margin: 10px 0; font-size: 1em; }
+.modhub-assist-card { max-width: 600px; padding: 18px; background: var(--850); border: 1px solid var(--700); }
+.modhub-assist-notice { padding: 10px 12px; border-left: 2px solid var(--gold); background: var(--850); }
+.modhub-assist-notice:empty { display: none; }
+.modhub-assist-field { display: grid; gap: 6px; min-width: 0; margin: 12px 0; color: var(--300); font-size: .9em; }
+.modhub-assist-field input, .modhub-assist-field select, .modhub-assist-field textarea { box-sizing: border-box; width: 100%; min-width: 0; min-height: 36px; padding: 8px 10px; color: var(--100); background: var(--900); border: 1px solid var(--600); font: inherit; }
+.modhub-assist-field textarea { min-height: 84px; resize: vertical; }
+.modhub-assist-check { display: flex; align-items: flex-start; gap: 8px; margin: 14px 0; }
+.modhub-assist-check input { flex-shrink: 0; }
+.modhub-assist-invite { display: grid; gap: 4px; padding: 14px; background: var(--900); }
+.modhub-assist-invite strong { color: var(--gold); font-size: 1.45em; letter-spacing: .13em; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; user-select: text; }
+.modhub-assist-hint { font-size: .85em; color: var(--300); }
+.modhub-assist-connected { display: grid; grid-template-columns: minmax(0, 1fr) minmax(260px, 360px); gap: 20px; align-items: start; }
+.modhub-assist-connected.modhub-assist-player { grid-template-columns: minmax(0, 1fr); }
+.modhub-assist-chat, .modhub-assist-tools { min-width: 0; }
+.modhub-assist-tools { padding: 16px; border-left: 2px solid var(--600); background: var(--850); }
+.modhub-assist-conversation { min-height: 180px; max-height: 52vh; overflow-y: auto; overscroll-behavior: contain; padding: 12px; background: var(--900); border: 1px solid var(--700); }
+.modhub-assist-message { min-width: 0; margin-bottom: 14px; padding: 9px 10px; border-left: 2px solid var(--600); background: var(--850); }
+.modhub-assist-message:last-child { margin-bottom: 0; }
+.modhub-assist-message p, .modhub-assist-system { white-space: pre-wrap; overflow-wrap: anywhere; }
+.modhub-assist-message small { color: var(--400); }
+.modhub-assist-message-own { margin-left: 16px; border-left-color: var(--750); background: var(--800); }
+.modhub-assist-system { color: var(--300); margin-bottom: 14px; font-size: .9em; }
+.modhub-assist-task { padding: 14px; margin: 16px 0; border-left: 2px solid var(--gold); background: var(--850); }
+.modhub-assist-preview { box-sizing: border-box; width: 100%; min-width: 0; max-width: 100%; min-height: 180px; max-height: 48vh; resize: vertical; padding: 12px; color: var(--100); background: var(--900); border: 1px solid var(--600); font: inherit; font-size: .9em; }
+.modhub-assist-code { max-height: 45vh; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--900); border: 1px solid var(--700); font-size: .85em; tab-size: 2; }
+.modhub-assist-detail { margin-top: 18px; padding-left: 14px; border-left: 2px solid var(--600); }
+.modhub-assist-change { box-sizing: border-box; min-width: 0; margin: 14px 0; padding: 12px; border: 1px solid var(--600); }
+.modhub-assist-change legend { color: var(--gold); }
+.modhub-assist-secondary { margin: 20px 0 0; padding: 12px 0 0; border-top: 1px solid var(--750); color: var(--300); font-size: .9em; }
+.modhub-assist-secondary > summary { cursor: pointer; padding: 4px 0; }
+.modhub-assist-secondary > p { padding-left: 12px; }
+.modhub-assist-verification { margin: 16px 0; padding: 10px 12px; border-left: 2px solid var(--600); background: var(--850); font-size: .9em; }
+.modhub-assist :focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+#modHubHelpContainer .modhub-assist .modhub-help-actions > button { min-width: 0; flex: 0 1 auto; white-space: normal; }
+@media (max-width: 900px) {
+    .modhub-assist-connected { grid-template-columns: minmax(0, 1fr); }
+    .modhub-assist-tools { border-left: 0; border-top: 2px solid var(--600); }
 }
+@media (max-width: 768px) {
+    .modhub-assist-card, .modhub-assist-tools { padding: 12px; }
+    .modhub-assist-header h2 { font-size: 1.3em; }
+    .modhub-assist-header { gap: 10px; }
+    .modhub-assist-field input, .modhub-assist-field select, .modhub-assist-field textarea { font-size: 16px; }
+    .modhub-assist-invite strong { font-size: 1.25em; letter-spacing: .1em; }
+    .modhub-assist-conversation { max-height: 48vh; padding: 8px; }
+    .modhub-assist-message-own { margin-left: 8px; }
+    #modHubHelpContainer .modhub-assist .modhub-help-actions > button { flex: 1 1 140px; min-height: 36px; }
+    .modhub-assist-entry-badge { margin: 4px; }
+}
+
+/* 主动操作定位时，为固定页签和边框保留阅读间距。 */
+#modHubHelpContainer [tabindex="-1"], #modHubAssistPlayerPreview, #modHubAssistOperationPreview,
+#modHubAssistChat, #modHubAssistConversation, .modhub-assist-card, .modhub-assist-tools, .modhub-assist-change {
+    scroll-margin-top: 52px;
+    scroll-margin-bottom: 16px;
+}
+.modhub-assist-notice.red { border-left-color: var(--red); }

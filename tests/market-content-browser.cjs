@@ -201,7 +201,7 @@ const results = [];
             window.modHubFixtureReopening = window.modHubInitMarket();
         });
         await page.waitForFunction(() => window.modHubFixtureReadStarted);
-        assert.equal(await page.locator('#modHubMarketBatchToolbar').isVisible(), false, '咒语重开且管理状态读取延迟时也立即隐藏批量操作');
+        assert.equal(await page.locator('#modHubMarketBatchToolbar').isVisible(), false, '言灵重开且管理状态读取延迟时也立即隐藏批量操作');
         assert.equal(await page.evaluate(() => window.modHubMarket.installSelectedMods()), false, '隐藏期间不能执行之前选择的 MOD 安装');
         await page.evaluate(async () => { window.modHubFixtureFinishRead(); await window.modHubFixtureReopening; });
         assert.equal(await page.locator('[data-section="spells"]').getAttribute('aria-pressed'), 'true');
@@ -216,7 +216,7 @@ const results = [];
         const spellState = await page.evaluate(() => ({ clientWidth: document.documentElement.clientWidth,
             scrollWidth: document.documentElement.scrollWidth, modCount: window.modHubMarket.getMarketMods().length,
             actions: [...document.querySelectorAll('.modhub-spell-card button')].map(button => ({ text: button.textContent, height: button.getBoundingClientRect().height })) }));
-        assert.ok(spellState.scrollWidth <= spellState.clientWidth + 1, '咒语板块不得横向溢出');
+        assert.ok(spellState.scrollWidth <= spellState.clientWidth + 1, '言灵板块不得横向溢出');
         assert.ok(spellState.actions.every(button => button.height >= 32));
         assert.equal(spellState.modCount, index.mods.length, '复制不会安装正文或改变模组目录');
         await page.screenshot({ path: path.join(evidenceDir, `spells-${width}.png`), fullPage: true });
@@ -320,7 +320,7 @@ const results = [];
         results.push({ width, nativeCssPath, nativeCssSha256, browserPath: 'Browser plugin not available', packageState, spellState, sourceInteractions,
             versionPalette, updateState, updateInteractions, batchUpdateState, ignoredUpdate, pageErrors: errors, consoleErrors, isolatedRequests, fixtureOnly: true });
         await context.close();
-        console.log(`${width}px 市场资料、咒语、未知适配新版与全部更新预选通过`);
+        console.log(`${width}px 市场资料、言灵、未知适配新版与全部更新预选通过`);
     }
 })().catch(error => { console.error(error.stack); process.exitCode = 1; }).finally(async () => {
     fs.writeFileSync(path.join(evidenceDir, 'result.json'), JSON.stringify(results, null, 2));

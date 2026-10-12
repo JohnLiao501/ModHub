@@ -13,6 +13,8 @@
  *   markSharedRepositories()     标记共享仓库并清除旧快照错配版本
  */
 
+import './modhub-wiki-title.js';
+
 const WIKI_API = 'https://degreesoflewditycn.miraheze.org/w/api.php';
 const WIKI_PAGE = '模组列表';
 const IDENTITY_FILE = './mod-identities.json';
@@ -254,25 +256,6 @@ function getColumnIndexes(table) {
   return idx;
 }
 
-/** 提取模组名，排除「Github / 下载 / 论坛」等功能链接 */
-function extractName(td) {
-  if (!td) return '';
-  const utilityRegex = /github|discord|下载|论坛|链接|地址|\u2708|\u2764|→|\[.*?\]/i;
-  const anchors = Array.from(td.querySelectorAll('a'));
-  const nameAnchors = anchors.filter((a) => {
-    const t = cleanText(a.textContent);
-    return t && !utilityRegex.test(t);
-  });
-  if (nameAnchors.length) {
-    return nameAnchors.map((a) => cleanText(a.textContent)).join('/');
-  }
-  const clone = td.cloneNode(true);
-  clone.querySelectorAll('a').forEach((a) => {
-    if (utilityRegex.test(cleanText(a.textContent))) a.remove();
-  });
-  return cleanText(clone.textContent);
-}
-
 /** 仅提取名称列中的 GitHub 项目链接，描述与作者中的引用不是发布源。 */
 function extractGithubUrls(row) {
   const urls = [];
@@ -367,24 +350,20 @@ export function extractModsFromHtml(html) {
       if (!tds.length) continue;
 
       const nameCell = tds[idx.name];
-      const namedProjects = Array.from(nameCell?.querySelectorAll('a[href]') || []).filter((a) =>
-        parseGithubUrl(a.getAttribute('href')) && cleanText(a.textContent)
-        && !/github|discord|下载|论坛|链接|地址|源码|镜像|\u2708|\u2764|→|\[.*?\]/i.test(cleanText(a.textContent)));
-      const projects = new Set(namedProjects.map((a) => a.getAttribute('href').replace(/\/+$/, ''))).size > 1
-        ? namedProjects : [null];
+      const title = globalThis.modHubWikiTitle.fromDom(nameCell);
+      const projects = title.status === 'resolved' && title.projects.length > 1 ? title.projects : [null];
       for (const project of projects) {
-        const name = (project ? cleanText(project.textContent) : extractName(nameCell))
-          .replace(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0E\uFE0F\u200D]/gu, '').trim();
+        const name = title.status === 'resolved' ? (project ? project.name : title.name) : '';
         const description = cleanText(tds[idx.description] ? tds[idx.description].textContent : '');
         const author =
           idx.author >= 0 && tds[idx.author] ? cleanText(tds[idx.author].textContent) : '';
         const dateText = idx.date >= 0 && tds[idx.date] ? cleanText(tds[idx.date].textContent) : '';
         const { date, version } = parseDateCell(dateText);
 
-        const githubUrls = project ? [project.getAttribute('href')] : extractGithubUrls(nameCell);
+        const githubUrls = project ? [project.href] : extractGithubUrls(nameCell);
         const githubUrl = githubUrls[0] || null;
 
-        const otherUrls = project ? [] : extractOtherUrls(nameCell);
+        const otherUrls = extractOtherUrls(nameCell);
         const otherUrl = pickBestOtherUrl(otherUrls);
 
         // 状态判定：核心字段决定 Failed / 通过
@@ -408,6 +387,8 @@ export function extractModsFromHtml(html) {
 
         mods.push({
           name: name || null,
+          wikiLegacyName: project ? (project.legacyName || project.name) : title.legacyName,
+          titleStatus: title.status,
           githubUrl,
           githubUrls,
           otherUrl,

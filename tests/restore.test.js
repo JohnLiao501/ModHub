@@ -534,6 +534,85 @@ async function protectionControls() {
     console.log('手动保护、独立系统保护、普通历史配额与原子元数据测试通过');
 }
 
+async function remoteProtectionControls() {
+    const h = harness({ confirm: () => true });
+    await h.api.startupReady;
+    await h.api.saveConfig({ autoCreate: false, maxPoints: 5 });
+    const ids = [];
+    for (let i = 0; i < 3; i++) {
+        const context = h.api.createOperation({ kind: 'remoteRepair', label: `远程协助执行前 ${i}` });
+        assert.equal(await h.api.prepare(context), true, '关闭普通自动建点后远程操作仍强制备份');
+        const point = h.mod.data.get(pointKey).find(item => item.id === context.pointId);
+        assert.equal(point.userProtected, true, '执行前建点事务已同时保存长期保护');
+        assert.equal(point.operation, 'remoteRepair');
+        if (i < 2) h.mod.data.set('package-custom:A', pack(`A 远程修改 ${i}`));
+        await h.api.finish(context);
+        assert.equal(context.finishError, undefined);
+        ids.push(context.pointId);
+    }
+    let panel = await h.api.getPanelState();
+    assert.ok(ids.every(id => panel.points.some(point => point.id === id && point.userProtected && point.operation === 'remoteRepair')));
+    assert.ok(panel.points.some(point => point.id === ids[2]), 'JS 只改游戏状态时，无模组变化的远程保护点仍保留');
+    for (let i = 0; i < 8; i++) {
+        h.mod.data.set('package-custom:A', pack(`A 普通历史 ${i}`));
+        await h.api.createPoint(`普通历史 ${i}`);
+    }
+    panel = await h.api.getPanelState();
+    assert.equal(panel.points.filter(point => !point.protected).length, 5);
+    assert.equal(panel.points.length, 8, '同轮全部远程保护点额外保留，不占普通配额');
+    assert.ok(ids.every(id => panel.points.some(point => point.id === id && point.userProtected)));
+
+    const reloaded = harness({ mod: h.mod, beauty: h.beauty, storage: h.storage, confirm: () => true });
+    await reloaded.api.startupReady;
+    reloaded.sandbox.SugarCube = { State: { passage: '首界面' } };
+    reloaded.document.getElementById('init-screen').style.display = 'none';
+    await reloaded.intervals[0]();
+    panel = await reloaded.api.getPanelState();
+    assert.ok(ids.every(id => panel.points.some(point => point.id === id && point.userProtected && !point.systemProtected)), '成功启动只解除系统保护，保留全部远程长期保护');
+    await reloaded.api.setPointProtection(ids[0], false);
+    assert.ok((await reloaded.api.getPanelState()).points.some(point => point.id === ids[0] && !point.protected), '玩家可以手动解除远程保护，不立即删除');
+    await reloaded.api.saveConfig({ autoCreate: false, maxPoints: 5 });
+    panel = await reloaded.api.getPanelState();
+    assert.ok(!panel.points.some(point => point.id === ids[0]), '解除保护后参与既有普通历史清理');
+    assert.ok(ids.slice(1).every(id => panel.points.some(point => point.id === id && point.userProtected)));
+
+    const failed = harness();
+    await failed.api.startupReady;
+    const before = structuredClone([...failed.mod.data]);
+    let protectedWrite = false;
+    failed.mod.failPut = (key, value) => {
+        if (key !== pointKey) return null;
+        protectedWrite = value[0].operation === 'remoteRepair' && value[0].userProtected === true;
+        return new Error('远程保护目录提交失败');
+    };
+    const context = failed.api.createOperation({ kind: 'remoteRepair', label: '不可跳过的远程保护' });
+    await assert.rejects(failed.api.prepare(context), /远程保护目录提交失败/);
+    assert.equal(protectedWrite, true, '备份与保护使用同一目录写入');
+    assert.deepEqual([...failed.mod.data], before, '目录提交失败不残留未保护点或部分备份包体');
+    assert.equal(context.pointId, null);
+    assert.equal(failed.api.isOperationBlocked(), false, '强制保护失败后释放操作锁');
+    assert.equal(failed.dialogs.length, 0, '远程保护失败不能提供跳过备份的确认');
+
+    const legacy = harness();
+    await legacy.api.startupReady;
+    const old = legacy.api.createOperation({ kind: 'remoteRepair' });
+    await legacy.api.prepare(old); await legacy.api.finish(old);
+    const oldPoints = structuredClone(legacy.mod.data.get(pointKey));
+    delete oldPoints[0].userProtected;
+    legacy.mod.data.set(pointKey, oldPoints);
+    const writes = legacy.mod.writes;
+    const point = (await legacy.api.getPanelState()).points[0];
+    assert.equal(point.operation, 'remoteRepair', '旧历史仍提供真实来源摘要');
+    assert.equal(point.userProtected, false, '旧远程历史缺少保护标记时不追溯补写保护');
+    assert.equal(legacy.mod.writes, writes, '读取摘要不改写旧历史');
+    for (const kind of ['manual', 'aiRepair']) {
+        const local = legacy.api.createOperation({ kind, label: '远程协助修复前' });
+        await legacy.api.prepare(local); await legacy.api.finish(local);
+        assert.equal((await legacy.api.getPanelState()).points.find(item => item.id === local.pointId).userProtected, false, '只按远程操作来源启用长期保护，不按标题猜测');
+    }
+    console.log('远程协助长期保护、事务失败、配额与旧历史兼容测试通过');
+}
+
 async function storageListMissingBody() {
     const enabled = ['前置', 'ModHub', 'A', '残留启用记录'];
     const disabled = ['B', '残留禁用记录'];
@@ -700,6 +779,7 @@ async function restorePackageVersions() {
 async function run() {
     await storageControls();
     await protectionControls();
+    await remoteProtectionControls();
     await storageListMissingBody();
     await restorePackageVersions();
     const old = createBaseSandbox();

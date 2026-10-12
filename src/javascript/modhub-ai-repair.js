@@ -1319,7 +1319,7 @@
         return finishContinuation(plan, record, next);
     }
 
-    async function apply(plan) {
+    async function apply(plan, { onPrepared } = {}) {
         try {
             const record = plans.get(plan);
             if (!record || record.stamp !== planStamp(plan)
@@ -1327,7 +1327,7 @@
             await assertCurrent(record);
             const result = await window.modHubApplyAiPackage({ name: record.name, baselineData: new Uint8Array(record.archive.bytes),
                 data: new Uint8Array(record.data), enabled: [...record.lists.enabled], disabled: [...record.lists.disabled],
-                ...(record.source === 'remoteRepair' ? { source: record.source } : {}) });
+                ...(record.source === 'remoteRepair' ? { source: record.source } : {}) }, { onPrepared });
             if (result?.ok) revision++;
             return result;
         } catch (error) { return { ok: false, reason: String(error?.message || error) }; }

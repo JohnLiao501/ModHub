@@ -189,20 +189,21 @@
     }
 }
 @media (max-width: 768px) {
-    /* 顶栏按可用宽度换行，关闭按钮独占右上角触控区域。 */
+    /* 顶栏保持单行横向滚动，关闭按钮独占右上角触控区域。 */
     #customOverlay[data-overlay="modloader"] #customOverlayTitle {
         min-width: 0 !important;
         max-width: 100% !important;
     }
     #customOverlay[data-overlay="modloader"] #overlayTabs {
         display: flex !important;
-        flex-wrap: wrap !important;
+        flex-wrap: nowrap !important;
         min-width: 0 !important;
-        padding-right: 40px !important;
-        overflow: visible !important;
+        padding-right: 0 !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
     }
     #customOverlay[data-overlay="modloader"] #overlayTabs button {
-        flex: 0 1 120px !important;
+        flex: 0 0 auto !important;
         width: auto !important;
         min-width: 96px !important;
         max-width: none !important;

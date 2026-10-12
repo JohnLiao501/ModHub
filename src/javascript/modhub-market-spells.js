@@ -1,4 +1,4 @@
-/** ModHub 社区获取说明与咒语配方。正文只作为文本展示和复制。 */
+/** ModHub 社区获取说明与言灵配方。正文只作为文本展示和复制。 */
 (function() {
     'use strict';
 
@@ -83,7 +83,8 @@
     function filter(search = '', sort = 'date') {
         const keyword = String(search).toLowerCase();
         const values = spells.filter(entry => !keyword || [entry.name, entry.author, entry.description, entry.spell.body,
-            entry.spell.syntax, entry.spell.inputLocation, entry.spell.prerequisites, entry.spell.gameVersionRange]
+            entry.spell.syntax, entry.spell.inputLocation, entry.spell.prerequisites, entry.spell.gameVersionRange,
+            entry.spell.modVersions, entry.spell.verificationMethod]
             .some(value => String(value || '').toLowerCase().includes(keyword)));
         return values.sort((left, right) => sort === 'name' ? String(left.name).localeCompare(String(right.name), 'zh-CN')
             : String(right.updateDate || right.spell.verifiedAt || '').localeCompare(String(left.updateDate || left.spell.verifiedAt || '')));
@@ -180,23 +181,26 @@
         try {
             if (!navigator.clipboard?.writeText) throw new Error('当前浏览器不支持剪贴板写入');
             await navigator.clipboard.writeText(body);
-            window.modHubShowToast?.('已复制咒语正文。请按说明在对应位置使用。', 'success');
+            window.modHubShowToast?.('已复制言灵正文。请按说明在对应位置使用。', 'success');
             return true;
         } catch (error) {
-            await window.modHubAlert?.(`未能复制咒语正文。请在详情中选择正文后手动复制。\n\n错误详情：${error.message || String(error)}`, '复制未完成');
+            await window.modHubAlert?.(`未能复制言灵正文。请在详情中选择正文后手动复制。\n\n错误详情：${error.message || String(error)}`, '复制未完成');
             return false;
         }
     }
 
     async function showDetails(entry) {
         if (typeof window.modHubConfirm !== 'function') return false;
-        const confirmed = await window.modHubConfirm({ title: entry.name || '咒语配方', confirmText: '复制正文', cancelText: '关闭',
+        const confirmed = await window.modHubConfirm({ title: entry.name || '言灵配方', confirmText: '复制正文', cancelText: '关闭',
             trustedMessageHtml: '<div class="modhub-spell-detail"></div>', dialogClass: 'modhub-spell-dialog',
             onRender(dialog) {
                 const host = dialog.querySelector('.modhub-spell-detail');
                 const fields = [['说明', entry.description], ['语法类型', entry.spell.syntax], ['输入位置', entry.spell.inputLocation],
                     ['使用步骤', entry.spell.instructions], ['参数', entry.spell.parameters], ['前提条件', entry.spell.prerequisites],
-                    ['适配 DoL', entry.spell.gameVersionRange || '未知，请核对原帖'], ['核验说明', '语法与使用资料已核验，未游戏实测']];
+                    ['适配 DoL', entry.spell.gameVersionRange || '未知，请核对原帖'], ['适用模组及版本', entry.spell.modVersions],
+                    ['验证方法', entry.spell.verificationMethod], ['核验说明', entry.spell.submittedEnvironmentVerified === true
+                        ? '提交者自述已在所列环境验证；通用适配尚未验证，不代表审核者完成游戏实测。'
+                        : '语法与使用资料已核验，未游戏实测']];
                 fields.forEach(([label, value]) => {
                     if (!value) return;
                     const paragraph = document.createElement('p');
@@ -219,13 +223,13 @@
         const entries = filter(search, sort);
         container.innerHTML = entries.length ? entries.map((entry, index) => `<div class="childItem modhub-market-card modhub-spell-card">`
             + `<div class="modhub-market-card-header"><span class="modhub-market-title gold">${escapeHtml(entry.name)}</span>`
-            + '<span class="modhub-market-badge badge-external">咒语配方</span></div>'
-            + `<div class="modhub-market-meta grey">作者：${escapeHtml(entry.author || '未知作者')} · 未游戏实测</div>`
+            + '<span class="modhub-market-badge badge-external">言灵配方</span></div>'
+            + `<div class="modhub-market-meta grey">作者：${escapeHtml(entry.author || '未知作者')} · ${entry.spell.submittedEnvironmentVerified === true ? '提交者环境已验证（自述），通用适配待核验' : '未游戏实测'}</div>`
             + `<div class="modhub-market-desc">${escapeHtml(entry.description || '暂无说明')}</div>`
             + `<div class="modhub-market-meta grey">输入位置：${escapeHtml(entry.spell.inputLocation || '请查看详情')}<br>适配 DoL：${escapeHtml(entry.spell.gameVersionRange || '未知，请核对原帖')}</div>`
             + `<div class="modhub-market-actions"><button type="button" class="macro-button modhub-btn-primary modhub-spell-detail-button" data-spell-index="${index}">查看使用说明</button>`
             + `<button type="button" class="macro-button modhub-btn-sub modhub-spell-copy-button" data-spell-index="${index}">复制正文</button></div></div>`).join('')
-            : `<div class="modhub-empty-state grey">${search ? '没有匹配的咒语配方。可清除搜索或刷新市场。' : '当前暂无咒语配方。可刷新市场获取最新目录。'}</div>`;
+            : `<div class="modhub-empty-state grey">${search ? '没有匹配的言灵配方。可清除搜索或刷新市场。' : '当前暂无言灵配方。可刷新市场获取最新目录。'}</div>`;
         container.querySelectorAll('.modhub-spell-detail-button').forEach(button => { button.onclick = () => showDetails(entries[Number(button.dataset.spellIndex)]); });
         container.querySelectorAll('.modhub-spell-copy-button').forEach(button => { button.onclick = () => copyBody(entries[Number(button.dataset.spellIndex)]); });
     }

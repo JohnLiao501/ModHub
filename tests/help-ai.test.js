@@ -5,6 +5,7 @@ function fixture(options = {}) {
     const elements = new Map(), calls = [], storage = new Map(options.storage || []);
     const state = { data: new Uint8Array([1]), preparations: [], logPreparations: [], recommendations: [], requests: [], sourcePreparations: [], sourceLocks: [], investigations: [], investigationLocks: [], connectionTests: [], logReads: 0,
         prepareError: options.prepareError || '', connectionSaveError: '', logError: '', prepareLocks: [], focusEvents: [], focusOptions: [], triages: [], fileNodes: [], suggestionNodes: [],
+        points: options.points ?? [{ id: '修复前点' }, { id: '失败保护点' }], historyReads: 0, historyError: '',
         targets: options.targets ?? [{ name: '测试模组', enabled: true, bootJson: { version: '1.0.0' } }],
         analysis: { lines: options.lines || [], errorMods: options.errorMods || [], matchedIssues: [], errorCount: 0, warnCount: 0 } };
     state.analysis.errorCount = state.analysis.lines.filter(item => item.level === 'error').length;
@@ -15,6 +16,10 @@ function fixture(options = {}) {
         if (!elements.has(id)) {
             const element = createStubElement(id.includes('Material') || id.includes('Description') ? 'textarea' : 'button');
             element.focus = settings => { state.focusEvents.push({ id, disabled: element.disabled }); state.focusOptions.push(settings); };
+            if (id === 'modHubAiHistoryActions' || id === 'modHubAiUndoActions') element.appendChild = child => {
+                child.parentNode?.removeChild(child);
+                element.children.push(child); child.parentNode = element; return child;
+            };
             elements.set(id, element);
         }
         return elements.get(id);
@@ -143,7 +148,10 @@ function fixture(options = {}) {
             apply: async value => { calls.push('应用'); assert.equal(value, plan); return options.result || { ok: true, pointId: '修复前点' }; },
         },
         modHubConfirm: async prompt => { calls.push('确认'); assert.match(prompt.message, /script\.js/); return options.confirm !== false; },
-        modHubRestore: { restore: async id => { calls.push('还原:' + id); return options.restore === true; } },
+        modHubRestore: {
+            list: async () => { state.historyReads++; if (state.historyError) throw new Error(state.historyError); return options.historyList ? options.historyList(state) : state.points; },
+            restore: async id => { calls.push('还原:' + id); return options.restore === true; },
+        },
         modHubAiPackage: { hash: async data => Array.from(data).join(',') },
         modHubReadInstalledModPackage: async () => ({ data: state.data }),
         modHubOpenManager: tab => { calls.push('导航:' + tab); return options.navigation !== false; },
@@ -215,12 +223,20 @@ module.exports = async function() {
         assert.equal(f.el('Last').hidden, false);
     }
     {
-        const f = fixture(); await f.init();
+        const f = fixture(); let initialScrolls = 0; f.host.scrollIntoView = () => { initialScrolls++; }; await f.init();
         assert.deepEqual(f.calls, [], '首屏不读取包体或发送请求');
-        assert.match(f.host.innerHTML, /需要什么帮助/);
+        assert.equal(initialScrolls, 0, '普通首页不能自动滚过常见问题跳入AI板块');
+        assert.match(f.host.innerHTML, /<h3>AI 协助<\/h3>/);
+        assert.doesNotMatch(f.host.innerHTML, /data-help-topic|data-help-open="remote"/, '常见问题和远程协助独立于AI各阶段');
         assert.match(f.host.innerHTML, /描述问题.*确认分析.*查看方案.*重载验证/);
-        assert.match(f.container.innerHTML, /使用声明、数据与撤销范围/);
-        assert.match(f.container.innerHTML, /发送内容.*密钥保存.*应用修改.*验证与撤销/);
+        assert.match(f.host.innerHTML, /使用声明、数据与撤销范围/);
+        assert.match(f.host.innerHTML, /发送内容.*密钥保存.*应用修改.*验证与撤销/);
+        assert.doesNotMatch(f.container.innerHTML, /使用声明、数据与撤销范围/, 'AI 使用声明不再放在帮助中心公共页脚');
+        assert.doesNotMatch(f.host.innerHTML, /不依赖枫叶框架/);
+        assert.match(f.container.innerHTML, /我们随时为您提供帮助。请告诉我们您遇到的问题，以便为您提供合适的帮助和支持。/);
+        assert.equal((f.host.innerHTML.match(/id="modHubAiRestoreStatus"/g) || []).length, 1, '各阶段共用同一原因节点');
+        const historyActions = f.host.innerHTML.match(/<div\b[^>]*id="modHubAiHistoryActions"[^>]*>([\s\S]*?)<\/div>/)?.[1] || '';
+        assert.match(historyActions, /id="modHubAiRestoreStatus"/); assert.match(historyActions, /id="modHubAiLast"/, '原因与历史入口位于同一操作区域');
         assert.doesNotMatch(f.host.innerHTML, /modHubAiConsent/, '明确发送按钮即表达同意，不增加重复复选框');
         const workflow = f.host.innerHTML.indexOf('id="modHubAiWorkflow"');
         assert.ok(f.host.innerHTML.indexOf('id="modHubAiKey"') < workflow, '连接设置独立于分析工作流');
@@ -1325,6 +1341,103 @@ module.exports = async function() {
         await f.el('Analyze').onclick(); await f.el('Apply').onclick(); await f.init();
         f.state.data = new Uint8Array([2]); await f.el('Last').onclick();
         assert.match(f.el('Status').textContent, /不再对应当前包体/); assert.equal(f.storage.has('modhub_ai_last_repair'), false);
+    }
+    // 历史入口须核对真实还原点；旧记录或旧页面的异步结果不能解除当前限制。
+    {
+        let resolve;
+        const record = { name: '测试模组', pointId: '修复前点', verified: true };
+        const f = fixture({ storage: [['modhub_ai_last_repair', JSON.stringify(record)]],
+            historyList: () => new Promise(done => { resolve = done; }) });
+        await f.init();
+        assert.equal(f.el('Last').hidden, false, '存在修复记录时保留历史入口');
+        assert.equal(f.el('Last').disabled, true, '还原点尚未完成核对时不能进入修复记录');
+        assert.equal(f.el('Undo').disabled, true, '尚未完成核对时不能还原');
+        resolve([{ id: record.pointId }]); await f.settle();
+        assert.equal(f.el('Last').disabled, false, '真实目录中仍有修复前点时开放入口');
+        assert.equal(f.el('Undo').disabled, false);
+    }
+    {
+        const record = { name: '测试模组', pointId: '已删除的点', verified: true };
+        const f = fixture({ points: [], storage: [['modhub_ai_last_repair', JSON.stringify(record)]] });
+        await f.init();
+        assert.equal(f.el('Last').disabled, true); assert.equal(f.el('Undo').disabled, true);
+        assert.equal(f.el('RestoreStatus').hidden, false, '禁用原因须在入口旁可见');
+        assert.equal(f.el('RestoreStatus').parentNode, f.el('HistoryActions'), '首页原因与禁用的历史入口同处一栏');
+        assert.match(f.el('RestoreStatus').textContent, /已删除|保留期限/);
+        assert.doesNotMatch(f.el('RestoreStatus').textContent + f.el('Saved').textContent, /已删除的点/, '不可用时不展示失效还原点标识');
+        await f.el('Last').onclick();
+        assert.equal(f.el('Step4').hidden, true, '直接触发失效入口也不能进入验证与撤销页');
+        assert.ok(!f.calls.some(call => call.startsWith('还原:')));
+    }
+    {
+        const record = { name: '测试模组', pointId: '修复前点' };
+        const f = fixture({ storage: [['modhub_ai_last_repair', JSON.stringify(record)]] });
+        f.state.historyError = '还原点目录读取失败'; await f.init();
+        assert.equal(f.el('Last').disabled, true); assert.equal(f.el('Undo').disabled, true);
+        assert.match(f.el('RestoreStatus').textContent, /还原点目录读取失败/, '核对失败须保留具体原因');
+        assert.equal(f.el('RestoreStatus').hidden, false);
+    }
+    {
+        const record = { name: '测试模组', pointId: '修复前点' };
+        const f = fixture({ storage: [['modhub_ai_last_repair', JSON.stringify(record)]] });
+        await f.init(); assert.equal(f.el('Last').disabled, false);
+        f.state.points = []; await f.el('Last').onclick();
+        assert.equal(f.el('Step4').hidden, true, '点击前被删除的点不能使用初始化时的可用状态');
+        assert.equal(f.el('Last').disabled, true); assert.equal(f.el('Undo').disabled, true);
+        assert.match(f.el('RestoreStatus').textContent, /已删除|保留期限/);
+    }
+    {
+        const f = fixture(); await f.init(); await start(f); configure(f);
+        await f.el('Analyze').onclick(); await f.el('Apply').onclick();
+        assert.equal(f.el('Undo').disabled, false);
+        f.state.points = []; await f.el('Undo').onclick();
+        assert.equal(f.el('Undo').disabled, true, '保存后还原点被删除须立即禁用撤销');
+        assert.ok(!f.calls.some(call => call.startsWith('还原:')), '不存在的点不得进入还原确认流程');
+        assert.match(f.el('RestoreStatus').textContent, /已删除|保留期限/);
+        assert.doesNotMatch(f.el('Saved').textContent, /修复前还原点：修复前点/, '不继续显示不可用的还原点标识');
+        const reason = f.el('RestoreStatus'), text = reason.textContent;
+        assert.equal(reason.parentNode, f.el('UndoActions'), '验证页原因与禁用的撤销按钮同处一栏');
+        assert.equal(f.el('HistoryActions').children.includes(reason), false, '节点从旧区域移出');
+        f.el('Again').onclick();
+        assert.equal(reason.parentNode, f.el('HistoryActions'), '返回描述问题后原因跟随历史入口');
+        assert.equal(f.el('UndoActions').children.includes(reason), false);
+        assert.equal(f.el('HistoryActions').children.filter(node => node === reason).length, 1);
+        assert.equal(reason.textContent, text, '移动原因节点不改写原文');
+        assert.equal(reason.hidden, false); assert.equal(f.el('Last').disabled, true);
+    }
+    {
+        let resolve;
+        const record = { name: '测试模组', pointId: '旧修复点' };
+        const f = fixture({ storage: [['modhub_ai_last_repair', JSON.stringify(record)]],
+            historyList: state => state.historyReads === 1 ? new Promise(done => { resolve = done; }) : state.points });
+        await f.init(); await start(f); configure(f); await f.el('Analyze').onclick(); await f.el('Apply').onclick();
+        assert.equal(f.el('Undo').disabled, false);
+        resolve([]); await f.settle();
+        assert.equal(f.el('Undo').disabled, false, '旧记录迟到的缺失结果不能禁用刚保存的新记录');
+        assert.match(f.el('Saved').textContent, /修复前还原点：修复前点/);
+        assert.equal(JSON.parse(f.storage.get('modhub_ai_last_repair')).pointId, '修复前点');
+    }
+    {
+        let resolve;
+        const record = { name: '测试模组', pointId: '修复前点' };
+        const f = fixture({ storage: [['modhub_ai_last_repair', JSON.stringify(record)]],
+            historyList: state => state.historyReads === 1 ? new Promise(done => { resolve = done; }) : [] });
+        await f.init(); await f.init();
+        assert.equal(f.el('Last').disabled, true);
+        const reason = f.el('RestoreStatus').textContent;
+        resolve([{ id: record.pointId }]); await f.settle();
+        assert.equal(f.el('Last').disabled, true, '旧页面迟到的可用结果不能开放新页面入口');
+        assert.equal(f.el('RestoreStatus').textContent, reason);
+    }
+    {
+        const record = { name: '测试模组', pointId: '修复前点' };
+        const f = fixture({ storage: [['modhub_ai_last_repair', JSON.stringify(record)]] });
+        await f.init(); assert.equal(f.el('Last').disabled, false);
+        f.sb.modHubRestore.showHistory = async () => { f.state.points = []; return false; };
+        await f.container.onclick({ target: { closest: selector => selector === '[data-help-restore]' ? {} : null } });
+        await f.settle();
+        assert.equal(f.el('Last').disabled, true, '在当前帮助页面打开历史并删除点，关闭面板后同步禁用入口');
+        assert.equal(f.el('RestoreStatus').hidden, false);
     }
     {
         let resolve;

@@ -119,9 +119,9 @@ module.exports = async function() {
     assert.deepEqual(bootJson.scriptFileList, [
         'javascript/modhub-manager.js',
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
-        'javascript/modhub-log.js', 'javascript/modhub-market-variants.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
+        'javascript/modhub-log.js', 'javascript/modhub-market-variants.js', 'javascript/modhub-wiki-title.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
-        'javascript/modhub-ai-package.js', 'javascript/modhub-ai-repair.js', 'javascript/modhub-remote-help.js', 'javascript/modhub-help.js',
+        'javascript/modhub-ai-package.js', 'javascript/modhub-ai-repair.js', 'javascript/modhub-remote-protocol.js', 'javascript/modhub-game-command.js', 'javascript/modhub-remote-assist.js', 'javascript/modhub-help.js',
     ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志、市场与帮助');
     assert.deepEqual(bootJson.scriptFileList_inject_early, ['javascript/modhub-style.js', 'javascript/modhub-dialog.js', 'javascript/modhub-restore-panel.js', 'javascript/modhub-restore.js'], '样式守卫必须先于弹窗、面板与恢复引擎注入，早期模块必须先于业务脚本');
     for (const file of [...bootJson.scriptFileList_inject_early, ...bootJson.scriptFileList]) {

@@ -36,7 +36,7 @@ def pack_mod():
             return True
         if 'copy' in rel_path.lower():
             return True
-        if rel_path == 'test-smart-sort.js':
+        if rel_path in ('test-smart-sort.js', 'javascript/modhub-readme-John的电脑.js'):
             return True
         return False
 

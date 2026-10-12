@@ -1,11 +1,12 @@
 const assert = require('node:assert/strict');
 const { readFile } = require('node:fs/promises');
 const path = require('node:path');
+const { pathToFileURL } = require('node:url');
 
 async function main() {
   const source = await readFile(path.join(__dirname, 'dol-mod-extractor.js'), 'utf8');
   assert.deepEqual(await readFile(path.join(__dirname, 'dolmod-site', 'dist', 'dol-mod-extractor.js')), Buffer.from(source), '根目录与网站提取器副本必须逐字节相同');
-  const moduleUrl = `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+  const moduleUrl = pathToFileURL(path.join(__dirname, 'dol-mod-extractor.js')).href;
   const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories,
     modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName,
     modHubNormalizeVariant, modHubNormalizeRequiredDependencies } = await import(moduleUrl);

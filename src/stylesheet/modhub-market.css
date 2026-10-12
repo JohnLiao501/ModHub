@@ -599,6 +599,35 @@
     resize: vertical;
 }
 
+.modhub-community-dialog.is-spell .modhub-community-form input,
+.modhub-community-dialog.is-spell .modhub-community-form textarea,
+.modhub-community-dialog.is-spell .modhub-community-form select {
+    min-width: 0;
+    max-width: 100%;
+    color: var(--100, #eee) !important;
+}
+
+.modhub-community-form .modhub-community-check {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    min-height: 36px;
+}
+
+.modhub-community-form .modhub-community-check input[type="checkbox"] {
+    flex: 0 0 18px;
+    width: 18px;
+    height: 18px;
+    min-height: 18px;
+    margin: 3px 0 0;
+    padding: 0;
+}
+
+.modhub-community-check span {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
 .modhub-community-form [hidden] {
     display: none !important;
 }

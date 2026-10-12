@@ -520,6 +520,11 @@
         };
         const content = document.getElementById('customOverlayContent');
         const tabs = document.getElementById('overlayTabs');
+        const tabStyle = getComputedStyle(tabs);
+        const tabButtons = Array.from(tabs.querySelectorAll('button')).filter(button => button.getBoundingClientRect().height > 0);
+        const tabRows = new Set(tabButtons.map(button => Math.round(button.getBoundingClientRect().top))).size;
+        const tabTouchHeight = tabButtons.every(button => button.getBoundingClientRect().height >= 32);
+        const narrowTabsPass = innerWidth > 768 || tabStyle.flexWrap === 'nowrap' && tabStyle.overflowX === 'auto' && tabRows === 1 && tabTouchHeight;
         const report = document.getElementById('modHubHelpReport');
         const buttons = Array.from(help.querySelectorAll('button')).filter(button => button.getBoundingClientRect().height > 0)
             .map(button => ({ text: button.textContent.trim(), ...rect(button), clipped: button.scrollWidth > button.clientWidth + 1 }));
@@ -530,11 +535,12 @@
             原年龄勾选状态保持: ageChecks.every(({ input, checked }) => input.isConnected && input.checked === checked),
             帮助区域: { ...rect(help), safeBottom, horizontalOverflow: help.scrollWidth > help.clientWidth + 1 },
             内容滚动区: { ...rect(content), scrollHeight: content.scrollHeight, clientHeight: content.clientHeight, overflowY: getComputedStyle(content).overflowY },
-            顶部页签: { ...rect(tabs), clientWidth: tabs.clientWidth, scrollWidth: tabs.scrollWidth, overflowX: getComputedStyle(tabs).overflowX,
+            顶部页签: { ...rect(tabs), clientWidth: tabs.clientWidth, scrollWidth: tabs.scrollWidth, overflowX: tabStyle.overflowX, flexWrap: tabStyle.flexWrap,
+                标签行数: tabRows, 触控高度通过: tabTouchHeight, 窄屏单行横向滚动通过: narrowTabsPass,
                 帮助页签存在: Array.from(tabs.querySelectorAll('button')).some(button => button.textContent.trim() === '帮助中心' && getComputedStyle(button).display !== 'none') },
             报告预览: { ...rect(report), readonly: report.readOnly, minHeight: getComputedStyle(report).minHeight, maxHeight: getComputedStyle(report).maxHeight, overflowY: getComputedStyle(report).overflowY },
             可见帮助按钮: buttons,
-            基础几何通过: safeBottom >= 60 && help.scrollWidth <= help.clientWidth + 1
+            基础几何通过: safeBottom >= 60 && help.scrollWidth <= help.clientWidth + 1 && narrowTabsPass
                 && buttons.every(button => button.height >= 32 && !button.clipped)
                 && report.getBoundingClientRect().width <= help.getBoundingClientRect().width + 1
         };
