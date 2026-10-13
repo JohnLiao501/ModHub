@@ -5,7 +5,7 @@ const repository = 'https://github.com/LanguageCardsFixture/SharedProducts';
 const offlineCatalogUrls = [
     'https://dol.alseece.top/release-index.json',
     'https://dolmod-release-index.johnliao381658675.workers.dev/release-index.json',
-    'https://dolmod-catalog-pages.pages.dev/mod-identities.json'
+    'https://dol.alseece.top/mod-identities.json'
 ];
 const copy = value => JSON.parse(JSON.stringify(value));
 const language = (id, label) => ({ groupId: 'language-cards-fixture', groupName: '语言测试模组', type: 'language', id, label });

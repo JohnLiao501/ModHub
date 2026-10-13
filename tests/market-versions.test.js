@@ -192,14 +192,20 @@ module.exports = async function() {
     {
         const { sb } = loadVersions();
         let requests = 0;
-        sb.fetch = async () => { requests++; return { ok: true, json: async () => ({ tag_name: 'v1.0',
-            assets: [{ name: 'Example-v1.0.modpack', browser_download_url: `${baseMod.githubUrl}/releases/download/v1.0/Example-v1.0.modpack` }] }) }; };
+        sb.fetch = async value => {
+            requests++;
+            assert.equal(new URL(value).origin, 'https://dol.alseece.top');
+            return { ok: true, json: async () => ({ schemaVersion: 1, id: baseMod.id, sourceUrl: baseMod.githubUrl,
+                page: 1, hasMore: false, communityRevision: sb.modHubMarket.getCommunityRevision(), fetchedAt: new Date().toISOString(),
+                releases: [{ tagName: 'v1.0', assets: [{ name: 'Example-v1.0.modpack', size: 1,
+                    downloadUrl: `${baseMod.githubUrl}/releases/download/v1.0/Example-v1.0.modpack` }] }] }) };
+        };
         const current = await sb.modHubMarket.fetchModRelease(baseMod);
         const key = 'modhub_market_rel_v2_Owner_Example';
         sb.localStorage.setItem(key, JSON.stringify({ timestamp: Date.now(), data: { ...current,
             assetPlanVersion: 3, assets: [], candidateAssets: [], availableAssets: [], assetName: null, assetUrl: null } }));
         assert.equal((await sb.modHubMarket.fetchModRelease(baseMod)).assets[0].name, 'Example-v1.0.modpack', '旧后缀规则缓存的空列表必须立即失效');
-        assert.equal(requests, 2, '格式支持升级后不得等旧缓存六小时过期');
+        assert.equal(requests, 1, '格式支持升级后复用已核验历史重新选包，不沿用旧后缀规则或重复请求');
     }
     {
         const { versions } = loadVersions();

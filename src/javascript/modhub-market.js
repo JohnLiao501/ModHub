@@ -22,14 +22,14 @@
     const MODHUB_SUBMISSION_PAGE_SIZE = 10;
     const PRIMARY_RELEASE_INDEX_URL = 'https://dol.alseece.top/release-index.json';
     const BACKUP_RELEASE_INDEX_URL = 'https://dolmod-release-index.johnliao381658675.workers.dev/release-index.json';
-    const RELEASE_WORKER_API_BASE = 'https://dolmod-release-index.johnliao381658675.workers.dev';
+    const RELEASE_WORKER_API_BASE = 'https://dol.alseece.top';
     const RELEASE_INDEX_URL = PRIMARY_RELEASE_INDEX_URL;
     const RELEASE_INDEX_MIRRORS = [
         PRIMARY_RELEASE_INDEX_URL,
         BACKUP_RELEASE_INDEX_URL
     ];
     let activeReleaseWorkerBaseUrl = PRIMARY_RELEASE_INDEX_URL;
-    const IDENTITY_CATALOG_URL = 'https://dolmod-catalog-pages.pages.dev/mod-identities.json';
+    const IDENTITY_CATALOG_URL = 'https://dol.alseece.top/mod-identities.json';
     const IDENTITY_CACHE_KEY = 'modhub_market_identities_v4';
     const IDENTITY_FETCH_TIMEOUT_MS = 8000;
     const README_FETCH_TIMEOUT_MS = 8000;
@@ -2136,16 +2136,31 @@
             candidates: mainCandidates, availableAssets: downloadable, needsChoice: false, reason: '' };
     }
 
+    function historicalReleaseMetadata(release) {
+        return { tag_name: release.tagName, name: release.name, html_url: release.htmlUrl,
+            published_at: release.publishedAt, draft: release.draft, prerelease: release.prerelease,
+            version: release.version, versionSource: release.versionSource,
+            assets: release.assets.map(asset => ({ ...asset, browser_download_url: asset.downloadUrl })) };
+    }
+
     async function fetchModRelease(mod, options = {}) {
         const { useCache = true, signal } = options;
         if (!mod || !mod.githubUrl) throw new Error('模组缺少 GitHub 仓库链接');
-        const repo = parseGithubRepo(mod.githubUrl);
+        let repo = parseGithubRepo(mod.githubUrl);
         if (!repo) throw new Error('无法解析 GitHub 仓库地址');
         if (repo.sourcePath) {
             const err = new Error('此条目指向仓库内的文件或分支，请前往模组主页按作者说明下载安装');
             err.code = 'MANUAL_SOURCE';
             throw err;
         }
+        if (isWithdrawn(mod) || mod.autoInstall === false || mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod)) {
+            const error = new Error(isWithdrawn(mod) ? '该模组来源已撤回，请刷新市场' : '该模组未获准自动安装，请前往作者主页');
+            error.code = isWithdrawn(mod) ? 'MOD_RELEASES_UNAVAILABLE' : 'MANUAL_SOURCE';
+            throw error;
+        }
+        // 精确摘要查询仍以目录原始来源核验，不能临时替换来源绕过历史接口。
+        if (options.releaseTag) repo = { ...repo, releaseTag: options.releaseTag,
+            assetName: options.releaseTag === repo.releaseTag ? repo.assetName : '' };
         const sharedRepository = !repo.releaseTag && (mod.sharedRepository || (marketModList || [])
             .filter(item => parseGithubRepo(item.githubUrl)?.key === repo.key).length > 1);
 
@@ -2154,8 +2169,7 @@
         const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}${repo.releaseTag ? `_tag_${encodeURIComponent(repo.releaseTag)}` : ''}${repo.assetName ? `_asset_${encodeURIComponent(repo.assetName)}` : ''}${sharedRepository ? `_entry_${encodeURIComponent(entryKey)}` : ''}`;
         const gameVersion = window.StartConfig?.version || '';
         const platform = (typeof window.modHubIsMobile === 'function' ? window.modHubIsMobile() : window.modHubIsMobile) ? 'mobile' : 'desktop';
-        const source = JSON.stringify([repo.key, repo.releaseTag, repo.assetName, entryKey, mod.bootNames || [], mod.aliases || [],
-            (mod.identityId || mod.id) === 'au-beautification' ? mod._matchedLocal?.name || '' : '']);
+        const source = JSON.stringify([repo.key, repo.releaseTag, repo.assetName, getModUpdateSignature(mod, gameVersion)]);
         const isUsableCache = cached => cached?.assetPlanVersion === 6 && cached.assetPlanGameVersion === gameVersion
             && cached.assetPlanPlatform === platform && cached.assetPlanSource === source
             && (!mod.version || compareVersions(cached.version, mod.version) >= 0);
@@ -2169,47 +2183,68 @@
         const headers = { Accept: 'application/vnd.github+json' };
         const baseUrl = `https://api.github.com/repos/${repo.owner}/${repo.repo}`;
 
-        let releaseData = null;
+        let releaseData = null, catalogStale = false;
         try {
-            const latestRes = await fetch(sharedRepository ? `${baseUrl}/releases?per_page=100`
-                : `${baseUrl}/releases/${repo.releaseTag ? `tags/${encodeURIComponent(repo.releaseTag)}` : 'latest'}`, { headers, signal });
-
-            if (latestRes.status === 429 || latestRes.status === 403) {
-                const err = new Error('GitHub API 触发速率限制，请稍候再试');
-                err.code = 'RATE_LIMITED';
-                throw err;
-            }
-
-            if (latestRes.status === 404) {
-                if (repo.releaseTag) {
-                    const err = new Error(`指定发布标签不存在或不可访问：${repo.releaseTag}`);
-                    err.code = 'RELEASE_NOT_FOUND';
-                    throw err;
+            if (mod.id && window.modHubMarketVersions?.fetchReleases) {
+                let history, selected;
+                const releases = [];
+                do {
+                    history = await window.modHubMarketVersions.fetchReleases(mod, {
+                        page: history ? history.page + 1 : 1, useCache, signal
+                    });
+                    catalogStale ||= Boolean(history.stale);
+                    releases.push(...history.releases.map(historicalReleaseMetadata));
+                    selected = releases.find(release => repo.releaseTag ? release.tag_name === repo.releaseTag
+                        : !sharedRepository || release.assets.some(asset => matchesAssetIdentity(asset, mod)));
+                } while (!selected && history.hasMore);
+                if (!selected) {
+                    const error = new Error(repo.releaseTag ? `指定发布标签未出现在当前目录历史中：${repo.releaseTag}`
+                        : '当前目录历史中未找到该模组的安装包，请核对作者发布');
+                    error.code = repo.releaseTag ? 'RELEASE_NOT_FOUND' : 'MANUAL_SOURCE';
+                    throw error;
                 }
-                const listRes = await fetch(`${baseUrl}/releases?per_page=1`, { headers, signal });
-                if (listRes.status === 429 || listRes.status === 403) {
-                    const err = new Error('GitHub API 触发速率限制');
+                releaseData = sharedRepository ? releases : selected;
+            } else {
+                const latestRes = await fetch(sharedRepository ? `${baseUrl}/releases?per_page=100`
+                    : `${baseUrl}/releases/${repo.releaseTag ? `tags/${encodeURIComponent(repo.releaseTag)}` : 'latest'}`, { headers, signal });
+
+                if (latestRes.status === 429 || latestRes.status === 403) {
+                    const err = new Error('GitHub API 触发速率限制，请稍候再试');
                     err.code = 'RATE_LIMITED';
                     throw err;
                 }
-                if (listRes.status === 404) {
-                    const deadKey = `${repo.owner}/${repo.repo}`.toLowerCase();
-                    markRepoAsDead(deadKey);
-                    if (mod) mod._isDeadRepo = true;
-                    invalidateDeadRepoMods(deadKey);
-                    const err = new Error('该模组的 GitHub 仓库已被作者移除或不存在 (404)');
-                    err.code = 'REPO_NOT_FOUND';
-                    err.status = 404;
-                    throw err;
+
+                if (latestRes.status === 404) {
+                    if (repo.releaseTag) {
+                        const err = new Error(`指定发布标签不存在或不可访问：${repo.releaseTag}`);
+                        err.code = 'RELEASE_NOT_FOUND';
+                        throw err;
+                    }
+                    const listRes = await fetch(`${baseUrl}/releases?per_page=1`, { headers, signal });
+                    if (listRes.status === 429 || listRes.status === 403) {
+                        const err = new Error('GitHub API 触发速率限制');
+                        err.code = 'RATE_LIMITED';
+                        throw err;
+                    }
+                    if (listRes.status === 404) {
+                        const deadKey = `${repo.owner}/${repo.repo}`.toLowerCase();
+                        markRepoAsDead(deadKey);
+                        if (mod) mod._isDeadRepo = true;
+                        invalidateDeadRepoMods(deadKey);
+                        const err = new Error('该模组的 GitHub 仓库已被作者移除或不存在 (404)');
+                        err.code = 'REPO_NOT_FOUND';
+                        err.status = 404;
+                        throw err;
+                    }
+                    if (!listRes.ok) throw new Error(`GitHub 访问异常: ${listRes.status}`);
+                    const list = await listRes.json();
+                    if (!Array.isArray(list) || !list.length) throw new Error('该仓库未发布 Release');
+                    releaseData = list[0];
+                } else if (!latestRes.ok) {
+                    throw new Error(`GitHub 访问异常: ${latestRes.status}`);
+                } else {
+                    releaseData = await latestRes.json();
                 }
-                if (!listRes.ok) throw new Error(`GitHub 访问异常: ${listRes.status}`);
-                const list = await listRes.json();
-                if (!Array.isArray(list) || !list.length) throw new Error('该仓库未发布 Release');
-                releaseData = list[0];
-            } else if (!latestRes.ok) {
-                throw new Error(`GitHub 访问异常: ${latestRes.status}`);
-            } else {
-                releaseData = await latestRes.json();
             }
             if (sharedRepository) {
                 const releases = Array.isArray(releaseData) ? releaseData : [releaseData];
@@ -2238,7 +2273,8 @@
             unmarkRepoAsDead(currentRepoKey);
             if (mod) mod._isDeadRepo = false;
         } catch (fetchErr) {
-            if (['REPO_NOT_FOUND', 'RELEASE_NOT_FOUND', 'MANUAL_SOURCE'].includes(fetchErr?.code) || fetchErr?.status === 404 || fetchErr?.name === 'AbortError') {
+            if (['REPO_NOT_FOUND', 'RELEASE_NOT_FOUND', 'MANUAL_SOURCE'].includes(fetchErr?.code) || fetchErr?.status === 404 || fetchErr?.name === 'AbortError'
+                || window.modHubMarketVersions?.isUnsafeHistoryError?.(fetchErr)) {
                 throw fetchErr;
             }
             const staleCache = readLocalCache(cacheKey, Infinity, true);
@@ -2253,7 +2289,8 @@
             name: a.name,
             size: a.size,
             downloadUrl: a.browser_download_url,
-            digest: a.digest || ''
+            digest: a.digest || '',
+            ...(a.versionSource === 'verified-boot' ? { bootName: a.bootName, version: a.version, versionSource: a.versionSource } : {})
         }));
         const assetPlan = buildReleaseAssetPlan(assets, gameVersion, { ...mod, sharedRepository });
         const bestAsset = assetPlan.assets[0] || null;
@@ -2272,7 +2309,7 @@
                 sourceUrl: mod.githubUrl,
                 releases: [{ tagName, name: releaseTitle, htmlUrl: releaseData.html_url,
                     publishedAt: releaseData.published_at, draft: releaseData.draft,
-                    prerelease: releaseData.prerelease, assets }]
+                    prerelease: releaseData.prerelease, version: releaseData.version, versionSource: releaseData.versionSource, assets }]
             });
             const metadata = candidates.find(candidate => candidate.assetUrl === bestAsset?.downloadUrl);
             version = metadata?.version || '';
@@ -2306,7 +2343,9 @@
             updateDateSource: Number.isFinite(publishedTime) ? 'github' : mod.updateDateSource || null
         };
 
-        if (useCache) {
+        if (catalogStale) result.isStale = true;
+
+        if (useCache && !catalogStale) {
             writeLocalCache(cacheKey, result);
         }
         return result;
@@ -2322,13 +2361,21 @@
             if (Array.isArray(cached)) return cached.slice(0, limit);
         }
 
-        const response = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.repo}/releases?per_page=20`, {
-            headers: { Accept: 'application/vnd.github+json' },
-            signal: options.signal
-        });
-        if (response.status === 429 || response.status === 403) throw new Error('GitHub API 触发速率限制');
-        if (!response.ok) throw new Error(`GitHub 访问异常: ${response.status}`);
-        const releases = await response.json();
+        let releases, catalogStale = false;
+        if (mod.id && window.modHubMarketVersions?.fetchReleases) {
+            const history = await window.modHubMarketVersions.fetchReleases(mod, { page: 1,
+                useCache: options.useCache !== false, signal: options.signal });
+            catalogStale = Boolean(history.stale);
+            releases = history.releases.map(historicalReleaseMetadata);
+        } else {
+            const response = await fetch(`https://api.github.com/repos/${repo.owner}/${repo.repo}/releases?per_page=20`, {
+                headers: { Accept: 'application/vnd.github+json' },
+                signal: options.signal
+            });
+            if (response.status === 429 || response.status === 403) throw new Error('GitHub API 触发速率限制');
+            if (!response.ok) throw new Error(`GitHub 访问异常: ${response.status}`);
+            releases = await response.json();
+        }
         const companions = [];
         for (const release of Array.isArray(releases) ? releases : []) {
             if (release.draft || release.prerelease) continue;
@@ -2348,7 +2395,7 @@
             }
             if (companions.length >= limit) break;
         }
-        writeLocalCache(cacheKey, companions);
+        if (!catalogStale) writeLocalCache(cacheKey, companions);
         return companions;
     }
 
@@ -3128,8 +3175,7 @@
                 try {
                     const official = await queueOfficialPackageMetadata(signal => {
                         if (mod._updateCheck !== state || versions.getGameVersion() !== gameVersion) return null;
-                        return fetchModRelease({ ...mod,
-                            githubUrl: `https://github.com/${repository.owner}/${repository.repo}/releases/tag/${encodeURIComponent(state.release.tagName)}` }, { signal });
+                        return fetchModRelease(mod, { signal, useCache: false, releaseTag: state.release.tagName });
                     });
                     const matching = official?.availableAssets?.find(item => item.downloadUrl === asset.downloadUrl);
                     if (matching?.digest) {

@@ -20,7 +20,7 @@ const WIKI_PAGE = '模组列表';
 const IDENTITY_FILE = './mod-identities.json';
 const CACHE_PREFIX = 'dol_mod_release_v2_';
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 小时
-const MODHUB_RELEASE_API_BASE = 'https://dolmod-release-index.johnliao381658675.workers.dev';
+const MODHUB_RELEASE_API_BASE = 'https://dol.alseece.top';
 
 // ==================== 通用工具 ====================
 
@@ -555,6 +555,19 @@ export function parseGithubReleaseTarget(value) {
 export function modHubIsModPackageName(name) {
   return /\.(?:zip|mod|modpack(?:\.crypt)?)$/i.test(name || '')
     && !/(?:^|[\s._-])(?:source(?:[\s._-]*code)?|src|apk|outdated?|obsolete)(?=[\s._-]|$)|源码|整合包|过时版/i.test(name || '');
+}
+
+export function modHubGetDownloadUrl(value) {
+  try {
+    const url = new URL(value);
+    if (url.protocol === 'https:' && !url.username && !url.password && !url.port && !url.search && !url.hash
+        && /^(www\.)?github\.com$/i.test(url.hostname)
+        && /^\/[^/]+\/[^/]+\/releases\/download\/[^/]+\/[^/]+$/i.test(url.pathname)
+        && modHubIsModPackageName(decodeURIComponent(url.pathname.split('/').pop()))) {
+      return `${MODHUB_RELEASE_API_BASE}/download?url=${encodeURIComponent(url.href)}`;
+    }
+  } catch { /* 不支持的入口仍由原来源提供 */ }
+  return value;
 }
 
 function pickDownloadAsset(assets) {

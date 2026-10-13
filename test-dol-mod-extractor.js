@@ -8,13 +8,31 @@ async function main() {
   assert.deepEqual(await readFile(path.join(__dirname, 'dolmod-site', 'dist', 'dol-mod-extractor.js')), Buffer.from(source), '根目录与网站提取器副本必须逐字节相同');
   const moduleUrl = pathToFileURL(path.join(__dirname, 'dol-mod-extractor.js')).href;
   const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories,
-    modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName,
+    modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName, modHubGetDownloadUrl,
     modHubNormalizeVariant, modHubNormalizeRequiredDependencies } = await import(moduleUrl);
   for (const name of ['Example.modpack', 'Example.MODPACK.CRYPT', 'Example.mod.zip', 'Example.mod']) {
     assert.equal(modHubIsModPackageName(name), true, `原生模组包后缀应识别：${name}`);
   }
   for (const name of ['Example.modpack.exe', 'Example.modpack.crypt.txt', 'Example.crypt', 'source-code.modpack', 'Example.apk.zip', 'Example.jar', 'README.md']) {
     assert.equal(modHubIsModPackageName(name), false, `非模组附件不得进入安装包选择：${name}`);
+  }
+  for (const suffix of ['zip', 'mod', 'modpack', 'modpack.crypt']) {
+    const sourceUrl = `https://github.com/Owner/Repo/releases/download/v1/%E6%A8%A1%E7%BB%84%20%26%20test.${suffix}`;
+    const proxyUrl = new URL(modHubGetDownloadUrl(sourceUrl));
+    assert.equal(proxyUrl.origin, 'https://dol.alseece.top', '模组附件应通过国内入口下载');
+    assert.equal(proxyUrl.pathname, '/download');
+    assert.equal(proxyUrl.searchParams.get('url'), sourceUrl, '附件原地址必须完整编码，不能截断特殊字符');
+  }
+  for (const value of ['https://downloads.example.test/mod.zip?token=keep&file=1',
+    'https://github.com/Owner/Repo', 'https://github.com/Owner/Repo/releases/download/v1/mod.zip?raw=1',
+    'https://github.com/Owner/Repo/releases/download/v1/mod.zip#part',
+    'https://github.com:8443/Owner/Repo/releases/download/v1/mod.zip',
+    'https://user:secret@github.com/Owner/Repo/releases/download/v1/mod.zip',
+    'https://github.com.example.test/Owner/Repo/releases/download/v1/mod.zip',
+    'http://github.com/Owner/Repo/releases/download/v1/mod.zip',
+    'https://github.com/Owner/Repo/releases/download/v1/setup.exe',
+    'https://github.com/Owner/Repo/releases/download/v1/source-code.zip']) {
+    assert.equal(modHubGetDownloadUrl(value), value, '不支持的入口保留原地址及参数，不误送入下载代理');
   }
   const catalog = JSON.parse(await readFile(path.join(__dirname, 'mod-identities.json'), 'utf8'));
   assert.deepEqual(await readFile(path.join(__dirname, 'mod-identities.json')),
@@ -108,6 +126,7 @@ async function main() {
   try {
     const sourceUrl = 'https://github.com/Owner/Repo';
     globalThis.fetch = async url => {
+      assert.equal(new URL(url).origin, 'https://dol.alseece.top', '历史发布必须使用国内入口');
       assert.match(url, /\/mod-releases\?id=sample&page=2$/);
       return Response.json({ schemaVersion: 1, id: 'sample', sourceUrl, page: 2, hasMore: false, stale: false, releases: [] });
     };

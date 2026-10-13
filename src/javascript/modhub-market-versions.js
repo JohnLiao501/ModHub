@@ -406,7 +406,7 @@
         const sourceUrl = normalizeSource(mod.githubUrl);
         const source = getReleaseSource(sourceUrl);
         if (!sourceUrl || !source) throw historyError('该模组没有可用的发布来源', 'MANUAL_SOURCE');
-        // 索引镜像只提供目录文件，历史接口与其他动态接口共用真实 Worker 地址。
+        // 历史接口与其他动态接口共用国内反代入口，仍核验目录来源。
         const base = new URL(market.RELEASE_WORKER_API_BASE);
         const communityRevision = market.getCommunityRevision?.() ?? mod.communityRevision;
         const signatureFields = [base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
@@ -473,7 +473,7 @@
             }
         }
         // 旧服务可能按旧文件名规则漏筛；只核对已获准的原仓库，不绕过社区审核。
-        if (verifyEmptyHistory && !data.fromGithub && !data.releases.length) {
+        if (verifyEmptyHistory && !data.fromGithub && !data.releases.length && !data.hasMore) {
             checkCurrent();
             try {
                 const direct = await fetchGithubHistory(mod, source, page, signal, communityRevision);
@@ -807,5 +807,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

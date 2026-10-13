@@ -1,7 +1,7 @@
 /** ModHub 匿名远程协助：后台收信，前台逐项预览确认。 */
 (function() {
     'use strict';
-    const MODHUB_ASSIST_ORIGIN = 'https://dolmod-release-index.johnliao381658675.workers.dev';
+    const MODHUB_ASSIST_ORIGIN = 'https://dol.alseece.top';
     const MODHUB_ASSIST_LIMIT = 1024 * 1024;
     const labels = { runJavaScript: '快速 JS 指令', collectDiagnostics: '收集诊断', readSources: '查看源码', applyConfiguration: '配置建议', applyPatch: '源码补丁（高级修复）' };
     const hints = {

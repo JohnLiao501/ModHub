@@ -42,11 +42,12 @@ module.exports = async function () {
             '市场日期排序采用产品自身发布，而非同仓库顺序');
     }
 
-    // 直连 GitHub 的回退与历史选版使用相同身份、固定标签和完整版本 token。
+    // 无目录 ID 的 GitHub 容错路径与历史选版使用相同身份、固定标签和完整版本 token。
     {
         const { sb } = setup();
         const raw = definition('future-direct', 'FutureDirect', 'FD0.1.5');
         const [mod] = sb.modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 9, mods: [raw] });
+        delete mod.id;
         let releaseName = 'FutureDirectV0.1.5';
         let publishedAt = '2026-07-19T18:10:31Z';
         let fetchCount = 0;

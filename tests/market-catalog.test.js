@@ -5,6 +5,149 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    // 主安装、精确标签与图包查询复用国内历史接口，保留真实下载源和身份核验。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        const market = sb.modHubMarket;
+        assert.equal(market.RELEASE_WORKER_API_BASE, 'https://dol.alseece.top');
+        assert.equal(market.IDENTITY_CATALOG_URL, 'https://dol.alseece.top/mod-identities.json');
+        const mod = { id: 'gateway-main', name: 'Main', bootNames: ['Main'], githubUrl: 'https://github.com/Gateway/Main' };
+        const release = (tag, names) => ({ tagName: tag, name: tag, publishedAt: '2026-10-13T00:00:00Z',
+            assets: names.map(name => ({ name, size: 2, digest: 'sha256:' + 'a'.repeat(64),
+                downloadUrl: `${mod.githubUrl}/releases/download/${tag}/${name}` })) });
+        const requests = [];
+        sb.fetch = async (value, init) => {
+            const url = new URL(value);
+            requests.push(url.href);
+            assert.equal(url.origin, 'https://dol.alseece.top', '可用的反代不再请求 GitHub 元数据');
+            assert.equal(url.pathname, '/mod-releases');
+            assert.equal(url.searchParams.get('id'), mod.id);
+            assert.ok(!init.headers?.Authorization, '浏览器不向反代发送 GitHub 密钥');
+            const page = Number(url.searchParams.get('page'));
+            return { ok: true, json: async () => ({ schemaVersion: 1, id: mod.id, sourceUrl: mod.githubUrl,
+                page, hasMore: page === 1, communityRevision: market.getCommunityRevision(), fetchedAt: new Date().toISOString(), stale: false,
+                releases: page === 1 ? [release('v2.0', ['Main2.0.zip', 'Main.PhotoPack2.0.zip'])]
+                    : [release('v1.0', ['Main1.0.zip'])] }) };
+        };
+        const latest = await market.fetchModRelease(mod);
+        assert.equal(latest.assetName, 'Main2.0.zip');
+        assert.deepEqual(Array.from(latest.assets, asset => asset.name), ['Main2.0.zip', 'Main.PhotoPack2.0.zip']);
+        assert.equal(latest.assetUrl, `${mod.githubUrl}/releases/download/v2.0/Main2.0.zip`, '下载证据保留作者真实链接');
+        assert.equal(new URL(market.getDownloadUrl(latest.assetUrl, 'worker')).origin, 'https://dol.alseece.top', '包体从同一反代下载');
+        const previous = await market.fetchModRelease(mod, { releaseTag: 'v1.0', useCache: false });
+        assert.equal(previous.assetName, 'Main1.0.zip');
+        assert.ok(requests.some(value => new URL(value).searchParams.get('page') === '2'), '精确旧标签按原目录来源分页核对');
+        assert.equal(mod.githubUrl, 'https://github.com/Gateway/Main');
+        assert.equal((await market.fetchRecentCompanionAssets(mod))[0].name, 'Main.PhotoPack2.0.zip');
+        sb.fetch = async () => ({ ok: false, status: 403, json: async () => ({ code: 'MANUAL_SOURCE', error: '来源已取消授权' }) });
+        await assert.rejects(market.fetchModRelease(mod, { useCache: false }), error => error.code === 'MANUAL_SOURCE',
+            '目录拒绝不能回退到旧安装缓存或绕过目录查询官方源');
+    }
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        const repo = 'https://github.com/Gateway/Shared';
+        const mods = ['Foo', 'Bar'].map(name => ({ id: 'gateway-' + name, name, bootNames: [name], githubUrl: repo, sharedRepository: true }));
+        sb.fetch = async value => {
+            const url = new URL(value);
+            assert.equal(url.origin, 'https://dol.alseece.top');
+            const mod = mods.find(item => item.id === url.searchParams.get('id'));
+            return { ok: true, json: async () => ({ schemaVersion: 1, id: mod.id, sourceUrl: repo, page: 1, hasMore: false,
+                communityRevision: sb.modHubMarket.getCommunityRevision(), fetchedAt: new Date().toISOString(), releases: ['Other', mod.name].map(name => ({ tagName: name, name,
+                    assets: [{ name: name + '1.0.zip', size: 2, downloadUrl: `${repo}/releases/download/${name}/${name}1.0.zip` }] })) }) };
+        };
+        assert.equal((await sb.modHubMarket.fetchModRelease(mods[0])).assetName, 'Foo1.0.zip');
+        assert.equal((await sb.modHubMarket.fetchModRelease(mods[1])).assetName, 'Bar1.0.zip', '同仓库不同产品仍隔离缓存和附件');
+        const sourceUrl = `${repo}/releases/download/registered/Registered.zip`;
+        const verified = { sourceUrl, fileName: 'Registered.zip', bootName: 'Registered', version: '1.2', size: 2, sha256: 'a'.repeat(64) };
+        const fixed = { id: 'gateway-fixed', name: 'Registered', bootNames: ['Registered'], githubUrl: sourceUrl, verifiedReleaseAsset: verified };
+        sb.fetch = async value => {
+            assert.equal(new URL(value).origin, 'https://dol.alseece.top');
+            return { ok: true, json: async () => ({ schemaVersion: 1, id: fixed.id, sourceUrl, page: 1, hasMore: false,
+                communityRevision: sb.modHubMarket.getCommunityRevision(), fetchedAt: new Date().toISOString(), releases: [{ tagName: 'registered', name: '9.0', version: '1.2', versionSource: 'verified-boot',
+                    assets: [{ name: 'Registered.zip', size: 2, downloadUrl: sourceUrl, digest: 'sha256:' + verified.sha256,
+                        bootName: 'Registered', version: '1.2', versionSource: 'verified-boot' }] }] }) };
+        };
+        const fixedRelease = await sb.modHubMarket.fetchModRelease(fixed);
+        assert.equal(fixedRelease.assetUrl, sourceUrl);
+        assert.equal(fixedRelease.version, '1.2', '固定附件登记的包内版本证据不能被标签或标题替代');
+    }
+    // 固定附件的历史标签可以登记不同文件名；精确当前标签仍只允许当前附件。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        const repo = 'https://github.com/Gateway/FixedHistory';
+        const mod = { id: 'gateway-fixed-history', name: 'Main', bootNames: ['Main'],
+            githubUrl: `${repo}/releases/download/current/Main2.0.zip`,
+            releaseCompatibility: [{ releaseTag: 'old', assetName: 'Main1.0.zip', gameVersionRange: '=0.5.10.12' }] };
+        const requests = [];
+        sb.fetch = async value => {
+            const url = new URL(value);
+            assert.equal(url.origin, 'https://dol.alseece.top');
+            requests.push(url.href);
+            return { ok: true, json: async () => ({ schemaVersion: 1, id: mod.id, sourceUrl: mod.githubUrl,
+                page: 1, hasMore: false, communityRevision: sb.modHubMarket.getCommunityRevision(), fetchedAt: new Date().toISOString(),
+                releases: [['current', 'Main2.0.zip'], ['old', 'Main1.0.zip']].map(([tagName, name]) => ({ tagName,
+                    assets: [{ name, size: 2, downloadUrl: `${repo}/releases/download/${tagName}/${name}` }] })) }) };
+        };
+        assert.equal((await sb.modHubMarket.fetchModRelease(mod, { releaseTag: 'current' })).assetName, 'Main2.0.zip');
+        assert.equal((await sb.modHubMarket.fetchModRelease(mod, { releaseTag: 'old' })).assetName, 'Main1.0.zip',
+            '不同历史文件名由目录历史登记限定，不能继续套用当前附件名');
+        await assert.rejects(sb.modHubMarket.fetchModRelease(mod, { releaseTag: 'unreviewed' }),
+            error => error.code === 'RELEASE_NOT_FOUND', '未登记的历史标签不能回退到最新包');
+        assert.ok(requests.every(value => new URL(value).searchParams.get('id') === mod.id), '精确历史查询不更改来源或代理任意 URL');
+    }
+    // 原精确标签查询不能因历史超过 100 条而失效；共享仓库允许合法空页继续分页。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js']);
+        const repo = 'https://github.com/Gateway/Deep';
+        const mod = { id: 'gateway-deep', name: 'Deep', bootNames: ['Deep'], githubUrl: repo };
+        let shared = false;
+        const pages = [];
+        sb.fetch = async value => {
+            const url = new URL(value);
+            assert.equal(url.origin, 'https://dol.alseece.top', '反代合法空页不应触发 GitHub 查询');
+            const page = Number(url.searchParams.get('page'));
+            pages.push(page);
+            const tag = page === 6 ? 'v1.0' : 'other-' + page;
+            const name = page === 6 ? 'Deep1.0.zip' : 'Other1.0.zip';
+            return { ok: true, json: async () => ({ schemaVersion: 1, id: url.searchParams.get('id'), sourceUrl: repo,
+                page, hasMore: page < 6, communityRevision: sb.modHubMarket.getCommunityRevision(), fetchedAt: new Date().toISOString(),
+                releases: shared && page < 6 ? [] : [{ tagName: tag, assets: [{ name, size: 2,
+                    downloadUrl: `${repo}/releases/download/${tag}/${name}` }] }] }) };
+        };
+        const old = await sb.modHubMarket.fetchModRelease(mod, { releaseTag: 'v1.0' });
+        assert.equal(old.tagName, 'v1.0');
+        assert.equal(old.assetName, 'Deep1.0.zip');
+        assert.deepEqual(pages, [1, 2, 3, 4, 5, 6], '精确标签在第六页也必须找到，不能改装最新发布');
+        const beforeCache = pages.length;
+        assert.equal((await sb.modHubMarket.fetchModRelease(mod, { releaseTag: 'v1.0' })).fromCache, true);
+        assert.equal(pages.length, beforeCache, '同源同标签保留已核验缓存');
+        shared = true;
+        pages.length = 0;
+        const sharedMod = { ...mod, id: 'gateway-deep-shared', sharedRepository: true };
+        assert.equal((await sb.modHubMarket.fetchModRelease(sharedMod)).assetName, 'Deep1.0.zip');
+        assert.deepEqual(pages, [1, 2, 3, 4, 5, 6], '共享仓库前五页没有本产品时继续查询第六页');
+        let failures = 0;
+        for (const [status, code] of [[403, 'MANUAL_SOURCE'], [409, 'RELEASE_SOURCE_CHANGED'], [503, 'CATALOG_UNAVAILABLE']]) {
+            sb.fetch = async value => {
+                failures++;
+                assert.equal(new URL(value).origin, 'https://dol.alseece.top');
+                return { ok: false, status, json: async () => ({ code, error: '目录无法继续核验' }) };
+            };
+            await assert.rejects(sb.modHubMarket.fetchModRelease(mod, { releaseTag: 'v1.0', useCache: false }), error => error.code === code,
+                '已登记源的拒绝不能使用旧安装包或官方查询绕过');
+        }
+        assert.equal(failures, 3);
+        const changed = { ...mod, githubUrl: repo + '/releases/tag/new-channel' };
+        await assert.rejects(sb.modHubMarket.fetchModRelease(changed, { releaseTag: 'v1.0' }), error => error.code === 'CATALOG_UNAVAILABLE',
+            '原目录源变化后，即使请求同一旧标签也不能复用旧源缓存');
+        assert.equal(failures, 4, '目录源变化必须重新查询而不是直接返回缓存');
+        await assert.rejects(sb.modHubMarket.fetchModRelease({ ...mod, autoInstall: false }, { releaseTag: 'v1.0' }),
+            error => error.code === 'MANUAL_SOURCE', '安装资格变化必须在读取缓存之前拒绝');
+    }
     // 旧索引的功能入口名称逐项隔离，只允许使用已经保留的 Wiki 标题恢复。
     {
         const market = loadMarket().modHubMarket;
@@ -567,8 +710,12 @@ module.exports = async function() {
         sb.modHubGetController = () => ({ checkModZipFileIndexDB: async () => ({ ...boot }) });
         sb.modHubLoadModManageState = async () => {};
         sb.modHubLoadDisabledModInfo = async () => {};
+        const historyRequests = [];
         sb.modHubMarketVersions = { getGameVersion: () => '0.5.12.13',
-            fetchReleases: async () => ({ page: 1, hasMore: false }), buildCandidates: () => [release], getLatestGameCandidate: () => release };
+            fetchReleases: async (mod, options) => {
+                historyRequests.push({ source: mod.githubUrl, ...options });
+                return { page: 1, hasMore: false, releases: [{ tagName: tag, assets: [{ name: 'Published.zip', downloadUrl, size: 2, digest }] }] };
+            }, buildCandidates: () => [release], getLatestGameCandidate: () => release };
         const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubMarketStats'].map(key => [key, createStubElement()]));
         sb.document.getElementById = key => elements.get(key) || null;
         const requests = [];
@@ -585,7 +732,8 @@ module.exports = async function() {
         await update.promise;
         sb.modHubMarket.renderMarketCards();
         const card = elements.get('modHubMarketCardsContainer').innerHTML;
-        assert.ok(requests.includes(`https://api.github.com/repos/VersionTests/${id}/releases/tags/${tag}`), '索引无摘要时补取精确tag的官方元数据');
+        assert.ok(historyRequests.length >= 2 && historyRequests.every(request => request.source === githubUrl), '索引无摘要时按原目录来源补取精确tag元数据');
+        assert.ok(!requests.some(url => url.startsWith('https://api.github.com/')), '补摘要不再直连 GitHub');
         assert.ok(card.includes(`最新版本：v${version}`));
         assert.equal(mod._matchedLocal.version, bootVersion, '市场身份与依赖保留真实boot版本');
         if (currentPackage === 2) {
@@ -915,11 +1063,14 @@ module.exports = async function() {
             assets: [{ name: 'Shared.EN.1.0.zip', size: 100, downloadUrl: url.replace('CHS', 'EN') }] }] }).length, 0, '固定中文附件不能改选英文附件');
         assert.equal(sb.modHubMarketVersions.buildCandidates(mod, { id: mod.id, sourceUrl: url, releases: [{ ...release,
             tagName: 'v2.0', assets: [{ name: 'Shared.CHS.2.0.zip', size: 100, downloadUrl: url.replaceAll('1.0', '2.0') }] }] }).length, 0, '未经登记的新标签不能替换历史固定包');
-        sb.fetch = async () => ({ ok: true, status: 200, json: async () => ({ tag_name: 'v1.0',
-            assets: [{ name: 'Shared.EN.1.0.zip', browser_download_url: url.replace('CHS', 'EN') },
-                { name: 'Shared.CHS.1.0.zip', browser_download_url: url }] }) });
+        sb.fetch = async value => {
+            assert.equal(new URL(value).origin, 'https://dol.alseece.top');
+            return { ok: true, status: 200, json: async () => ({ schemaVersion: 1, id: mod.id, sourceUrl: mod.githubUrl,
+                page: 1, hasMore: false, communityRevision: market.getCommunityRevision(),
+                fetchedAt: new Date().toISOString(), releases: [release] }) };
+        };
         const fetched = await market.fetchModRelease(mod, { useCache: false });
-        assert.equal(fetched.assetName, 'Shared.CHS.1.0.zip', '直接发布解析同样只采用指定附件');
+        assert.equal(fetched.assetName, 'Shared.CHS.1.0.zip', '反代发布解析同样只采用指定附件');
         assert.equal(fetched.availableAssets?.length || fetched.assets?.length, 1);
         const elements = new Map(['modHubModMarketContainer', 'modHubMarketCardsContainer', 'modHubCategoryCapsules']
             .map(id => [id, createStubElement()]));
@@ -1487,6 +1638,7 @@ module.exports = async function() {
             options.onRender?.(current.dialog);
         });
         const origin = new URL(market.RELEASE_WORKER_API_BASE).origin;
+        assert.equal(origin, 'https://dol.alseece.top', '投稿请求与验证消息固定使用国内反代来源');
         let attempts = 0;
         let dropSpellSubmission = false;
         let queriedStatus = 'needs_info';
@@ -1501,6 +1653,7 @@ module.exports = async function() {
         let queryErrorStatus = 0;
         const posted = [];
         sb.fetch = async (url, options) => {
+            assert.equal(new URL(url).origin, origin);
             const path = new URL(url).pathname;
             const body = JSON.parse(options.body);
             posted.push({ path, body });
@@ -1546,6 +1699,7 @@ module.exports = async function() {
         assert.ok(first.html.includes('modhub-community-fields') && first.html.includes('modhub-community-safety')
             && first.html.includes('title="安全验证"') && !first.html.includes('投稿验证'), '填写区单独滚动，验证提示统一为安全验证');
         assert.equal(new URL(first.frame.src).searchParams.get('embedded'), '1', '嵌入验证页不能重复显示提示');
+        assert.equal(new URL(first.frame.src).origin, origin, '验证码框架和投稿请求使用同一来源');
         Object.assign(first.inputs.name, { value: '测试模组' });
         Object.assign(first.inputs.author, { value: '作者' });
         Object.assign(first.inputs.sourceUrl, { value: 'https://tieba.baidu.com/p/123' });
@@ -1553,6 +1707,8 @@ module.exports = async function() {
         let nonce = new URL(first.frame.src).searchParams.get('nonce');
         listener({ origin: 'https://evil.example', source: first.frame.contentWindow,
             data: { type: 'modHubCommunityChallenge', nonce, token: '伪造' } });
+        listener({ origin: 'https://dolmod-release-index.johnliao381658675.workers.dev', source: first.frame.contentWindow,
+            data: { type: 'modHubCommunityChallenge', nonce, token: '旧来源' } });
         listener({ origin, source: {}, data: { type: 'modHubCommunityChallenge', nonce, token: '伪造' } });
         listener({ origin, source: first.frame.contentWindow,
             data: { type: 'modHubCommunityChallenge', nonce: 'wrong', token: '伪造' } });

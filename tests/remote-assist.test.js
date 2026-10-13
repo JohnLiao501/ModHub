@@ -95,7 +95,7 @@ async function fixture(options = {}) {
         },
         fetch: async (url, init) => {
             const endpoint = url.split('/remote-assistance')[1], body = init.body ? JSON.parse(init.body) : undefined;
-            stats.requests.push({ endpoint, method: init.method, headers: init.headers, credentials: init.credentials, cache: init.cache, body });
+            stats.requests.push({ url, endpoint, method: init.method, headers: init.headers, credentials: init.credentials, cache: init.cache, redirect: init.redirect, body });
             if (options.pollError && endpoint.includes('?after=')) throw new Error('收信网络中断');
             if (options.chatError && endpoint.endsWith('/text')) throw new Error('发送网络中断');
             let result, status = 200;
@@ -183,6 +183,8 @@ module.exports = async function runRemoteAssistTests() {
         f.sb.modHubRemoteAssist.unmount(); f.messages.push({ id: 'text-2', seq: 3, type: 'text', sender: 'helper', text: '新消息' }); await f.tick();
         assert.equal(f.sb.modHubRemoteAssist.getSummary().unread, 1, '离开工作区继续收信');
         assert.ok(f.stats.requests.every(item => item.credentials === 'omit' && item.cache === 'no-store'));
+        assert.ok(f.stats.requests.every(item => new URL(item.url).origin === 'https://dol.alseece.top'
+            && item.redirect === 'error' && item.headers.Authorization === 'Bearer ' + '1'.repeat(64)), '切换协助反代保留 Bearer、禁止重定向与无缓存约束');
     }
     {
         const f = await fixture({ commands: false, recreateDom: true }); f.mount(); await settle();
