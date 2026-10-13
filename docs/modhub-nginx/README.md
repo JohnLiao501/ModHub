@@ -1,6 +1,6 @@
 # ModHub 宝塔站点增量配置
 
-本目录保存适用于 `dol.alseece.top` 宝塔主配置的公共配置。站点已安装 `modhub.conf` 和 `modhub-worker.inc`；本次只需替换空凭据行、放置单独提供的私有凭据文件，并新增一条网站精确路径规则，无需重新上传整套配置。主配置通过 `extension/dol.alseece.top/*.conf` 加载扩展，文件所在目录为：
+本目录保存适用于 `dol.alseece.top` 宝塔主配置的公共配置。站点已安装 `modhub.conf` 和 `modhub-worker.inc`；管理员已确认完成空凭据行替换、私有凭据文件放置、网站精确路径规则及重载。首次部署或迁移站点时仍按本文检查和加载配置。主配置通过 `extension/dol.alseece.top/*.conf` 加载扩展，文件所在目录为：
 
 ```text
 /www/server/panel/vhost/nginx/extension/dol.alseece.top/
@@ -67,7 +67,7 @@ include /www/server/panel/vhost/nginx/extension/dol.alseece.top/modhub-proxy-aut
 
 `modhub-proxy-auth.inc` 由我们单独提供，只交给服务器管理员，放在上述绝对路径。它包含与 Worker 的 `MODHUB_PROXY_SECRET` 对应的代理凭据，覆盖访客自行提交的同名头；不要公开、提交仓库、放入客户端包或发送完整配置输出。该文件使用 `.inc` 后缀，只由公共配置引用，不会被 `*.conf` 单独加载。没有该私有文件时不要重载。
 
-可信代理、真实 IP 限流及 Turnstile 公开域名校验已随 Worker 发布，`MODHUB_PROXY_SECRET` 已设置并回读确认。只有共享凭据与单个合法 IP 都通过校验，Worker 才使用代理声明的玩家地址和固定公开域名 `dol.alseece.top`；无效代理头回退到 Cloudflare 的直连身份。代理凭据不赋予协助、投稿或后台权限。仍待管理员应用私有 include 和下文的网站精确路径规则，再确认成功重载；不能以代码发布代替服务器和完整流程验收。Nginx 前若有其他代理，还需只对可信来源恢复真实 IP。
+可信代理、真实 IP 限流及 Turnstile 公开域名校验已随 Worker 发布，`MODHUB_PROXY_SECRET` 已设置并回读确认。只有共享凭据与单个合法 IP 都通过校验，Worker 才使用代理声明的玩家地址和固定公开域名 `dol.alseece.top`；无效代理头回退到 Cloudflare 的直连身份。代理凭据不赋予协助、投稿或后台权限。管理员已确认私有 include 和下文的网站精确路径规则已应用并重载；真实访客 IP 转发尚未取得线上事件观测证据，多人独立限流仍需实测。Nginx 前若有其他代理，还需只对可信来源恢复真实 IP。
 
 ## 网站入口与当前发布资源
 
@@ -75,19 +75,19 @@ include /www/server/panel/vhost/nginx/extension/dol.alseece.top/modhub-proxy-aut
 
 Worker 和 Pages 的变量 `proxy_pass` 均不附带 URI。`/modhub/` 先核验公开资源白名单，再通过 `rewrite ... break` 去掉该前缀并保留查询参数；上游变量赋值在 break 之前执行。不能给变量 proxy_pass 加尾 `/` 期待自动去掉前缀，也不能把 break 改为 last。网页路径使用必要的规范化跳转，协助 API 不增加跳转。[Nginx 代理说明](https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_pass)
 
-线上另发现 Pages 会将上游 `/index.html` 以 308 规范化到 `/?query`，原代理直接传回这一地址会使 `/modhub/index.html` 落到站点根目录。在服务器现有的 `modhub.conf` 中，将下面这一行加在 `location ^~ /modhub/` 附近，与它并列，不能放入其大括号内：
+此前发现 Pages 会将上游 `/index.html` 以 308 规范化到 `/?query`，原代理直接传回这一地址会使 `/modhub/index.html` 落到站点根目录。首次配置时，在服务器现有的 `modhub.conf` 中，将下面这一行加在 `location ^~ /modhub/` 附近，与它并列，不能放入其大括号内：
 
 ```nginx
 location = /modhub/index.html { return 308 /modhub/$is_args$args; }
 ```
 
-该精确规则直接返回 `/modhub/`，保留查询参数，不回源 Pages。不要调整其他 `proxy_redirect` 或业务规则。本地配置文本已补入该规则，线上仍待管理员应用并通过 `nginx -t` 后重载。
+该精确规则直接返回 `/modhub/`，保留查询参数，不回源 Pages。不要调整其他 `proxy_redirect` 或业务规则。本地配置文本与服务器均已补入该规则，管理员已确认重载；实际复测 `/modhub/index.html?source=v1.5.1` 返回 308，目标为 `https://dol.alseece.top/modhub/?source=v1.5.1`。
 
 客户端的公开接口地址、下载链接和验证来源检查已完成代码适配；网页与后端已完成发布，Pages 生产版本为 `3fd45293`，原 Sites 公开入口版本 `25` 的发布状态为 `succeeded`。现有 Turnstile 已追加并回读确认 `dol.alseece.top`，原 Worker 域名、模式和 clearance 保持不变，未读取或替换 Turnstile secret。浏览器仍需访问官方验证资源；若该资源在玩家网络中无法加载，投稿和补充资料仍可能受阻。这些边界见上一层的反代交接说明。
 
 ## 测试与重载
 
-现有站点只需完成空凭据行的替换、放置单独提供的 `modhub-proxy-auth.inc`，并在 `modhub.conf` 增加上述 `/modhub/index.html` 精确规则。保留已验证的 IPv4、DNS、系统 CA 和索引规则，不需要重新上传整套公共配置文件。
+本站上述增量配置已由管理员确认完成并重载。首次部署或迁移时，完成空凭据行替换、放置单独提供的 `modhub-proxy-auth.inc`，并在 `modhub.conf` 增加上述 `/modhub/index.html` 精确规则。保留已验证的 IPv4、DNS、系统 CA 和索引规则，不需要重新上传整套公共配置文件。
 
 如果回源超时或被拒绝，先解决服务器的上游连接与对应安全规则，再加载配置；若返回 Cloudflare 1010，需要服务维护者根据安全事件核对浏览器签名拦截，不能以关闭证书验证解决。
 
@@ -113,4 +113,4 @@ location = /modhub/index.html { return 308 /modhub/$is_args$args; }
 
 先验证 `/health` 返回 200 JSON，再验证索引、历史、说明、图片、身份字典、下载及 `/modhub/` 的配套资源。协助与投稿的 OPTIONS 应返回 204 及 CORS 头，不能返回 405。完整验收命令及后端分工见 [反代交接说明](../modhub-reverse-proxy-handoff.md)。
 
-2026 年 10 月 13 日，IPv4 和系统 CA 修正后的公开接口复测通过，检查范围包括健康、索引、历史、说明、页面资源、下载包校验及协助和投稿预检。后续 Worker 已发布版本 `5e8f4ca4-0101-4afb-be86-bd1e0086d51a`，原绑定回读保留；网站发布及 Turnstile 域名也已完成核验。发布前后社区条目 38、投稿 53、事件 112 及其他相关表计数完全一致，外键检查为 0，无需数据库迁移。管理员私有 include 的放置、空凭据行替换、网站精确规则及重载仍待确认；上述 `/modhub/index.html` 跳转问题尚未在服务器修复。国内关闭 VPN 后的完整游戏、协助会话和验证码流程尚未验收。
+2026 年 10 月 13 日，IPv4 和系统 CA 修正后的公开接口复测通过，检查范围包括健康、索引、历史、说明、页面资源、下载包校验及协助和投稿预检。后续 Worker 已发布版本 `5e8f4ca4-0101-4afb-be86-bd1e0086d51a`，原绑定回读保留；网站发布及 Turnstile 域名也已完成核验。发布前后社区条目 38、投稿 53、事件 112 及其他相关表计数完全一致，外键检查为 0，无需数据库迁移。管理员已确认私有 include 放置、空凭据行替换、网站精确规则及重载完成；规范跳转、原 v1.5.0 安装包下载校验和本机当前网络下的隔离协助创建、加入、鉴权、关闭协议复测通过。真实访客 IP 转发尚未取得线上事件观测证据；真人 Turnstile 验证及国内关闭 VPN 后的完整游戏、协助流程尚未验收。

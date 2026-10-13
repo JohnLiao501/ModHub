@@ -2,13 +2,13 @@
 
 请将 `https://dol.alseece.top` 从市场索引入口扩展为 ModHub 的公开业务接口入口。浏览器连接该域名，由服务器回源现有 Worker；模组包体、协助会话和社区资料继续由原服务维护。
 
-公共配置见 [宝塔增量配置](modhub-nginx/README.md)；下文通用 Nginx 示例用于说明契约，不与增量文件重复加载。站点已经安装公共配置，本次只需替换空凭据行、放置单独提供的私有凭据文件，并新增一条网站精确路径规则，不要求重新上传整套配置。
+公共配置见 [宝塔增量配置](modhub-nginx/README.md)；下文通用 Nginx 示例用于说明契约，不与增量文件重复加载。站点已经安装公共配置，管理员已确认完成空凭据行替换、私有凭据文件放置、网站精确路径规则及重载。首次部署或迁移时仍按下文操作，不要求重新上传整套配置。
 
-宝塔 proxy 目录存在索引精确规则，增量文件已排除重复的 `/release-index.json` 声明。IPv4 和系统 CA 回源修正后的公开接口复测已通过；保留旧索引 location 对 `modhub-worker.inc` 的引用。将公共文件原来的空 `X-ModHub-Proxy-Token` 行替换为 `include /www/server/panel/vhost/nginx/extension/dol.alseece.top/modhub-proxy-auth.inc;`，放置私有文件，并按下文新增 `/modhub/index.html` 的精确规则，`nginx -t` 成功后再平滑重载。
+宝塔 proxy 目录存在索引精确规则，增量文件已排除重复的 `/release-index.json` 声明。IPv4 和系统 CA 回源修正后的公开接口复测已通过；保留旧索引 location 对 `modhub-worker.inc` 的引用。首次部署时，将公共文件原来的空 `X-ModHub-Proxy-Token` 行替换为 `include /www/server/panel/vhost/nginx/extension/dol.alseece.top/modhub-proxy-auth.inc;`，放置私有文件，并按下文新增 `/modhub/index.html` 的精确规则，`nginx -t` 成功后再平滑重载。
 
 2026 年 10 月 13 日，用户确认在其直连网络中 Cloudflare 内容及投稿安全验证均无法加载，并明确决定继续使用 Turnstile。本次接入范围包括公开 API、网站页面和静态资源，以及现有 Turnstile 的公开域名和后端校验适配。仅扩展 API 反代不能解决 Turnstile 的浏览器依赖。
 
-客户端的公开接口代码适配已完成，网站及后端已发布，现有 Turnstile 的公开允许域名已追加并回读确认。仍待管理员放置私有 include、替换空凭据行、新增网站精确路径规则并确认成功重载，再验收多人协助与社区投稿。国内关闭 VPN 后的完整验证码及游戏流程尚未验收，不能将发布或接口检查通过表述为全功能国内直连通过。
+客户端的公开接口代码适配已完成，网站及后端已发布，现有 Turnstile 的公开允许域名已追加并回读确认。管理员已确认私有 include 放置、空凭据行替换、网站精确路径规则及重载完成；规范跳转和本机当前网络下的隔离协助创建、加入、鉴权、关闭协议复测通过。真实访客 IP 转发尚未取得线上事件观测证据，多人独立限流、真人 Turnstile 验证及国内关闭 VPN 后的完整游戏流程尚未验收，不能将发布或接口检查通过表述为全功能国内直连通过。
 
 ## 公开路径与上游
 
@@ -53,7 +53,7 @@
 
 以下内容加入现有 `dol.alseece.top` 的 HTTPS server。若使用宝塔，同样编辑该站点的 Nginx 配置。先核对已有 location 的优先级，合并或替换同路径的旧规则，保留网站其他页面。
 
-此示例中的两个代理请求头已由线上 Worker 实现，`MODHUB_PROXY_SECRET` 已设置并回读确认，服务器私有 include 的放置和重载仍待确认。目标服务器为 Alibaba Cloud Linux 3，CA 使用已验证的系统证书包路径。相关 location 以变量上游配合 ipv6=off 限制 IPv4 回源；现有已验证的 DNS 和 CA 配置继续保留。
+此示例中的两个代理请求头已由线上 Worker 实现，`MODHUB_PROXY_SECRET` 已设置并回读确认，管理员已确认服务器私有 include 放置及重载完成。真实访客 IP 转发尚未取得线上事件观测证据。目标服务器为 Alibaba Cloud Linux 3，CA 使用已验证的系统证书包路径。相关 location 以变量上游配合 ipv6=off 限制 IPv4 回源；现有已验证的 DNS 和 CA 配置继续保留。
 
 ```nginx
 location ~ ^/(release-index\.json|mod-releases|readme|readme-image|download|health|community-challenge|community-submissions(/(query|query-batch|target-status|amend|withdraw|delete))?|remote-assistance(/.*)?)$ {
@@ -128,7 +128,7 @@ location = /mod-identities.json {
 
 Worker 的历史、下载、投稿及远程协助限流已经统一接入可信代理上下文。未通过代理校验时仍使用 Cloudflare 提供的直连 IP；普通 Nginx 回源但未配置有效代理凭据时，多位玩家仍会共用出口额度。远程协助的正常轮询也经过 IP 限流，不能只提高生成协助码的限额。
 
-线上 Worker 已实现以下契约，服务器私有 include 生效及多人实际限流仍待验收：
+线上 Worker 已实现以下契约，管理员已确认服务器私有 include 放置并重载；真实访客 IP 转发的线上事件观测及多人实际限流仍待验收：
 
 - Worker 使用受保护环境密钥 `MODHUB_PROXY_SECRET` 验证 `X-ModHub-Proxy-Token`。
 - 只有代理密钥验证通过，才接收并校验单个 `X-ModHub-Proxy-Client-IP`，用于所有上述限流及投稿验证的 remoteip。无效代理头必须拒绝或忽略，不能让访客伪造 IP 绕过限流。
@@ -155,7 +155,7 @@ Worker 的历史、下载、投稿及远程协助限流已经统一接入可信�
 
 以下为反代 Pages 的补充示例，加入同一 HTTPS server；访问入口使用带末尾斜杠的 `/modhub/`。变量 proxy_pass 不带 URI；白名单核验后以 rewrite ... break 移除该前缀，查询参数继续保留。赋值必须先于 break，不能改用 last。
 
-线上发现上游 `/index.html` 会以 308 规范化到 `/?query`，直接传回会使 `/modhub/index.html` 落到站点根目录。管理员在现有 `modhub.conf` 的 `/modhub/` 静态段附近新增下面的精确 location，与原前缀 location 并列。这条规则保留查询参数并直接返回公开入口，不回源 Pages；不改其他 `proxy_redirect` 或业务规则。当前只完成本地配置修订，服务器仍待应用并执行 `nginx -t`。
+此前发现上游 `/index.html` 会以 308 规范化到 `/?query`，直接传回会使 `/modhub/index.html` 落到站点根目录。首次配置时，管理员在现有 `modhub.conf` 的 `/modhub/` 静态段附近新增下面的精确 location，与原前缀 location 并列。这条规则保留查询参数并直接返回公开入口，不回源 Pages；不改其他 `proxy_redirect` 或业务规则。本站规则已由管理员确认应用并重载；实际复测 `/modhub/index.html?source=v1.5.1` 返回 308，目标为 `https://dol.alseece.top/modhub/?source=v1.5.1`。
 
 ```nginx
 location = /modhub/index.html { return 308 /modhub/$is_args$args; }
@@ -218,7 +218,7 @@ location ^~ /modhub/ {
 
 ## 联调与上线验收
 
-现有公开反代已完成接口复测，后端、网站及 Turnstile 域名配置已完成发布和回读确认。此次服务器只需替换空凭据行、放置私有 include，并新增 `/modhub/index.html` 精确规则；变更前保留原配置，执行 `nginx -t`，通过后再平滑重载。上述增量修改与管理员重载仍待确认。
+现有公开反代已完成接口复测，后端、网站及 Turnstile 域名配置已完成发布和回读确认。管理员已确认空凭据行替换、私有 include 放置、网站精确规则及重载完成；规范跳转和本机当前网络下的隔离协助创建、加入、鉴权、关闭协议复测通过。首次部署或迁移时，仍需保留原配置，执行 `nginx -t`，通过后再平滑重载。真实访客 IP 的线上事件观测、多人独立限流和完整用户流程继续按下文验收。
 
 以下命令只检查公开 GET 和 OPTIONS，不发送会话凭据，也不创建协助或投稿：
 
@@ -245,7 +245,7 @@ curl -i --max-time 20 -X OPTIONS \
 
 市场同时验收历史分页、固定标签和共享仓库选包、说明及图片、完整 ZIP 下载、安装前社区状态核验。当前 Worker 下载服务没有实现 Range 断点续传，代理不要伪造 206 或开启强制分段来宣称已支持断点续传。
 
-投稿验收现有 Turnstile 在公开域名上的完整流程、创建、查询、补充和撤回，并清理隔离测试资料。网站另外验收页面、配套静态资源、数据刷新、历史查询和下载，确认普通使用不会再跳回 `pages.dev` 或直接请求 `workers.dev`；Turnstile 官方资源仍是独立外部依赖。管理员完成私有 include 并确认成功重载后，国内关闭 VPN 分别测试桌面和手机网络，确认多人轮询及实际验证。客户端或 Worker 改动后运行 `node src/test-smart-sort.js`；网站改动运行 `npm test`；涉及根提取器时另运行 `node test-dol-mod-extractor.js`，并完成改动文件的 Python Unicode 扫描。
+投稿验收现有 Turnstile 在公开域名上的完整流程、创建、查询、补充和撤回，并清理隔离测试资料。网站另外验收页面、配套静态资源、数据刷新、历史查询和下载，确认普通使用不会再跳回 `pages.dev` 或直接请求 `workers.dev`；Turnstile 官方资源仍是独立外部依赖。管理员现已确认私有 include 放置并重载；后续仍需在国内关闭 VPN 分别测试桌面和手机网络，确认多人轮询及真人验证。客户端或 Worker 改动后运行 `node src/test-smart-sort.js`；网站改动运行 `npm test`；涉及根提取器时另运行 `node test-dol-mod-extractor.js`，并完成改动文件的 Python Unicode 扫描。
 
 ## 当前探测与代码定位
 
@@ -260,11 +260,11 @@ curl -i --max-time 20 -X OPTIONS \
 | Sites | 原公开入口版本 `25` 发布状态为 `succeeded`；已同步当前生产源码及关联测试 |
 | Turnstile | 原组件已追加并回读 `dol.alseece.top`；原 Worker 域名、模式及 clearance 保持不变，未读取或替换 Turnstile secret |
 
-发布前后 `community_entries` 为 38、`community_submissions` 为 53、`community_submission_events` 为 112，其他相关表计数也完全相同；外键检查为 0，无需数据库迁移。管理员放置私有 include、替换空凭据行、新增网站精确规则及成功重载仍待确认；`/modhub/index.html` 跳转问题尚未在服务器修复，国内无 VPN 的完整验证码及游戏流程尚未验收。
+发布前后 `community_entries` 为 38、`community_submissions` 为 53、`community_submission_events` 为 112，其他相关表计数也完全相同；外键检查为 0，无需数据库迁移。管理员已确认私有 include 放置、空凭据行替换、网站精确规则及重载完成；`/modhub/index.html?source=v1.5.1` 已正确跳转到 `https://dol.alseece.top/modhub/?source=v1.5.1`，原 v1.5.0 安装包下载校验及本机当前网络下的隔离协助创建、加入、鉴权、关闭协议复测通过。真实访客 IP 转发尚未取得线上事件观测证据，真人 Turnstile 验证及国内无 VPN 的完整游戏、协助流程尚未验收。
 
 早期使用默认脚本请求头时，主域索引及 Worker 健康接口另收到 403，正文为 `error code: 1010`；改用 curl 请求头后 Worker 健康检查返回 200。Cloudflare 将 1010 解释为客户端浏览器签名被拒绝，这不能单独证明普通玩家浏览器也无法访问。若服务器回源仍收到此错误，由服务维护者根据安全事件精确处理公开 API 的可信来源规则，保留其他路径保护。[Cloudflare 1010 错误说明](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/cloudflare-1xxx-errors/error-1010/)
 
-上述 HTTP 探测不是国内关闭 VPN 的游戏实测，也未创建会话或投稿。
+上述公开 GET 和 OPTIONS 探测不创建会话或投稿；后续隔离协议复测另行创建测试协助并完成关闭，未执行游戏修改或提交投稿。这些结果均不是国内关闭 VPN 的游戏实测，真人 Turnstile 验证及真实访客 IP 的线上事件观测仍待完成。
 
 代码定位：
 
