@@ -83,7 +83,7 @@ location = /modhub/index.html { return 308 /modhub/$is_args$args; }
 
 该精确规则直接返回 `/modhub/`，保留查询参数，不回源 Pages。不要调整其他 `proxy_redirect` 或业务规则。本地配置文本已补入该规则，线上仍待管理员应用并通过 `nginx -t` 后重载。
 
-客户端的公开接口地址、下载链接和验证来源检查已完成代码适配；网页与后端已完成发布，Pages 生产版本为 `3fd45293`，原 Sites 公开入口版本 `24` 的发布状态为 `succeeded`。现有 Turnstile 已追加并回读确认 `dol.alseece.top`，原 Worker 域名、模式和 clearance 保持不变，未读取或替换 Turnstile secret。浏览器仍需访问官方验证资源；若该资源在玩家网络中无法加载，投稿和补充资料仍可能受阻。这些边界见上一层的反代交接说明。
+客户端的公开接口地址、下载链接和验证来源检查已完成代码适配；网页与后端已完成发布，Pages 生产版本为 `3fd45293`，原 Sites 公开入口版本 `25` 的发布状态为 `succeeded`。现有 Turnstile 已追加并回读确认 `dol.alseece.top`，原 Worker 域名、模式和 clearance 保持不变，未读取或替换 Turnstile secret。浏览器仍需访问官方验证资源；若该资源在玩家网络中无法加载，投稿和补充资料仍可能受阻。这些边界见上一层的反代交接说明。
 
 ## 测试与重载
 

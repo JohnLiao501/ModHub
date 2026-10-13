@@ -257,7 +257,7 @@ curl -i --max-time 20 -X OPTIONS \
 | --- | --- |
 | Worker | 版本 `5e8f4ca4-0101-4afb-be86-bd1e0086d51a` 已上线；`MODHUB_PROXY_SECRET` 已设置，原绑定回读保留 |
 | Pages | 生产版本 `3fd45293` 已发布 |
-| Sites | 原公开入口版本 `24` 发布状态为 `succeeded` |
+| Sites | 原公开入口版本 `25` 发布状态为 `succeeded`；已同步当前生产源码及关联测试 |
 | Turnstile | 原组件已追加并回读 `dol.alseece.top`；原 Worker 域名、模式及 clearance 保持不变，未读取或替换 Turnstile secret |
 
 发布前后 `community_entries` 为 38、`community_submissions` 为 53、`community_submission_events` 为 112，其他相关表计数也完全相同；外键检查为 0，无需数据库迁移。管理员放置私有 include、替换空凭据行、新增网站精确规则及成功重载仍待确认；`/modhub/index.html` 跳转问题尚未在服务器修复，国内无 VPN 的完整验证码及游戏流程尚未验收。
