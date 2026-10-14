@@ -77,5 +77,28 @@ module.exports = async function () {
     assert.notEqual(lnn[0].verifiedReleaseAssets[0].sha256, lnn[1].verifiedReleaseAssets[0].sha256);
     assert.deepEqual(lnn[0].requiredDependencies, [{ modName: 'ModI18N', version: '*' }]);
     assert.deepEqual(lnn[1].requiredDependencies || [], [], '英文不继承简中额外前置');
+    const editionMembers = ['alpha', 'omega'].map(id => ({ id: `phone-${id}`, identityId: `phone-${id}`, name: '手机',
+        bootNames: [`Phone ${id}`], variant: { groupId: 'phone', groupName: '手机', type: 'edition', id, label: id } }));
+    const [editionGroup] = api.groupMods(editionMembers);
+    assert.equal(editionGroup.isEditionGroup, true, '发行分支复用展示组，真实成员继续独立');
+    assert.equal(editionGroup.variantType, 'edition');
+    assert.equal(api.groupMods([editionMembers[0], { ...editionMembers[1], variant: { ...editionMembers[1].variant, type: 'language' } }]).length, 2,
+        '不同分组类型不能聚合');
+    const typed = { packageEditions: [
+        { id: 'lite', label: '轻量版', bootName: 'Package', assetSeries: 'Package-Lite', bootEdition: 'lite', exclusive: true },
+        { id: 'visual', label: '图像版', bootName: 'Package', assetSeries: 'Package-Visual', bootEdition: 'visual', exclusive: true,
+            verifiedAssets: [{ sourceUrl: 'https://github.com/Author/Package/releases/download/v1/Visual.zip', sha256: 'a'.repeat(64), version: '1' }] }
+    ] };
+    assert.equal(api.getPackageEdition(typed, { bootJson: { name: 'Package', edition: 'lite' } }).id, 'lite');
+    assert.equal(api.getPackageEdition(typed, { bootJson: { name: 'Package' }, packageDigest: 'sha256:' + 'a'.repeat(64) }).id, 'visual',
+        '缺少包型字段时仍可通过精确已核验摘要识别');
+    assert.equal(api.getPackageEdition(typed, { bootJson: { name: 'Package' } }), null, '未知旧包不能猜测包型');
+    assert.equal(api.getPackageEdition(typed, { bootJson: { name: 'Other', edition: 'lite' } }), null);
+    assert.equal(api.normalizePackageEditions([typed.packageEditions[0], typed.packageEditions[0]]).length, 0);
+    const resource = { bootName: 'PhotoPack', label: '图包', packageRole: 'resource', assetSeries: 'PhotoPack',
+        sourceUrl: 'https://github.com/Author/Package/releases/download/v1/PhotoPack.zip' };
+    assert.equal(api.normalizeOptionalResources([resource]).length, 1);
+    assert.equal(api.normalizeOptionalResources([{ ...resource, sourceUrl: resource.sourceUrl.replace('github.com', 'github.com:8443') }]).length, 0,
+        '附加下载不能通过端口绕过真实来源');
     console.log('语言变体展示契约测试通过');
 };

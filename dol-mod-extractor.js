@@ -46,16 +46,16 @@ function uniqueStrings(values) {
   return [...new Set((values || []).filter((value) => typeof value === 'string' && value.trim()))];
 }
 
-/** 仅透传维护者显式声明的语言分组，不从同仓库或名称推断。 */
+/** 仅透传维护者显式声明的发行分组，不从同仓库或名称推断。 */
 export function modHubNormalizeVariant(value) {
-  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'language') return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !['language', 'edition'].includes(value.type)) return null;
   const text = (item, limit) => typeof item === 'string' && item.trim().length <= limit
     && !/[\u0000-\u001f\u007f]/u.test(item) ? item.trim() : '';
   const groupId = text(value.groupId, 128).toLowerCase(), groupName = text(value.groupName, 200);
   const id = text(value.id, 48), label = text(value.label, 80);
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(groupId) || !groupName || !label
-      || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(id)) return null;
-  return { groupId, groupName, type: 'language', id, label };
+      || !(value.type === 'language' ? /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i : /^[a-z0-9][a-z0-9._-]*$/i).test(id)) return null;
+  return { groupId, groupName, type: value.type, id, label };
 }
 
 /** 作者说明中的必需前置独立于包内元数据，使用加载器真实技术名。 */
@@ -74,6 +74,79 @@ export function modHubNormalizeRequiredDependencies(value) {
     seen.add(key);
     return [{ modName, version }];
   });
+}
+
+const modHubCatalogText = (value, limit) => typeof value === 'string' && value.trim().length <= limit
+  && !/[\u0000-\u001f\u007f]/u.test(value) ? value.trim() : '';
+const modHubCatalogGroupId = value => /^[a-z0-9][a-z0-9._-]*$/i.test(modHubCatalogText(value, 128))
+  ? value.trim().toLowerCase() : '';
+const modHubCatalogAssetUrl = value => {
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:' && url.hostname === 'github.com' && !url.port && !url.username && !url.password
+                && /^\/[^/]+\/[^/]+\/releases\/download\/[^/]+\/[^/]+$/.test(url.pathname) && !url.search && !url.hash ? url.href : '';
+        } catch (_) { return ''; }
+    };
+    export function modHubNormalizePackageEditions(value) {
+        if (!Array.isArray(value)) return [];
+        const ids = new Set();
+        const result = [];
+        for (const item of value) {
+            const id = modHubCatalogGroupId(item?.id), label = modHubCatalogText(item?.label, 80), bootName = modHubCatalogText(item?.bootName, 200), assetSeries = modHubCatalogText(item?.assetSeries, 200);
+            if (!id || ids.has(id) || !label || !bootName || !assetSeries || typeof item.exclusive !== 'boolean') return [];
+            const bootEdition = item.bootEdition === undefined ? '' : modHubCatalogText(item.bootEdition, 80);
+            if (item.bootEdition !== undefined && !bootEdition) return [];
+            const verifiedAssets = (Array.isArray(item.verifiedAssets) ? item.verifiedAssets : []).flatMap(record => {
+                const sourceUrl = modHubCatalogAssetUrl(record?.sourceUrl), sha256 = modHubCatalogText(record?.sha256, 64).toLowerCase(), version = modHubCatalogText(record?.version, 200);
+                return sourceUrl && /^[a-f0-9]{64}$/.test(sha256) ? [{ sourceUrl, sha256, ...(version ? { version } : {}) }] : [];
+            });
+            ids.add(id);
+            result.push({ id, label, bootName, assetSeries, exclusive: item.exclusive, ...(bootEdition ? { bootEdition } : {}),
+                ...(verifiedAssets.length ? { verifiedAssets } : {}) });
+        }
+        return result;
+    }
+    export function modHubNormalizeOptionalResources(value) {
+        if (!Array.isArray(value)) return [];
+        const names = new Set();
+        return value.flatMap(item => {
+            const bootName = modHubCatalogText(item?.bootName, 200), label = modHubCatalogText(item?.label, 80), assetSeries = modHubCatalogText(item?.assetSeries, 200);
+            const sourceUrl = item?.sourceUrl === undefined ? '' : modHubCatalogAssetUrl(item.sourceUrl);
+            if (!bootName || names.has(bootName.toLowerCase()) || !label || !assetSeries || !['audio', 'resource'].includes(item.packageRole)
+                || item.sourceUrl !== undefined && !sourceUrl) return [];
+            names.add(bootName.toLowerCase());
+            const sha256 = modHubCatalogText(item.sha256, 64).toLowerCase(), version = modHubCatalogText(item.version, 200), evidenceUrl = modHubCatalogText(item.evidenceUrl, 2000);
+            return [{ bootName, label, assetSeries, packageRole: item.packageRole, ...(sourceUrl ? { sourceUrl } : {}),
+                ...(version ? { version } : {}), ...(/^[a-f0-9]{64}$/.test(sha256) ? { sha256 } : {}),
+                ...(Number.isSafeInteger(item.size) && item.size > 0 ? { size: item.size } : {}),
+                ...(evidenceUrl ? { evidenceUrl } : {}) }];
+        });
+    }
+
+/** 持续跟踪只允许登记身份已经授权的仓库级 HTTPS 发布源。 */
+export function modHubNormalizeReleaseTrackingSource(identity) {
+  try {
+    const url = new URL(identity?.releaseTrackingSourceUrl);
+    const target = parseGithubReleaseTarget(url.href);
+    if (url.protocol !== 'https:' || url.hostname !== 'github.com' || url.port || url.username || url.password || url.search || url.hash
+        || !/^\/[^/]+\/[^/]+(?:\/releases)?\/?$/.test(url.pathname)
+        || !target || target.tag || target.assetName
+        || !(identity.repositoryKeys || []).some(key => String(key).toLowerCase() === `${target.owner}/${target.repo}`.toLowerCase())) return null;
+    if (identity.githubUrl) {
+      const original = parseGithubReleaseTarget(identity.githubUrl);
+      if (!original || original.owner.toLowerCase() !== target.owner.toLowerCase()
+          || !(identity.repositoryKeys || []).some(key => String(key).toLowerCase() === `${original.owner}/${original.repo}`.toLowerCase())) return null;
+    }
+    return url.href.replace(/\/+$/, '');
+  } catch { return null; }
+}
+
+export function modHubNormalizeReleaseProductMetadata(identity) {
+  const optionalResources = modHubNormalizeOptionalResources(identity?.optionalResources);
+  const packageEditions = modHubNormalizePackageEditions(identity?.packageEditions);
+  const releaseTrackingSourceUrl = modHubNormalizeReleaseTrackingSource(identity);
+  return { ...(optionalResources.length ? { optionalResources } : {}), ...(packageEditions.length ? { packageEditions } : {}),
+    ...(releaseTrackingSourceUrl ? { releaseTrackingSourceUrl } : {}) };
 }
 
 function normalizeDependencies(value) {
@@ -202,6 +275,8 @@ export function mergeModIdentities(mods, catalog) {
       variant: modHubNormalizeVariant(identity.variant),
       requiredDependencies: modHubNormalizeRequiredDependencies(identity.requiredDependencies),
       releaseCompatibility: modHubNormalizeReleaseCompatibility(identity.releaseCompatibility),
+      ...modHubNormalizeReleaseProductMetadata(identity),
+      verifiedReleaseAssets: identity.verifiedReleaseAssets || [],
     };
   });
 }
@@ -469,7 +544,7 @@ export function clearReleaseCache() {
 }
 
 /** 按当前目录来源读取历史发布，缓存及下架检查统一交给 Worker。 */
-export async function modHubFetchModReleases(mod, { page = 1, signal } = {}) {
+export async function modHubFetchModReleases(mod, { page = 1, signal, identity } = {}) {
   const id = mod?.id || mod?.identityId;
   if (!id || !Number.isSafeInteger(page) || page < 1) throw new Error('模组缺少目录身份或页码无效，请核对原始发布页');
   const params = new URLSearchParams({ id, page: String(page) });
@@ -491,13 +566,23 @@ export async function modHubFetchModReleases(mod, { page = 1, signal } = {}) {
     throw Object.assign(new Error(message), { code: payload.code, status: response.status, details });
   }
   const normalizeSource = value => {
-    const url = new URL(value);
-    url.hash = '';
-    url.pathname = url.pathname.replace(/\/+$/, '') || '/';
-    return url.toString();
+    try {
+      const url = new URL(value);
+      url.hash = '';
+      url.pathname = url.pathname.replace(/\/+$/, '') || '/';
+      return url.toString();
+    } catch { return null; }
   };
+  // 跟踪来源必须来自当前身份的批准登记，不能由条目自身扩大固定标签范围。
+  const trackingSource = identity?.id && identity.id === mod.identityId ? modHubNormalizeReleaseTrackingSource(identity) : null;
+  const originalTarget = parseGithubReleaseTarget(mod.githubUrl), trackingTarget = parseGithubReleaseTarget(trackingSource);
+  const approvedOriginal = originalTarget && (identity?.repositoryKeys || []).some(key => String(key).toLowerCase()
+    === `${originalTarget.owner}/${originalTarget.repo}`.toLowerCase());
+  const approvedTracking = approvedOriginal && trackingTarget
+    && originalTarget.owner.toLowerCase() === trackingTarget.owner.toLowerCase();
+  const expectedSource = normalizeSource(approvedTracking ? trackingSource : mod.githubUrl);
   if (payload?.schemaVersion !== 1 || payload.id !== id || payload.page !== page || !Array.isArray(payload.releases)
-      || normalizeSource(payload.sourceUrl) !== normalizeSource(mod.githubUrl)) {
+      || !expectedSource || normalizeSource(payload.sourceUrl) !== expectedSource) {
     throw Object.assign(new Error('发布来源与当前目录不一致，请刷新目录后重试'), { code: 'RELEASE_SOURCE_CHANGED', status: 409 });
   }
   return payload;
@@ -529,11 +614,16 @@ export function markSharedRepositories(mods) {
   return mods.map(mod => {
     const repo = parseGithubUrl(mod.githubUrl);
     const sharedRepository = Boolean(mod.sharedRepository || (!!repo && repoCounts.get(`${repo.owner}/${repo.repo}`.toLowerCase()) > 1));
-    const target = parseGithubReleaseTarget(mod.githubUrl);
-    const unscopedVersion = mod.versionSource === 'github' && mod.githubUrl && (!target || (sharedRepository && !target.tag));
+    const target = parseGithubReleaseTarget(modHubNormalizeReleaseTrackingSource(mod) || mod.githubUrl);
+    const release = parseGithubReleaseTarget(mod.releaseUrl);
+    const repoKey = target && `${target.owner}/${target.repo}`.toLowerCase();
+    const scoped = mod.releaseProductScoped === true && release?.tag
+      && `${release.owner}/${release.repo}`.toLowerCase() === repoKey
+      && (!mod.repo || String(mod.repo).toLowerCase() === repoKey) && (!target.tag || release.tag === target.tag);
+    const unscopedVersion = mod.versionSource === 'github' && mod.githubUrl && (!target || (sharedRepository && !target.tag && !scoped));
     return { ...mod, sharedRepository, ...(unscopedVersion ? {
       version: mod.wikiVersion || mod.tableVersion || null, versionLabel: null, versionSource: 'wiki',
-      updateDate: mod.wikiDate || mod.tableUpdateDate || null, updateDateSource: 'wiki', releaseUrl: null,
+      updateDate: mod.wikiDate || mod.tableUpdateDate || null, updateDateSource: 'wiki', releaseUrl: null, releaseProductScoped: false,
     } : {}) };
   });
 }
@@ -570,6 +660,35 @@ export function modHubGetDownloadUrl(value) {
   return value;
 }
 
+// 智能手机原版旧附件的 Alpha.3.x 与后续 0.3.x 使用同一版本刻度。
+export function modHubNormalizeReleaseAssetVersion(name, version) {
+  const legacy = String(name || '').match(/^SmartPhone(?:-PhotoPack)?-vAlpha\.(3\.\d+(?:\.\d+)*)\.mod\.zip$/i);
+  return legacy && version === legacy[1] ? `0.${version}` : version;
+}
+
+/** 当前附件命中完整批准证据时使用包内版号，旧附件无 API 摘要时仍保留预期摘要。 */
+export function modHubMatchReleaseAssetEvidence(asset, mod) {
+  const sourceUrl = modHubCatalogAssetUrl(asset?.downloadUrl || asset?.browser_download_url);
+  const source = parseGithubReleaseTarget(sourceUrl);
+  const target = parseGithubReleaseTarget(modHubNormalizeReleaseTrackingSource(mod) || mod?.githubUrl || mod?.sourceUrl);
+  if (!source || !target || source.assetName !== asset?.name
+      || source.owner.toLowerCase() !== target.owner.toLowerCase() || source.repo.toLowerCase() !== target.repo.toLowerCase()) return null;
+  const matches = new Map();
+  for (const record of [...(Array.isArray(mod?.verifiedReleaseAssets) ? mod.verifiedReleaseAssets : []),
+    ...(mod?.verifiedReleaseAsset ? [mod.verifiedReleaseAsset] : [])]) {
+    const sha256 = typeof record?.sha256 === 'string' ? record.sha256.toLowerCase() : '';
+    const version = modHubCatalogText(record?.version, 200);
+    if (modHubCatalogAssetUrl(record?.sourceUrl) !== sourceUrl || !/^[a-f0-9]{64}$/.test(sha256)
+        || !Number.isSafeInteger(record.size) || record.size <= 0 || !version
+        || !(mod?.bootNames || []).includes(record.bootName) || record.fileName && record.fileName !== asset.name
+        || asset.digest != null && (typeof asset.digest !== 'string' || asset.digest.toLowerCase() !== `sha256:${sha256}`)
+        || asset.size != null && asset.size !== record.size) continue;
+    matches.set(JSON.stringify([record.bootName, version, sha256, record.size]), { sourceUrl, bootName: record.bootName,
+      version, sha256, size: record.size });
+  }
+  return matches.size === 1 ? [...matches.values()][0] : null;
+}
+
 function pickDownloadAsset(assets) {
   if (!assets || !assets.length) return null;
   const prefer = [/\.zip$/i, /\.mod$/i, /\.modpack$/i, /\.modpack\.crypt$/i];
@@ -591,9 +710,41 @@ function getAssetSeries(name) {
   return stripped.replace(/^(?:dol|mod)+/, '').replace(/(?:dol|mod)+$/, '') || stripped;
 }
 
-function matchesAssetIdentity(asset, mod) {
+function modHubExtractorDeclaredAsset(asset, mod, field) {
+  return (modHubNormalizeReleaseProductMetadata(mod)[field] || []).find(item => item.sourceUrl
+    ? item.sourceUrl === (asset.downloadUrl || asset.browser_download_url)
+    : getAssetSeries(item.assetSeries) === getAssetSeries(asset.name));
+}
+
+function matchesAssetIdentity(asset, mod, exact = false) {
+  if (modHubExtractorDeclaredAsset(asset, mod, 'packageEditions')) return true;
+  if (modHubNormalizeVariant(mod?.variant)) {
+    const target = parseGithubReleaseTarget(modHubNormalizeReleaseTrackingSource(mod) || mod.githubUrl);
+    const series = getAssetSeries(asset.name);
+    const bootNames = Array.isArray(mod.bootNames) ? mod.bootNames : [];
+    const registered = (Array.isArray(mod.verifiedReleaseAssets) ? mod.verifiedReleaseAssets : []).flatMap(record => {
+      const source = parseGithubReleaseTarget(record?.sourceUrl);
+      return source?.assetName && `${source.owner}/${source.repo}`.toLowerCase() === `${target?.owner}/${target?.repo}`.toLowerCase()
+        && bootNames.includes(record.bootName) && /^[a-f0-9]{64}$/i.test(record.sha256 || '')
+        && (!record.fileName || record.fileName === source.assetName) ? [source.assetName] : [];
+    });
+    return [...bootNames, ...registered].some(name => getAssetSeries(name) === series);
+  }
   const series = getAssetSeries(String(asset.name || '').replace(/(?:^|[\s._-])(?:desktop|windows|pc|mobile|android|english|chinese|chs|cht|cn|en|zh)(?=[\s._-]|$)/ig, ''));
-  return [...(mod?.bootNames || []), ...(mod?.aliases || []), mod?.name].some(name => {
+  const scoped = exact || mod?.sharedRepository || modHubNormalizeReleaseTrackingSource(mod)
+    || modHubNormalizePackageEditions(mod?.packageEditions).length;
+  const target = parseGithubReleaseTarget(modHubNormalizeReleaseTrackingSource(mod) || mod?.githubUrl);
+  const registered = [...(Array.isArray(mod?.verifiedReleaseAssets) ? mod.verifiedReleaseAssets : []),
+    ...(mod?.verifiedReleaseAsset ? [mod.verifiedReleaseAsset] : [])].flatMap(record => {
+      const source = parseGithubReleaseTarget(record?.sourceUrl);
+      return source?.assetName && modHubCatalogAssetUrl(record.sourceUrl)
+        && `${source.owner}/${source.repo}`.toLowerCase() === `${target?.owner}/${target?.repo}`.toLowerCase()
+        && (mod.bootNames || []).includes(record.bootName) && /^[a-f0-9]{64}$/i.test(record.sha256 || '')
+        && (!record.fileName || record.fileName === source.assetName) ? [source.assetName] : [];
+    });
+  const names = scoped ? [...(mod?.bootNames || []), ...registered]
+    : [...(mod?.bootNames || []), ...(mod?.aliases || []), mod?.name];
+  return names.some(name => {
     const identity = getAssetSeries(name);
     return identity.length >= 3 && identity === series;
   });
@@ -619,12 +770,14 @@ export async function fetchModRelease(mod, options = {}) {
   const { useCache = true } = options;
 
   if (!mod || !mod.githubUrl) throw new Error('模组缺少 GitHub 链接');
-  const parsed = parseGithubReleaseTarget(mod.githubUrl);
+  const trackingSource = modHubNormalizeReleaseTrackingSource(mod);
+  const parsed = parseGithubReleaseTarget(trackingSource || mod.githubUrl);
   if (!parsed) throw new Error('该链接未指定模组发布页，请前往原始主页下载');
 
-  const sharedRepository = !!mod.sharedRepository && !parsed.tag;
+  const sharedRepository = !parsed.tag && Boolean(mod.sharedRepository || trackingSource || modHubNormalizeVariant(mod.variant)
+    || modHubNormalizePackageEditions(mod.packageEditions).length);
   const releasePath = parsed.tag ? `tags/${encodeURIComponent(parsed.tag)}` : 'latest';
-  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], 'modpack-v1', 'asset-version-v1', 'asset-series-v2']))}`;
+  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], mod.variant || null, mod.releaseProductScoped === true, modHubNormalizeReleaseProductMetadata(mod), mod.verifiedReleaseAssets || [], 'modpack-v1', 'asset-version-v3', 'asset-series-v3']))}`;
 
   if (useCache) {
     const cached = readCache(cacheKey);
@@ -653,27 +806,53 @@ export async function fetchModRelease(mod, options = {}) {
   }
 
   if (sharedRepository) {
-    // ponytail: 最多检索最近 100 个发布，无可信匹配时转作者主页，确有需求再增加分页。
-    releaseData = (Array.isArray(releaseData) ? releaseData : []).filter(release => !release.draft && !release.prerelease
+    const candidates = Array.isArray(releaseData) ? [...releaseData] : [];
+    let hasMore = /<[^>]+>;\s*rel="next"/.test(latestRes.headers?.get?.('Link') || '');
+    // shortcut: 最多读取 400 个发布，超出范围由玩家核对作者主页。
+    for (let page = 2; hasMore && page <= 4; page++) {
+      const response = await fetch(`${baseUrl}/releases?per_page=100&page=${page}`, { headers });
+      if (response.status === 429 || response.status === 403) throw rateLimitError(response);
+      if (!response.ok) throw new Error(`GitHub API 错误: ${response.status}`);
+      const rows = await response.json();
+      if (!Array.isArray(rows)) throw new Error('GitHub 发布列表格式异常');
+      candidates.push(...rows);
+      hasMore = /<[^>]+>;\s*rel="next"/.test(response.headers?.get?.('Link') || '');
+    }
+    if (hasMore) throw new Error('发布列表超出检查范围，请核对作者主页');
+    releaseData = candidates.filter(release => !release.draft && !release.prerelease
       && (release.assets || []).some(asset => modHubIsModPackageName(asset.name) && matchesAssetIdentity(asset, mod)))
       .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0];
     if (!releaseData) throw new Error('共享仓库中未找到当前模组的发布，请前往原始主页核对');
   }
   if (parsed.tag && releaseData.tag_name !== parsed.tag) throw new Error('返回的 Release 标签与模组来源不一致');
   const assets = (releaseData.assets || []).filter((a) => modHubIsModPackageName(a.name) && (!parsed.assetName || a.name === parsed.assetName)
-    && (!sharedRepository || matchesAssetIdentity(a, mod))).map((a) => ({
-    name: a.name,
-    size: a.size,
-    contentType: a.content_type,
-    downloadUrl: a.browser_download_url,
-  }));
+    && (!sharedRepository || matchesAssetIdentity(a, mod) || modHubExtractorDeclaredAsset(a, mod, 'optionalResources'))).map((a) => {
+    const evidence = modHubMatchReleaseAssetEvidence(a, mod);
+    return {
+      name: a.name,
+      size: evidence?.size || a.size,
+      contentType: a.content_type,
+      downloadUrl: a.browser_download_url,
+      digest: evidence ? `sha256:${evidence.sha256}` : a.digest || '',
+      ...(evidence ? { bootName: evidence.bootName, version: evidence.version, versionSource: 'verified-boot' } : {}),
+      ...(modHubExtractorDeclaredAsset(a, mod, 'optionalResources') ? { optional: true, ...modHubExtractorDeclaredAsset(a, mod, 'optionalResources') } : {}),
+      ...(modHubExtractorDeclaredAsset(a, mod, 'packageEditions') ? { editionId: modHubExtractorDeclaredAsset(a, mod, 'packageEditions').id } : {}),
+    };
+  });
   if (parsed.assetName && !assets.length) throw new Error('指定的模组附件不存在');
-  const best = pickDownloadAsset(assets);
+  const mainAssets = assets.filter(asset => !asset.optional);
+  const best = pickDownloadAsset(mainAssets);
 
   const assetVersions = String(best?.name || '').match(/\d+(?:\.\d+)+/g) || [];
   const gameVersion = String(best?.name || '').match(/(?:^|[\s_.-])(?:for[\s._-]*)?dol[\s._-]*v?(0\.\d+\.\d+(?:\.\d+)?)(?=[\s_.-]|$)/i)?.[1]
     || (assetVersions.length > 1 ? assetVersions.find(version => /^0\.5\.\d+(?:\.\d+)?$/.test(version)) : '');
-  const assetVersion = String(best?.name || '').replace(gameVersion || '', '').match(/\d+(?:\.\d+)+/)?.[0];
+  const editionVersions = modHubNormalizePackageEditions(mod.packageEditions).length ? mainAssets.map(asset => {
+    const registered = modHubNormalizePackageEditions(mod.packageEditions).flatMap(item => item.verifiedAssets || [])
+      .find(record => record.sourceUrl === asset.downloadUrl);
+    return registered?.version || modHubNormalizeReleaseAssetVersion(asset.name, String(asset.name).match(/\d+(?:\.\d+)+/)?.[0]);
+  }) : [];
+  const assetVersion = best?.version || modHubNormalizeReleaseAssetVersion(best?.name, String(best?.name || '').replace(gameVersion || '', '').match(/\d+(?:\.\d+)+/)?.[0])
+    || (editionVersions.length && editionVersions.every(Boolean) && new Set(editionVersions).size === 1 ? editionVersions[0] : null);
   const releaseTitle = String(releaseData.name || '').trim();
   const explicitTitleVersion = releaseTitle.match(/^v?(\d+(?:\.\d+){1,3}(?:-[0-9a-z][0-9a-z.-]*)?)$/i)?.[1];
   const tagName = String(releaseData.tag_name || '');
@@ -697,6 +876,9 @@ export async function fetchModRelease(mod, options = {}) {
     version,
     updateDate,
     repoUrl: mod.githubUrl,
+    releaseProductScoped: mainAssets.some(asset => matchesAssetIdentity(asset, mod, true)
+      && (() => { const source = parseGithubReleaseTarget(asset.downloadUrl); return source && source.tag === releaseData.tag_name
+        && source.owner.toLowerCase() === parsed.owner.toLowerCase() && source.repo.toLowerCase() === parsed.repo.toLowerCase(); })()),
   };
 
   if (useCache) writeCache(cacheKey, release);

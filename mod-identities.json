@@ -349,6 +349,15 @@
         {
           "id": "maplebirch"
         }
+      ],
+      "optionalResources": [
+        {
+          "bootName": "deadwood-reblooms-audio",
+          "label": "音频扩展包",
+          "packageRole": "audio",
+          "assetSeries": "deadwood-reblooms-audio",
+          "evidenceUrl": "https://github.com/MaplebirchLeaf/Deadwood-Reblooms/releases"
+        }
       ]
     },
     {
@@ -374,7 +383,27 @@
         "剧情",
         "NPC"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "variant": {
+        "groupId": "smartphone",
+        "groupName": "万能的智能手机",
+        "type": "edition",
+        "id": "alpha",
+        "label": "原版"
+      },
+      "optionalResources": [
+        {
+          "bootName": "SmartPhone PhotoPack",
+          "label": "摄像图包",
+          "packageRole": "resource",
+          "assetSeries": "SmartPhone-PhotoPack-Alpha",
+          "sourceUrl": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/releases/download/v0.3.87/SmartPhone-PhotoPack-vAlpha.3.87.mod.zip",
+          "version": "Alpha.3.87",
+          "evidenceUrl": "https://dol.alseece.top/release/smartphone/",
+          "size": 20078985,
+          "sha256": "4844b53004a3ce799c7b1d217c97b6161c898f9003b6509d895dd1817328c0a4"
+        }
+      ]
     },
     {
       "id": "smartphone-omega",
@@ -398,6 +427,24 @@
       "category": "外观与资源",
       "tags": [
         "服装"
+      ],
+      "variant": {
+        "groupId": "smartphone",
+        "groupName": "万能的智能手机",
+        "type": "edition",
+        "id": "omega",
+        "label": "Omega 简化版"
+      },
+      "releaseTrackingSourceUrl": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/releases",
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/releases/download/v.omega.1.0/SmartPhone-vOmega.1.0.mod.zip",
+          "sha256": "56ee288154671dd7fd0694e443862cc2b34852acc2d0a5c36cb3cdcb902cf4a0",
+          "version": "Omega.1.0",
+          "bootName": "SmartPhone Omega",
+          "size": 124940,
+          "verifiedAt": "2026-10-14T06:46:54Z"
+        }
       ]
     },
     {
@@ -708,7 +755,19 @@
       "tags": [
         "头像",
         "NPC"
-      ]
+      ],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/Eudemonism00/DOL-NPC-Avatars-Mod/releases/download/1.4/NPC.Avatars.Mod.mod.zip",
+          "sha256": "f76a1eabeeed1107b3d2d6fb5b3a9f7a622735fa8824a4354ef0c6825a8d565f",
+          "size": 679620,
+          "bootName": "NPC Avatars Mod",
+          "version": "1.4.1",
+          "fileName": "NPC.Avatars.Mod.mod.zip",
+          "verifiedAt": "2026-10-14T07:39:54Z"
+        }
+      ],
+      "releaseTrackingSourceUrl": "https://github.com/Eudemonism00/DOL-NPC-Avatars-Mod/releases"
     },
     {
       "id": "woven-realm-cooking",
@@ -968,6 +1027,16 @@
         {
           "id": "simple-framework"
         }
+      ],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/LooopSpiner/Evil-Cockroach-Mod/releases/download/v1.0.1/cockroach.zip",
+          "sha256": "a90ab52c150fa2d808e3be9539a6af1d1eac0bde255b25b89e3e387cad1a2f30",
+          "bootName": "蟑螂啊啊啊",
+          "version": "1.0.1",
+          "size": 704260,
+          "verifiedAt": "2026-10-14T12:18:24.852Z"
+        }
       ]
     },
     {
@@ -1220,7 +1289,27 @@
       ],
       "category": "剧情与角色",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/emicoto/DOLMods/releases/download/fix/i.Candy.and.Robot.2.4.4.2.3.zip",
+          "sha256": "60b04b2d2b5cbe4bbd3e38b3811501a51875f547724bf9decbf1c6f2e47b7b45",
+          "size": 205407,
+          "bootName": "i, Candy + Robot",
+          "version": "2.4.4.2",
+          "fileName": "i.Candy.and.Robot.2.4.4.2.3.zip",
+          "verifiedAt": "2026-10-14T07:39:54Z"
+        },
+        {
+          "sourceUrl": "https://github.com/emicoto/DOLMods/releases/download/sf1.15/i.Candy.and.Robot.ver2.4.5.1.fix.zip",
+          "sha256": "43927a720bb2156e63d9b4408bc02dbd907f354a7281871ccb6d20f8f4a2bcc8",
+          "size": 216664,
+          "bootName": "i, Candy + Robot",
+          "version": "2.4.5",
+          "fileName": "i.Candy.and.Robot.ver2.4.5.1.fix.zip",
+          "verifiedAt": "2026-10-14T07:39:54Z"
+        }
+      ]
     },
     {
       "id": "fishing-life",
@@ -1425,7 +1514,17 @@
         "Tony70124/BetterCheatCommandManagement-for-DOL"
       ],
       "category": "界面与便利",
-      "tags": []
+      "tags": [],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/Tony70124/BetterCheatCommandManagement-for-DOL/releases/download/v2.1.4/BCCM_v2.1.4.zip",
+          "sha256": "d79fb858d72bb97702c766aff28905280fd0dd1214e5ffec7c549b56a498528a",
+          "bootName": "BetterCheatCommandManagement",
+          "version": "2.1.4",
+          "size": 19447,
+          "verifiedAt": "2026-10-14T12:18:21.985Z"
+        }
+      ]
     },
     {
       "id": "custom-hair",
@@ -1644,7 +1743,8 @@
       "id": "inuno-image-pack",
       "name": "inuno/犬野美化",
       "bootNames": [
-        "Inuno DoLP"
+        "Inuno DoLP",
+        "Inuno"
       ],
       "aliases": [],
       "repositories": [],
@@ -1652,7 +1752,45 @@
         "inuno-233/DOL-inuno-image-pack"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageEditions": [
+        {
+          "id": "original",
+          "label": "原版",
+          "bootName": "Inuno",
+          "assetSeries": "inuno",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/inuno-233/DOL-inuno-image-pack/releases/download/%E5%8E%9F%E7%89%88%E6%9C%8D%E8%A3%85/inuno.0.0.6.zip",
+              "sha256": "b0309b483db68ab4399608959d8634e2bf6443493e89f65aa30076e0fad54667",
+              "version": "0.0.6"
+            }
+          ]
+        },
+        {
+          "id": "dolp",
+          "label": "DoLP",
+          "bootName": "Inuno DoLP",
+          "assetSeries": "Inuno-DoLP",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/inuno-233/DOL-inuno-image-pack/releases/download/%E5%8E%9F%E7%89%88%E6%9C%8D%E8%A3%85/Inuno.0.0.6.DoLP.zip",
+              "sha256": "4e93903a8d52e49f07781ab1a7727d977080d5f346e0c54d65127705039695eb",
+              "version": "0.0.6"
+            }
+          ]
+        }
+      ],
+      "packageEditionWarning": "作者说明：支持至 DoL 0.5.6.10，0.5.7 可能兼容，0.5.8 及以后不支持。请核对当前游戏版本。",
+      "releaseCompatibility": [
+        {
+          "releaseTag": "原版服装",
+          "gameVersionRange": "<0.5.8",
+          "evidenceUrl": "https://github.com/inuno-233/DOL-inuno-image-pack/releases/tag/%E5%8E%9F%E7%89%88%E6%9C%8D%E8%A3%85"
+        }
+      ]
     },
     {
       "id": "little-pc",
@@ -1711,7 +1849,18 @@
       ],
       "category": "修复与兼容",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/chris81605/DOL-Compatibility-Mods/releases/download/Compatibility/Clothing.Trait.Compatibility.zip",
+          "sha256": "fada503c0fb2eb6dfc0bbcca2b83809dc4ddb22d3e90538be5e5ac1b4ddbf8e0",
+          "size": 1443,
+          "bootName": "服裝特質補全",
+          "version": "0.5beta",
+          "fileName": "Clothing.Trait.Compatibility.zip",
+          "verifiedAt": "2026-10-14T07:39:54Z"
+        }
+      ]
     },
     {
       "id": "head-mask-compatibility",
@@ -1728,7 +1877,18 @@
       ],
       "category": "修复与兼容",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/chris81605/DOL-Compatibility-Mods/releases/download/Compatibility/LegacyHeadMaskCompat.0.5.10.12%2B.zip",
+          "sha256": "55f9929996ea0c1dd5bca41fe1b9193e3898e552214aa4b3bd25586557125ebb",
+          "size": 2057,
+          "bootName": "Legacy Head Mask Compatibility",
+          "version": "0.5beta",
+          "fileName": "LegacyHeadMaskCompat.0.5.10.12+.zip",
+          "verifiedAt": "2026-10-14T07:39:54Z"
+        }
+      ]
     },
     {
       "id": "sydney-dialogue-events",
@@ -1847,7 +2007,30 @@
         "服装",
         "发型"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageEditions": [
+        {
+          "id": "female",
+          "label": "女体模型",
+          "bootName": "【AUfemale】model",
+          "assetSeries": "AUfemale.model",
+          "exclusive": false
+        },
+        {
+          "id": "male",
+          "label": "男体模型",
+          "bootName": "【AUmale】model",
+          "assetSeries": "AUmale.model",
+          "exclusive": false
+        },
+        {
+          "id": "androgynous",
+          "label": "中性模型",
+          "bootName": "【AUandrogynous】model",
+          "assetSeries": "AUandrogynous.model",
+          "exclusive": false
+        }
+      ]
     },
     {
       "id": "au-hair-optimization",
@@ -2176,7 +2359,9 @@
         "Eu原版服装拓展"
       ],
       "repositories": [],
-      "repositoryKeys": [],
+      "repositoryKeys": [
+        "Eudemonism00/DOL-Eu-ArtMods"
+      ],
       "category": "外观与资源",
       "tags": [
         "服装扩展"
@@ -2190,7 +2375,8 @@
           "size": 102621,
           "verifiedAt": "2026-10-04T06:03:18.544958+00:00"
         }
-      ]
+      ],
+      "releaseTrackingSourceUrl": "https://github.com/Eudemonism00/DOL-Eu-ArtMods/releases"
     },
     {
       "id": "layering-fixes",
@@ -2293,6 +2479,39 @@
           "size": 126498,
           "verifiedAt": "2026-10-04T17:58:11.884768+00:00"
         }
+      ],
+      "releaseTrackingSourceUrl": "https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases",
+      "packageEditions": [
+        {
+          "id": "visual",
+          "label": "图像版 Visual",
+          "bootName": "FertilityExpansion",
+          "assetSeries": "FertilityExpansion-Visual",
+          "exclusive": true,
+          "bootEdition": "visual",
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/download/v1.6.15/FertilityExpansion-v1.6.15-Visual.mod.zip",
+              "sha256": "50bd9adeb85a03ee69478869129bb7ca9c74a21854aa630954eced5346c5e090",
+              "version": "1.6.15"
+            }
+          ]
+        },
+        {
+          "id": "lite",
+          "label": "轻量版 Lite",
+          "bootName": "FertilityExpansion",
+          "assetSeries": "FertilityExpansion-Lite",
+          "exclusive": true,
+          "bootEdition": "lite",
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/releases/download/v1.6.15/FertilityExpansion-v1.6.15-Lite.mod.zip",
+              "sha256": "9443ab5fd924b36bf708105ed3f733c8c32d3f8ad421f8c642a823d007129ff9",
+              "version": "1.6.15"
+            }
+          ]
+        }
       ]
     },
     {
@@ -2316,6 +2535,112 @@
       "tags": [
         "存档",
         "便利"
+      ]
+    },
+    {
+      "id": "dolsoftwetgameui-dol-game-ui",
+      "name": "DoL Soft & Wet Game UI",
+      "bootNames": [
+        "DoLGameUI"
+      ],
+      "aliases": [],
+      "repositories": [
+        "DoL-Game-UI"
+      ],
+      "repositoryKeys": [
+        "102326/DoL-Game-UI"
+      ],
+      "category": "界面与便利",
+      "tags": [
+        "界面"
+      ],
+      "optionalResources": [
+        {
+          "bootName": "ModHubSoftWet",
+          "label": "ModHub 界面兼容包",
+          "assetSeries": "ModHubSoftWet-ModHub-plus",
+          "version": "0.2.4",
+          "packageRole": "resource",
+          "evidenceUrl": "https://github.com/102326/DoL-Game-UI/releases/tag/v2.6.0"
+        },
+        {
+          "bootName": "MapleBirchSoftWet",
+          "label": "秋枫白桦界面兼容包",
+          "assetSeries": "MapleBirchSoftWet-maplebirch-plus",
+          "version": "0.2.4",
+          "packageRole": "resource",
+          "evidenceUrl": "https://github.com/102326/DoL-Game-UI/releases/tag/v2.6.0"
+        },
+        {
+          "bootName": "DolOptimizationSoftWet",
+          "label": "原版优化界面兼容包",
+          "assetSeries": "DolOptimizationSoftWet-Optimization-plus",
+          "version": "0.1.6",
+          "packageRole": "resource",
+          "evidenceUrl": "https://github.com/102326/DoL-Game-UI/releases/tag/v2.6.0"
+        },
+        {
+          "bootName": "ReOverfitsSoftWet",
+          "label": "外套头套槽界面兼容包",
+          "assetSeries": "ReOverfitsSoftWet-ReOverfits-plus",
+          "version": "0.2.2",
+          "packageRole": "resource",
+          "evidenceUrl": "https://github.com/102326/DoL-Game-UI/releases/tag/v2.6.0"
+        }
+      ]
+    },
+    {
+      "id": "community-ba74fb20-ce11-450e-a1d6-8e27a16553c8",
+      "name": "边栏回溯+页面调整",
+      "bootNames": [
+        "边栏回溯+页面调整"
+      ],
+      "aliases": [],
+      "repositories": [],
+      "repositoryKeys": [
+        "mirrormirroronwall/stowedbarhistorycontrol"
+      ],
+      "category": "界面与便利",
+      "tags": [],
+      "packageEditions": [
+        {
+          "id": "full",
+          "label": "回溯和页面调整",
+          "bootName": "边栏回溯+页面调整",
+          "assetSeries": "stowedbarhistorycontrol",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/mirrormirroronwall/stowedbarhistorycontrol/releases/download/1.0.3/stowedbarhistorycontrol.zip",
+              "sha256": "a18083e5151f3a2ab365a03c2017a920a4bf66a9c7d04f34b60d2f5f564cf834",
+              "version": "1.0.3"
+            },
+            {
+              "sourceUrl": "https://github.com/mirrormirroronwall/stowedbarhistorycontrol/releases/download/1.0.2/stowedbarhistorycontrol.zip",
+              "sha256": "21034f09141e8f6382c6f456fbae63d3806188eaf0f3649a064c283e94a8723d",
+              "version": "1.0.2"
+            }
+          ]
+        },
+        {
+          "id": "only",
+          "label": "仅回溯",
+          "bootName": "边栏回溯+页面调整",
+          "assetSeries": "stowedbarhistorycontrol-only",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/mirrormirroronwall/stowedbarhistorycontrol/releases/download/1.0.3/stowedbarhistorycontrol-only.zip",
+              "sha256": "b6a3c7fbee2e00da610cd02b739db2a8742107315750fa48e61a9d0985ce8552",
+              "version": "1.0.3"
+            },
+            {
+              "sourceUrl": "https://github.com/mirrormirroronwall/stowedbarhistorycontrol/releases/download/1.0.2/stowedbarhistorycontrol-only.zip",
+              "sha256": "78e3b7c2725da03911e3265d503729fd596fd0097a0154876b8ed9cbee3dd0e2",
+              "version": "1.0.2"
+            }
+          ]
+        }
       ]
     }
   ]

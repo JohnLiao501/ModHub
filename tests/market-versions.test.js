@@ -36,6 +36,33 @@ const release = (version, assets, compatibility) => ({ tagName: `v${version}`, n
 const baseMod = { id: 'example', name: 'Example', bootNames: ['Example'], githubUrl: 'https://github.com/Owner/Example' };
 
 module.exports = async function() {
+    {
+        const { sb, versions } = loadVersions();
+        const warning = { code: 'RELEASE_ASSET_CHANGED', tagName: 'old', assetName: 'Old.zip',
+            sourceUrl: 'https://github.com/Owner/Example/releases/download/old/Old.zip', message: '历史附件摘要已变化' };
+        sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, id: baseMod.id, sourceUrl: baseMod.githubUrl,
+            page: 1, hasMore: false, communityRevision: sb.modHubMarket.getCommunityRevision(), fetchedAt: new Date().toISOString(), releases: [], sourceWarnings: [warning] }) });
+        assert.equal((await versions.fetchReleases(baseMod)).sourceWarnings[0].message, warning.message);
+        warning.sourceUrl = warning.sourceUrl.replace('/Owner/Example/', '/Other/Repo/');
+        await assert.rejects(versions.fetchReleases(baseMod, { useCache: false }), error => error.code === 'RELEASE_SOURCE_CHANGED',
+            '历史警告也必须对应当前产品来源，不能混入其他仓库的附件');
+    }
+    {
+        const { sb, versions } = loadVersions(), market = sb.modHubMarket;
+        const phone = { id: 'smartphone', name: '智能手机', bootNames: ['SmartPhone Alpha'], githubUrl: 'https://github.com/Owner/Example' };
+        const candidates = versions.buildCandidates(phone, [release('v0.3.89', [asset('SmartPhone.Alpha-v0.3.89.1.mod.zip')]),
+            release('v0.3.87', [asset('SmartPhone-vAlpha.3.87.mod.zip')])]);
+        assert.deepEqual(Array.from(candidates, candidate => candidate.version), ['0.3.89.1', '0.3.87']);
+        assert.equal(versions.getDefaultSelection(phone, candidates, { updateOnly: true, localVersion: 'Alpha.3.88' }).defaultKey,
+            candidates[0].candidateKey, '真实旧 Alpha 版号应继承并推荐 0.3.xx 新包');
+        assert.equal(market.compareVersions('0.3.89.1', 'Alpha.3.88', phone), 1);
+        assert.equal(market.isSameVersion('Alpha.3.88', '0.3.88', phone), true);
+        assert.equal(market.isSameVersion('Alpha.3.88', '0.3.88', { id: 'other' }), false, '不得替其他模组猜测 Alpha 版本映射');
+        const omega = { id: 'smartphone-omega' }, candidate = { candidateKey: 'omega', seriesKey: 'omega', version: 'Omega.1.0',
+            assetUrl: 'https://example.test/omega.zip', compatibility: { evidence: 'unknown' } };
+        assert.equal(versions.getDefaultSelection(omega, [candidate]).defaultKey, 'omega', '已确认 Omega 版号应支持首次默认选版');
+        assert.equal(market.isReleaseInstalled({ version: '0.3.88' }, { name: 'SmartPhone Alpha', version: 'Alpha.3.88' }), true);
+    }
     // 正常响应与 429 登记快照共用真实附件合同；核验时间不充当 GitHub 发布日期。
     {
         const identities = JSON.parse(fs.readFileSync(path.join(__dirname, '../mod-identities.json'), 'utf8')).mods;
@@ -480,6 +507,8 @@ module.exports = async function() {
         const [currentKey, storedHistory] = historyWrites.find(([key]) => key.startsWith('modhub_market_history_v1_'));
         const oldHistory = JSON.parse(storedHistory);
         const oldSignature = JSON.parse(oldHistory.signature);
+        assert.equal(oldSignature.pop(), 'source-warnings-v1', '变化的历史附件隔离规则须使旧缓存失效');
+        assert.equal(oldSignature.pop(), 'asset-version-v3', '真实包体版号规则须使旧缓存失效');
         assert.equal(oldSignature.pop(), 'asset-series-v2', '历史缓存签名须隔离旧附件身份筛选规则');
         oldHistory.signature = JSON.stringify(oldSignature);
         oldHistory.data.releases = [];
@@ -922,6 +951,81 @@ module.exports = async function() {
         await assert.rejects(versions.fetchReleases(pinned, { useCache: false }), error => error.code === 'RELEASE_SOURCE_CHANGED', '固定渠道不能跳到未经声明的同仓库标签');
     }
 
+    {
+        const { sb, versions } = loadVersions();
+        const editions = ['lite', 'visual'].map(id => ({ id, label: id === 'lite' ? '轻量版' : '图像版', bootName: 'Example',
+            assetSeries: `Example${id}`, bootEdition: id, exclusive: true }));
+        const mod = { ...baseMod, packageEditions: editions };
+        const candidates = versions.buildCandidates(mod, [release('2.0.0', [asset('Example-v2.0.0-lite.zip'), asset('Example-v2.0.0-visual.zip')])]);
+        assert.equal(candidates.length, 2);
+        assert.deepEqual(Array.from(candidates, candidate => candidate.packageEdition.id).sort(), ['lite', 'visual']);
+        assert.equal(versions.getDefaultSelection(mod, candidates).defaultKey, '', '初装无已识别包型时不能默认猜测');
+        const local = { name: 'Example', version: '1.0.0', bootJson: { name: 'Example', version: '1.0.0', edition: 'lite' } };
+        sb.modHubMarket.getLocalInstalledProfiles = () => [local];
+        const selected = versions.getDefaultSelection(mod, candidates, { updateOnly: true, localProfile: local });
+        assert.equal(candidates.find(candidate => candidate.candidateKey === selected.defaultKey).packageEdition.id, 'lite', '更新继承真实boot.edition，不按最高包体大小或数组位置换型');
+        const unknown = { ...local, bootJson: { name: 'Example', version: '1.0.0' } };
+        sb.modHubMarket.getLocalInstalledProfiles = () => [unknown];
+        assert.equal(versions.getDefaultSelection(mod, candidates, { updateOnly: true, localProfile: unknown }).defaultKey, '', '旧包无类型证据时必须明确选择');
+        assert.equal(versions.getDefaultSelection({ ...mod, _selectedPackageEdition: 'visual' }, candidates, { localProfile: unknown }).defaultKey,
+            candidates.find(candidate => candidate.packageEdition.id === 'visual').candidateKey, '明确选择类型后只在该类型内默认选版');
+    }
+    {
+        const { sb, versions } = loadVersions();
+        const mod = { ...baseMod, optionalResources: [{ bootName: 'PhotoPack', label: '摄像图包', packageRole: 'resource', assetSeries: 'PhotoPack',
+            sourceUrl: 'https://github.com/Owner/Example/releases/download/v0.5.0/PhotoPack-v0.5.0.zip', evidenceUrl: 'https://github.com/Owner/Example/releases/tag/v0.5.0',
+            version: '0.5.0', sha256: 'a'.repeat(64), size: 200 }] };
+        const [candidate] = versions.buildCandidates(mod, [release('1.0.0', [asset('Example-v1.0.0.zip')])]);
+        assert.equal(candidate.optionalAssets[0].version, '0.5.0', '跨发布资源保留独立版本，不能继承主包1.0.0');
+        assert.equal(candidate.optionalAssets[0].bootName, 'PhotoPack');
+        assert.equal(candidate.optionalAssets[0].digest, `sha256:${'a'.repeat(64)}`);
+        const local = { name: 'Example', version: '1.0.0' }, resource = { name: 'PhotoPack', version: '0.4.0' };
+        sb.modHubMarket.getLocalInstalledProfiles = () => [local, resource];
+        assert.equal(versions.getDefaultSelection(mod, [candidate], { updateOnly: true, localProfile: local }).defaultKey, candidate.candidateKey,
+            '主包同版但已安装附包有独立更新时应参与全部更新');
+        resource.version = '0.5.0';
+        assert.equal(versions.getDefaultSelection(mod, [candidate], { updateOnly: true, localProfile: local }).defaultKey, '', '全部组件同版时不制造更新动作');
+    }
+    {
+        const { versions } = loadVersions();
+        const mod = { ...baseMod, optionalResources: [{ bootName: 'ExamplePhotoPack', label: '摄像图包', packageRole: 'resource', assetSeries: 'ExamplePhotoPack' }] };
+        const [candidate] = versions.buildCandidates(mod, [release('1.0.0', [asset('Example-v1.0.0.zip'), asset('Example-photo-pack-v1.0.0.zip')])]);
+        assert.equal(candidate.assets.length, 1, '显式可选图包不能同时被通用伴随资源规则强制安装');
+        assert.equal(candidate.optionalAssets.length, 1);
+        assert.equal(candidate.optionalAssets[0].bootName, 'ExamplePhotoPack');
+    }
+    {
+        const { versions } = loadVersions();
+        const editions = ['lite', 'visual'].map(id => ({ id, label: id, bootName: 'Example', assetSeries: `Example${id}`, bootEdition: id, exclusive: true }));
+        const old = release('1.0.0', [asset('Example.mod.zip', { digest: `sha256:${'d'.repeat(64)}` })]);
+        const verified = { sourceUrl: old.assets[0].downloadUrl, sha256: 'd'.repeat(64), bootName: 'Example', version: '1.0.0', size: 100 };
+        const fixed = { ...baseMod, githubUrl: verified.sourceUrl, packageEditions: editions, verifiedReleaseAssets: [verified] };
+        assert.equal(versions.getLegacyVerifiedRelease(fixed).sourceUrl, verified.sourceUrl);
+        const [candidate] = versions.buildCandidates(fixed, [old]);
+        assert.equal(candidate.legacyPackage, true);
+        assert.equal(candidate.packageEdition, undefined, '已登记旧包不借用新包型声明');
+        assert.equal(candidate.assets[0].digest, `sha256:${verified.sha256}`);
+        assert.equal(versions.getDefaultSelection(fixed, [candidate]).defaultKey, candidate.candidateKey, '明确固定旧附件可进入正常版本确认');
+        const tracking = { ...fixed, githubUrl: baseMod.githubUrl };
+        assert.equal(versions.getLegacyVerifiedRelease(tracking), null, '持续跟踪来源不能因登记旧包而绕过新包型选择');
+        const latest = release('2.0.0', [asset('Example-v2.0.0-lite.zip'), asset('Example-v2.0.0-visual.zip')]);
+        const candidates = versions.buildCandidates(tracking, [old, latest]);
+        assert.equal(versions.getDefaultSelection(tracking, candidates, { updateOnly: true, localProfile: { name: 'Example', version: '1.0.0' } }).defaultKey, '', '持续来源的旧无类型安装不能默认猜Lite或Visual');
+        assert.equal(versions.buildCandidates({ ...tracking, _selectedPackageEdition: 'visual' }, [old, latest]).length, 1, '明确选择新包型后不将无类型旧包混入');
+        old.assets[0].digest = `sha256:${'e'.repeat(64)}`;
+        assert.equal(versions.buildCandidates(fixed, [old]).length, 0, '固定旧包摘要变化必须停止，不能以旧登记绕过真实包变化');
+    }
+    for (const kind of ['identity', 'edition']) {
+        const { versions } = loadVersions();
+        const sourceUrl = 'https://github.com/Owner/Example/releases/download/v1.0.0/Example-v1.0.0.zip';
+        const verified = { sourceUrl, sha256: 'b'.repeat(64), version: 'Omega.1.0' };
+        const mod = kind === 'identity' ? { ...baseMod, verifiedReleaseAssets: [{ ...verified, bootName: 'Example' }] }
+            : { ...baseMod, _selectedPackageEdition: 'omega', packageEditions: [{ id: 'omega', label: 'Omega', bootName: 'Example', assetSeries: 'Example', exclusive: true, verifiedAssets: [verified] }] };
+        const raw = release('1.0.0', [asset('Example-v1.0.0.zip', { digest: `sha256:${'b'.repeat(64)}` })]);
+        assert.equal(versions.buildCandidates(mod, [raw])[0].version, 'Omega.1.0', '精确已核验摘要的boot版号优先于附件数字版号');
+        raw.assets[0].digest = `sha256:${'c'.repeat(64)}`;
+        assert.equal(versions.buildCandidates(mod, [raw])[0].version, '1.0.0', '摘要不符不得借用另一包体的真实版号');
+    }
     {
         const { sb, versions } = loadVersions();
         const optimizationMod = { id: 'dol-optimization', name: '原版优化', githubUrl: 'https://github.com/Owner/Example',

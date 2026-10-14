@@ -1342,6 +1342,89 @@ window.modHubFormatReloadMessage = function(message) {
         .replace(/\n/g, '<br>');
 };
 
+async function modHubCommitImportedPackages(files, options, context) {
+    if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('原子安装选项无效');
+    const restore = window.modHubRestore, controller = window.modHubGetController();
+    if (typeof restore?.commitPackageChanges !== 'function' || typeof controller?.checkModZipFileIndexDB !== 'function') {
+        throw new Error('当前环境无法原子提交所选安装包与启禁配置，已停止安装');
+    }
+    const readNames = (value = []) => {
+        if (!Array.isArray(value) || value.some(name => typeof name !== 'string' || !name.trim() || name !== name.trim())
+            || new Set(value.map(name => name.toLowerCase())).size !== value.length) throw new Error('安装配置包含无效或重复技术名');
+        return [...value];
+    };
+    const lists = await window.modHubReadIndexDBModLists();
+    if (!lists.ok) throw lists.error || new Error('无法核验安装前启禁配置');
+    const enabled = readNames(lists.enabled), disabled = readNames(lists.disabled);
+    readNames([...enabled, ...disabled]);
+    const key = name => name.toLowerCase();
+    const preserveDisabled = readNames(options.preserveDisabledNames);
+    if (preserveDisabled.some(name => !disabled.some(item => key(item) === key(name)))) throw new Error('附加项的禁用状态已改变，请重新生成安装计划');
+    const switchGroup = options.switchGroup;
+    const guardedPackages = [];
+    let targetName = '', disabledNames = [];
+    if (switchGroup) {
+        [targetName] = readNames([switchGroup.targetName]);
+        disabledNames = readNames(switchGroup.disabledNames);
+        if (disabledNames.some(name => key(name) === key(targetName)) || preserveDisabled.some(name => key(name) === key(targetName))) {
+            throw new Error('分支切换不能同时启用和禁用所选主包');
+        }
+        if (!Array.isArray(switchGroup.snapshot)) throw new Error('分支切换缺少确认时的状态快照');
+        readNames(switchGroup.snapshot.map(item => item?.name));
+        for (const item of switchGroup.snapshot) {
+            const isEnabled = enabled.some(name => key(name) === key(item.name));
+            const exists = isEnabled || disabled.some(name => key(name) === key(item.name));
+            const installed = await window.modHubReadInstalledModPackage(item.name);
+            if (!exists || typeof item.enabled !== 'boolean' || item.enabled !== isEnabled || installed.error || installed.missing
+                || String(installed.bootJson?.version || '') !== item.version) throw new Error('分支安装状态已改变，请重新生成安装计划');
+            const data = installed.data;
+            guardedPackages.push({ name: item.name, expectedData: typeof data === 'string' ? data
+                : ArrayBuffer.isView(data) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength).slice() : data.slice(0) });
+        }
+        if (disabledNames.some(name => !switchGroup.snapshot.some(item => key(item.name) === key(name)))) throw new Error('待停用分支不在确认快照中');
+        const registeredTarget = [...enabled, ...disabled].find(name => key(name) === key(targetName));
+        if (registeredTarget && !switchGroup.snapshot.some(item => key(item.name) === key(targetName))) throw new Error('所选分支安装状态已改变，请重新生成安装计划');
+    }
+    const packages = [], boots = [];
+    for (const file of files) {
+        const data = new Uint8Array(await file.arrayBuffer());
+        const boot = await controller.checkModZipFileIndexDB(data);
+        const name = typeof boot?.name === 'string' ? boot.name.trim() : '';
+        if (!name || typeof boot !== 'object' || Array.isArray(boot)) throw new Error(`【${file.name || '所选文件'}】未提供有效模组清单，已停止安装`);
+        if (boots.some(item => key(item.name) === key(name))) throw new Error(`所选安装包重复提供【${name}】`);
+        const previous = await window.modHubReadInstalledModPackage(name);
+        if (previous.error) throw previous.error;
+        // 原生 IndexDBLoader.addMod 将新包保存为 Uint8Array，不经过自动启用接口。
+        packages.push({ name, data, ...(previous.missing ? {} : { expectedData: previous.data }) });
+        boots.push(boot);
+    }
+    if (targetName && !packages.some(item => key(item.name) === key(targetName))) {
+        const target = await window.modHubReadInstalledModPackage(targetName);
+        if (target.error || target.missing || ![...enabled, ...disabled].some(name => key(name) === key(targetName))) {
+            throw new Error('所选切换分支没有已核验的安装包');
+        }
+    }
+    const toDisable = new Set([...preserveDisabled, ...disabledNames].map(key));
+    const nextEnabled = window.modHubKeepRecoveryOrder(window.modHubUniqueModNames([
+        ...enabled.filter(name => !toDisable.has(key(name))),
+        ...packages.map(item => item.name).filter(name => !toDisable.has(key(name))),
+        ...(targetName ? [targetName] : [])
+    ]), boots.map(bootJson => ({ name: bootJson.name, bootJson })));
+    const enabledKeys = new Set(nextEnabled.map(key));
+    const nextDisabled = window.modHubUniqueModNames([...disabled, ...disabledNames, ...preserveDisabled])
+        .filter(name => !enabledKeys.has(key(name)));
+    try {
+        await restore.commitPackageChanges({ context, packages, guardedPackages, expectedEnabled: enabled, expectedDisabled: disabled,
+            enabled: nextEnabled, disabled: nextDisabled });
+    } catch (error) {
+        if (error.committed) window.modHubMarket?.invalidateLocalPackageProfiles?.();
+        throw error;
+    }
+    boots.forEach(bootJson => window._modHubDisabledModInfo.set(key(bootJson.name), { name: bootJson.name, bootJson }));
+    window.modHubMarket?.invalidateLocalPackageProfiles?.();
+    return window.modHubUniqueModNames([...packages.map(item => item.name), ...(targetName ? [targetName] : [])]);
+}
+
 window.modHubHandleAddMod = async function(fileInput, options = {}) {
     const gui = window.modHubGetGui();
     if (!gui) {
@@ -1351,12 +1434,14 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
     const files = Array.isArray(fileInput)
         ? fileInput
         : Array.from(fileInput?.files || (Array.isArray(fileInput?.files) ? fileInput.files : []));
-    if (!files || files.length === 0) return;
+    if ((!files || files.length === 0) && !options.atomicPackageChanges?.switchGroup) return;
 
     const fileCount = files.length;
     const isBatch = fileCount > 1;
 
-    window.modHubShowToast(isBatch ? `正在解析并批量导入 ${fileCount} 个模组文件...` : '正在解析并导入模组文件...', 'warning');
+    let atomicContext = options.restoreContext;
+    if (options.atomicPackageChanges) window._modHubLastInstallError = '';
+    window.modHubShowToast(!fileCount ? '正在应用模组配置...' : isBatch ? `正在解析并批量导入 ${fileCount} 个模组文件...` : '正在解析并导入模组文件...', 'warning');
     try {
         const imported = await window.modHubRunManagerAction(async () => {
             let installedNames = [];
@@ -1371,7 +1456,9 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             }
             // 市场前置状态在统一操作锁内再次核验，检查失败不能写入包体。
             if (typeof options.beforeImport === 'function') await options.beforeImport();
-            if (fileCount === 1 && !needsNativeCheck && typeof gui.loadAndAddMod === 'function') {
+            if (options.atomicPackageChanges) {
+                installedNames = await modHubCommitImportedPackages(files, options.atomicPackageChanges, atomicContext);
+            } else if (fileCount === 1 && !needsNativeCheck && typeof gui.loadAndAddMod === 'function') {
                 await gui.loadAndAddMod(fileInput);
                 window.modHubMarket?.invalidateLocalPackageProfiles?.();
                 const lists = await window.modHubReadIndexDBModLists();
@@ -1392,6 +1479,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             try {
                 state = await window.modHubLoadModManageState(true);
             } catch (error) {
+                if (options.atomicPackageChanges) throw Object.assign(new Error(`安装已经提交，但管理配置回读未完成：${error.message}`), { committed: true });
                 console.warn('[ModHub] 安装后刷新模组列表失败，可稍后手动刷新:', error);
             }
             try {
@@ -1405,7 +1493,10 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
                 afterEnabled: state?.sideEnabled || [],
                 afterDisabled: state?.sideDisabled || []
             };
-        }, '正在导入模组，请稍候...', { restoreContext: options.restoreContext, restoreLabel: isBatch ? '批量导入模组' : '导入模组' });
+        }, '正在导入模组，请稍候...', { restoreContext: options.restoreContext, restoreLabel: isBatch ? '批量导入模组' : '导入模组',
+            onRestoreContext: context => { atomicContext = context; },
+            onError: error => { if (options.atomicPackageChanges) window._modHubLastInstallError = error.message || String(error); }
+        });
         if (!imported) {
             // 记录可读原因供市场端展示，避免只抛出含糊的「安装未完成」
             window._modHubLastInstallError = window._modHubLastInstallError || window._modHubManagerStatus || '模组管理器正忙或配置状态待核实';
@@ -1802,7 +1893,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
         try {
             await window.modHubLoadModManageState(true);
             await window.modHubLoadBeautyState(false);
-            window._modHubManagerStateUncertain = false;
+            window._modHubManagerStateUncertain = error.committed === true;
             if (options.trackReload) modHubRecordReloadChange(beforeReload);
         } catch (_) {
             window._modHubModState = beforeMod;

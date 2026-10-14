@@ -113,13 +113,13 @@ module.exports = async function() {
      * 1. boot.json 配置契约
      * ========================================================================= */
     assert.equal(bootJson.name, 'ModHub', '模组名称必须为 ModHub');
-    assert.equal(bootJson.version, '1.5.1', 'boot.json 版本号必须为 1.5.1');
+    assert.equal(bootJson.version, '1.6.0', 'boot.json 版本号必须为 1.6.0');
 
     // 1.1 ModHub 必需文件完整注册且真实存在于磁盘
     assert.deepEqual(bootJson.scriptFileList, [
         'javascript/modhub-manager.js',
         'javascript/modhub-drag.js', 'javascript/modhub-beauty.js', 'javascript/modhub-readme.js',
-        'javascript/modhub-log.js', 'javascript/modhub-market-variants.js', 'javascript/modhub-wiki-title.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
+        'javascript/modhub-log.js', 'javascript/modhub-market-variants.js', 'javascript/modhub-wiki-title.js', 'javascript/modhub-search.js', 'javascript/modhub-market.js', 'javascript/modhub-market-spells.js',
         'javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js',
         'javascript/modhub-ai-package.js', 'javascript/modhub-ai-repair.js', 'javascript/modhub-remote-protocol.js', 'javascript/modhub-game-command.js', 'javascript/modhub-remote-assist.js', 'javascript/modhub-help.js',
     ], '业务阶段必须先加载公共管理接口，再加载拖拽、美化、说明、日志、市场与帮助');
@@ -551,6 +551,144 @@ module.exports = async function() {
         for (const suffix of ['.modpack', '.MODPACK.CRYPT']) {
             assert.equal(sb.modHubResolveImportedModName(`ExactMod${suffix}`, ['ExactMod', 'ExactModModPackCrypt']),
                 'ExactMod', '原生包后缀不得参与技术名匹配或误配到同前缀模组');
+        }
+    }
+
+    // 特殊市场安装在真实仓库中一起提交包体与启禁列表，普通导入不走此路径。
+    {
+        const { harness } = require('./restore.test');
+        const createAtomicImporter = async () => {
+            const h = harness({ confirm: () => true, checkPackage: data => {
+                const source = typeof data === 'string' ? Buffer.from(data, 'base64').toString() : Buffer.from(data).toString();
+                if (source.startsWith('{')) return JSON.parse(source);
+                const name = source.startsWith('ModHub') ? 'ModHub' : source.startsWith('前置') ? '前置' : source[0];
+                return { name, version: '1.0', ...(name === 'ModHub' ? { dependenceInfo: [{ modName: '前置', version: '*' }] } : {}) };
+            } });
+            await h.api.startupReady;
+            const sb = h.sandbox, controller = sb.modModLoadController;
+            let nativeImports = 0, invalidations = 0;
+            controller.addModIndexDB = async () => { nativeImports++; throw new Error('特殊安装不得进入自动启用导入'); };
+            controller.listModIndexDB = async () => JSON.parse(h.mod.data.get('enabled-custom'));
+            controller.loadHiddenModList = async () => JSON.parse(h.mod.data.get('disabled-custom'));
+            const utils = { ...sb.modUtils, getIdbKeyValRef: () => ({ get: async key => h.mod.data.get(key) }) };
+            sb.modUtils = utils;
+            loadScripts(sb, ['javascript/modhub-manager.js']);
+            sb.modHubGetGui = () => ({ gModUtils: utils, modModLoadController: controller,
+                listSideLoadModNameOnly: controller.listModIndexDB, listSideLoadHiddenModNameOnly: controller.loadHiddenModList });
+            sb.modHubRenderModManageUI = sb.modHubUpdateManagerStatus = sb.modHubUpdateGeneralInfo = () => {};
+            sb.modHubLoadBeautyState = async () => {};
+            sb.modHubReadLocalReadme = async () => '';
+            sb.modHubShowToast = () => {};
+            sb.modHubMarket = { invalidateLocalPackageProfiles: () => { invalidations++; } };
+            sb.modHubLoadModManageState = async () => {
+                const enabled = await controller.listModIndexDB(), disabled = await controller.loadHiddenModList();
+                return sb._modHubModState = { sideEnabled: enabled, sideDisabled: disabled,
+                    sideMods: [...enabled.map(name => ({ name, enabled: true })), ...disabled.map(name => ({ name, enabled: false }))], builtInMods: [] };
+            };
+            await sb.modHubLoadModManageState();
+            sb._modHubDisabledModInfo.set('modhub', { bootJson: { name: 'ModHub', dependenceInfo: [{ modName: '前置', version: '*' }] } });
+            return { ...h, sb, nativeImports: () => nativeImports, invalidations: () => invalidations };
+        };
+        const file = (name, version = '2.0', fields = {}) => ({ name: `${name}.modpack`, arrayBuffer: async () =>
+            new Uint8Array(Buffer.from(JSON.stringify({ name, version, ...fields }))).buffer });
+        const switchOptions = { preserveDisabledNames: ['B'], switchGroup: { targetName: 'C', disabledNames: ['A'],
+            snapshot: [{ name: 'A', enabled: true, version: '1.0' }] } };
+        {
+            const f = await createAtomicImporter();
+            f.mod.data.set('package-custom:B', Buffer.from('B 旧包').toString('base64'));
+            assert.equal(await f.sb.modHubHandleAddMod([file('C'), file('B')], {
+                askRestart: false, keepCurrentTab: true, atomicPackageChanges: switchOptions }), true);
+            assert.equal(f.nativeImports(), 0);
+            assert.equal(f.invalidations(), 1);
+            assert.equal(f.mod.data.get('enabled-custom'), '["前置","ModHub","C"]');
+            assert.equal(f.mod.data.get('disabled-custom'), '["B","A"]', '切换旧分支的同时保持已禁用附加项禁用');
+            assert.equal(f.mod.data.get('package-custom:B').constructor.name, 'Uint8Array', '更新旧 base64 包时使用当前原生二进制编码');
+            assert.equal(f.sb._modHubDisabledModInfo.get('b').bootJson.version, '2.0');
+            assert.deepEqual([...f.mod.data.get('package-custom:A')], [...Buffer.from('A 旧包')]);
+            assert.deepEqual(f.mod.data.get('unrelated-game-save'), { keep: true });
+        }
+        {
+            const f = await createAtomicImporter();
+            assert.equal(await f.sb.modHubHandleAddMod([], { askRestart: false, keepCurrentTab: true,
+                atomicPackageChanges: { preserveDisabledNames: [], switchGroup: { targetName: 'B', disabledNames: ['A'], snapshot: [
+                    { name: 'A', enabled: true, version: '1.0' }, { name: 'B', enabled: false, version: '1.0' }
+                ] } } }), true, '同版已安装目标允许没有新文件的原子切换');
+            assert.equal(f.mod.data.get('enabled-custom'), '["前置","ModHub","B"]');
+            assert.equal(f.mod.data.get('disabled-custom'), '["A"]');
+            assert.deepEqual([...f.mod.data.get('package-custom:B')], [...Buffer.from('B 旧包')]);
+            assert.equal(f.nativeImports(), 0);
+        }
+        for (const mutation of ['targetDeleted', 'targetChanged', 'oldBranchChanged']) {
+            const f = await createAtomicImporter();
+            const commit = f.api.commitPackageChanges;
+            let listWrites = 0;
+            f.mod.failPut = key => { if (['enabled-custom', 'disabled-custom'].includes(key)) listWrites++; return null; };
+            f.api.commitPackageChanges = async changes => {
+                assert.equal(changes.packages.length, 0);
+                assert.deepEqual(Array.from(changes.guardedPackages, item => item.name).sort(), ['A', 'B'], '确认快照中的目标和旧分支必须一并守卫');
+                if (mutation === 'targetDeleted') f.mod.data.delete('package-custom:B');
+                if (mutation === 'targetChanged') f.mod.data.get('package-custom:B')[0] ^= 1;
+                if (mutation === 'oldBranchChanged') f.mod.data.set('package-custom:A', new Uint8Array(Buffer.from('A 外部更改')));
+                return commit(changes);
+            };
+            assert.equal(await f.sb.modHubHandleAddMod([], { askRestart: false, keepCurrentTab: true,
+                atomicPackageChanges: { preserveDisabledNames: [], switchGroup: { targetName: 'B', disabledNames: ['A'], snapshot: [
+                    { name: 'A', enabled: true, version: '1.0' }, { name: 'B', enabled: false, version: '1.0' }
+                ] } } }), false, '读取快照后发生的包体删改不能声称切换成功');
+            assert.equal(listWrites, 0, '包体守卫失配时两份启禁列表都不能写入');
+            assert.equal(f.mod.data.get('enabled-custom'), '["前置","ModHub","A"]');
+            assert.equal(f.mod.data.get('disabled-custom'), '["B"]');
+            if (mutation === 'targetDeleted') assert.equal(f.mod.data.has('package-custom:B'), false);
+            if (mutation === 'targetChanged') assert.notEqual(f.mod.data.get('package-custom:B')[0], Buffer.from('B 旧包')[0], '不能重新put旧快照覆盖外部更改');
+            assert.match(f.sb._modHubLastInstallError, /保留模组.*包体已被其他操作更改/);
+            assert.equal(f.nativeImports(), 0);
+            assert.equal(f.invalidations(), 0);
+        }
+        {
+            const f = await createAtomicImporter();
+            assert.equal(await f.sb.modHubHandleAddMod([file('A', '1.0', { edition: 'visual' })], {
+                askRestart: false, keepCurrentTab: true, atomicPackageChanges: {} }), true, '同技术名完整包型替换也走原子包体提交');
+            assert.equal(JSON.parse(Buffer.from(f.mod.data.get('package-custom:A')).toString()).edition, 'visual');
+            assert.equal(f.mod.data.get('enabled-custom'), '["前置","ModHub","A"]');
+            assert.equal(f.mod.data.get('disabled-custom'), '["B"]');
+            assert.equal(f.nativeImports(), 0);
+            const writes = f.mod.writes;
+            assert.equal(await f.sb.modHubHandleAddMod([], { askRestart: false }), undefined, '普通空导入仍然没有操作');
+            assert.equal(f.mod.writes, writes);
+        }
+        for (const failure of ['write', 'snapshot', 'required', 'duplicate']) {
+            const f = await createAtomicImporter();
+            const options = { askRestart: false, keepCurrentTab: true, atomicPackageChanges: switchOptions };
+            if (failure === 'write') f.mod.failPut = key => key === 'disabled-custom' ? new Error('模拟原子安装事务失败') : null;
+            if (failure === 'snapshot') options.atomicPackageChanges = { ...switchOptions, switchGroup: {
+                ...switchOptions.switchGroup, snapshot: [{ name: 'A', enabled: false, version: '1.0' }] } };
+            if (failure === 'required') options.beforeImport = async () => { throw new Error('必需前置已经禁用'); };
+            assert.equal(await f.sb.modHubHandleAddMod(failure === 'duplicate' ? [file('C'), file('C')] : [file('C'), file('B')], options), false);
+            assert.equal(f.mod.data.get('enabled-custom'), '["前置","ModHub","A"]');
+            assert.equal(f.mod.data.get('disabled-custom'), '["B"]');
+            assert.equal(f.mod.data.has('package-custom:C'), false, '失败不会留下部分安装的新分支');
+            assert.deepEqual([...f.mod.data.get('package-custom:B')], [...Buffer.from('B 旧包')]);
+            assert.equal(f.nativeImports(), 0);
+            assert.equal(f.invalidations(), 0);
+            assert.ok(f.sb._modHubLastInstallError, '保留具体失败原因供市场显示');
+        }
+        {
+            const f = await createAtomicImporter();
+            const commit = f.api.commitPackageChanges;
+            f.api.commitPackageChanges = async changes => {
+                const useStore = f.loader.customStore;
+                let committed = false;
+                f.loader.customStore = (mode, callback) => mode === 'readonly' && committed ? Promise.reject(new Error('模拟原子提交后回读失败'))
+                    : useStore(mode, callback).then(value => { if (mode === 'readwrite') committed = true; return value; });
+                try { return await commit(changes); } finally { f.loader.customStore = useStore; }
+            };
+            assert.equal(await f.sb.modHubHandleAddMod([file('C'), file('B')], {
+                askRestart: false, keepCurrentTab: true, atomicPackageChanges: switchOptions }), false);
+            assert.equal(f.mod.data.get('enabled-custom'), '["前置","ModHub","C"]', '已提交但回读失败不伪造已回滚');
+            assert.equal(f.mod.data.get('disabled-custom'), '["B","A"]');
+            assert.equal(f.sb._modHubManagerStateUncertain, true);
+            assert.match(f.sb._modHubLastInstallError, /安装已经提交.*回读核验未完成.*模拟原子提交后回读失败/);
+            assert.equal(f.invalidations(), 1, '已提交但核验失败仍清除旧包体档案缓存');
         }
     }
 

@@ -681,6 +681,100 @@
         return left.length === right.length && left.every((byte, index) => byte === right[index]);
     }
 
+    /** 限定安装只增改本次包体，并与两份启禁列表在真实仓库中一起提交。 */
+    async function commitPackageChanges({ context, packages, guardedPackages = [], expectedEnabled, expectedDisabled, enabled, disabled } = {}) {
+        if (!contexts.has(context) || owner !== context || !context.prepared || context.finished || context.cancelled || restoring) {
+            throw busy('安装保护及操作锁尚未就绪，已停止写入');
+        }
+        const names = value => {
+            if (!validNames(value) || value.some(name => name !== name.trim())
+                || new Set(value.map(name => name.toLowerCase())).size !== value.length) fail('安装启禁列表包含无效或重复技术名');
+            return [...value];
+        };
+        const beforeEnabled = names(expectedEnabled), beforeDisabled = names(expectedDisabled);
+        const nextEnabled = names(enabled), nextDisabled = names(disabled);
+        const beforeNames = names([...beforeEnabled, ...beforeDisabled]);
+        const nextNames = names([...nextEnabled, ...nextDisabled]);
+        const nameKeys = new Set(nextNames.map(name => name.toLowerCase()));
+        if (beforeNames.some(name => !nextNames.includes(name))) fail('限定安装不能移除或更名已登记的模组');
+        if (!Array.isArray(packages)) fail('安装包变更清单无效');
+        names(packages.map(item => item?.name));
+        if (!Array.isArray(guardedPackages)) fail('保留包体核验清单无效');
+        names(guardedPackages.map(item => item?.name));
+        const copyPackage = value => {
+            if (value === undefined) return undefined;
+            equalPackage(value, value);
+            if (typeof value === 'string') return value;
+            if (ArrayBuffer.isView(value)) return new value.constructor(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength));
+            return value.slice(0);
+        };
+        const changes = packages.map(item => ({ name: item.name, data: copyPackage(item.data), expectedData: copyPackage(item.expectedData) }));
+        const guards = guardedPackages.map(item => ({ name: item.name, expectedData: copyPackage(item.expectedData) }));
+        for (const item of guards) {
+            if (item.expectedData === undefined || !(await bytes(item.expectedData)).byteLength || !beforeNames.includes(item.name)) fail('保留包体缺少已登记的有效快照');
+        }
+        for (const item of changes) {
+            if (!item.data || !(await bytes(item.data)).byteLength || !nextNames.includes(item.name)) fail('安装包为空或未登记到目标启禁列表');
+        }
+        const previousKeys = new Set(beforeNames.map(name => name.toLowerCase()));
+        const changedKeys = new Set(changes.map(item => item.name.toLowerCase()));
+        if (nextNames.some(name => !previousKeys.has(name.toLowerCase()) && !changedKeys.has(name.toLowerCase()))) fail('目标列表包含未提供安装包的新模组');
+        if (!same(recoveryOrder(nextEnabled), nextEnabled)) fail('目标列表不符合恢复工具及必要前置的加载顺序');
+        const env = environment();
+        const packageKeys = changes.map(item => env.loader.constructor.calcModNameKey(item.name));
+        const guardKeys = guards.map(item => env.loader.constructor.calcModNameKey(item.name));
+        const checkedNames = [...new Set([...changes, ...guards].map(item => item.name))];
+        const checkedKeys = checkedNames.map(name => env.loader.constructor.calcModNameKey(name));
+        if (checkedKeys.some(key => typeof key !== 'string' || !key.startsWith(env.prefix))
+            || new Set([env.enabledKey, env.disabledKey, ...checkedKeys]).size !== checkedKeys.length + 2) fail('安装包存储键冲突，已停止写入');
+        const transact = write => transaction(env, write ? 'readwrite' : 'readonly', (store, done) => {
+            const rows = new Map();
+            const keys = [env.enabledKey, env.disabledKey, ...checkedKeys];
+            for (const key of keys) {
+                const request = store.get(key);
+                request.onsuccess = () => {
+                    try {
+                        rows.set(key, request.result);
+                        if (rows.size !== keys.length) return;
+                        if (!same(parseNames(rows.get(env.enabledKey)), write ? beforeEnabled : nextEnabled)
+                            || !same(parseNames(rows.get(env.disabledKey)), write ? beforeDisabled : nextDisabled)) {
+                            fail(write ? '安装前启禁配置已被其他操作更改，已停止覆盖' : '安装提交后的启禁配置回读不一致');
+                        }
+                        changes.forEach((item, index) => {
+                            const actual = rows.get(packageKeys[index]), expected = write ? item.expectedData : item.data;
+                            if (expected === undefined ? actual !== undefined : actual === undefined || !equalPackage(actual, expected)) {
+                                fail(write ? `模组【${item.name}】包体已被其他操作更改，已停止覆盖` : `模组【${item.name}】安装包提交后回读不一致`);
+                            }
+                        });
+                        guards.forEach((item, index) => {
+                            if (!write && changedKeys.has(item.name.toLowerCase())) return;
+                            const actual = rows.get(guardKeys[index]);
+                            if (actual === undefined || !equalPackage(actual, item.expectedData)) {
+                                fail(write ? `保留模组【${item.name}】包体已被其他操作更改，已停止切换` : `保留模组【${item.name}】提交后包体回读不一致`);
+                            }
+                        });
+                        if (write) {
+                            if (owner !== context || context.finished || context.cancelled || restoring) throw busy('安装已取消或操作锁已改变，未写入数据');
+                            changes.forEach((item, index) => store.put(item.data, packageKeys[index]));
+                            store.put(JSON.stringify(nextEnabled), env.enabledKey);
+                            store.put(JSON.stringify(nextDisabled), env.disabledKey);
+                        }
+                        done(true);
+                    } catch (error) { done.fail(error); }
+                };
+            }
+        });
+        await transact(true);
+        try { await transact(false); }
+        catch (cause) {
+            const error = new Error(`安装已经提交，但回读核验未完成：${cause.message}。请刷新列表核实配置；需要撤销时使用操作前还原点。`);
+            error.code = 'PACKAGE_COMMIT_VERIFY_FAILED';
+            error.committed = true;
+            throw error;
+        }
+        return { committed: true };
+    }
+
     function guardedValues(env, expected, values, deletes = []) {
         return transaction(env, 'readwrite', (store, done) => {
             const packageKeys = new Set([...expected.keys()].filter(key => typeof key === 'string' && key.startsWith(env.prefix)));
@@ -1213,7 +1307,7 @@
         return !successNotice;
     }
 
-    window.modHubRestore = { createOperation, prepare, finish, withOperation, claim, release, isOperationBlocked, list, showHistory, restore, keepRecoveryOrder: recoveryOrder, isRestoring: () => restoring, getStartupLogs: () => [...startupLogs] };
+    window.modHubRestore = { createOperation, prepare, finish, withOperation, claim, release, isOperationBlocked, list, showHistory, restore, commitPackageChanges, keepRecoveryOrder: recoveryOrder, isRestoring: () => restoring, getStartupLogs: () => [...startupLogs] };
     Object.assign(window.modHubRestore, { getPanelState, saveConfig, createPoint, deletePoints, setPointProtection, preview, getRecoveryInfo, mountDialog,
         getStorageIdentity: () => { const { dbName, storeName } = environment(); return { dbName, storeName }; } });
     window.modHubKeepRecoveryOrder = window.modHubKeepRecoveryOrder || recoveryOrder;

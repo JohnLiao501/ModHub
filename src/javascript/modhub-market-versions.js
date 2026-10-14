@@ -413,7 +413,8 @@
             mod.autoInstallScope || '', mod.revision, communityRevision, mod.identityId, mod.name,
             mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
             mod.bootNames || [], mod.aliases || [], mod.sharedRepository, mod.requiredDependencies || [], mod.variant || null, mod.verifiedReleaseAssets || [],
-            page, 'modpack-v1', 'asset-series-v2'];
+            mod.packageEditions || [], mod.optionalResources || [], mod._selectedPackageEdition || '',
+            page, 'modpack-v1', 'asset-series-v2', 'asset-version-v3', 'source-warnings-v1'];
         // 登记证据、语言或强制前置变化时废弃旧候选缓存。
         if (mod.verifiedReleaseAsset) signatureFields.push(mod.verifiedReleaseAsset);
         const signature = JSON.stringify(signatureFields);
@@ -434,10 +435,16 @@
         if (mod.autoInstall === false || mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) rejectUnsafe(historyError('该模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE'));
         let cached = null;
         try { cached = JSON.parse(localStorage.getItem(cacheKey) || 'null'); } catch (_) {}
+        const validWarning = warning => {
+            const target = getReleaseSource(warning?.sourceUrl);
+            return warning?.code === 'RELEASE_ASSET_CHANGED' && typeof warning.message === 'string' && warning.message.length > 0
+                && target?.key === source.key && target.tag === warning.tagName && target.assetName === warning.assetName;
+        };
         const validResponse = data => data?.schemaVersion === 1 && data.id === mod.id
             && normalizeSource(data.sourceUrl) === sourceUrl && data.page === page && typeof data.hasMore === 'boolean'
             && Number.isFinite(Date.parse(data.fetchedAt)) && (data.stale === undefined || typeof data.stale === 'boolean')
             && (!Number.isSafeInteger(communityRevision) || data.communityRevision === communityRevision)
+            && (data.sourceWarnings === undefined || Array.isArray(data.sourceWarnings) && data.sourceWarnings.every(validWarning))
             && Array.isArray(data.releases) && data.releases.every(release => validHistoricalRelease(release, mod, source));
         if (cached?.signature !== signature || !Number.isFinite(cached?.timestamp) || !validResponse(cached?.data)) cached = null;
         if (verifyEmptyHistory && !cached?.data.releases.length) cached = null;
@@ -550,6 +557,31 @@
         return verified.version;
     }
 
+    function registeredAssetBootVersion(mod, asset, edition) {
+        const records = [...(Array.isArray(mod?.verifiedReleaseAssets) ? mod.verifiedReleaseAssets : []),
+            ...(Array.isArray(edition?.verifiedAssets) ? edition.verifiedAssets : [])];
+        const matched = records.filter(record => typeof record?.version === 'string' && record.version.trim()
+            && /^[a-f0-9]{64}$/i.test(record.sha256 || '')
+            && normalizeSource(record.sourceUrl) === normalizeSource(asset.downloadUrl)
+            && String(asset.digest || '').toLowerCase() === `sha256:${record.sha256.toLowerCase()}`
+            && (!record.bootName || (edition ? record.bootName === edition.bootName : (mod.bootNames || []).includes(record.bootName)))
+            && (record.size === undefined || record.size === asset.size));
+        const versions = [...new Set(matched.map(record => record.version.trim()))];
+        return versions.length === 1 ? versions[0] : '';
+    }
+
+    function getLegacyVerifiedRelease(mod) {
+        const editions = window.modHubMarketVariants?.normalizePackageEditions?.(mod?.packageEditions) || [];
+        const source = getReleaseSource(normalizeSource(mod?.githubUrl));
+        if (!editions.length || mod._selectedPackageEdition || !source?.assetName) return null;
+        if (editions.some(edition => window.modHubMarket.getAssetSeries(edition.assetSeries) === window.modHubMarket.getAssetSeries(source.assetName)
+            || edition.verifiedAssets?.some(record => normalizeSource(record.sourceUrl) === normalizeSource(mod.githubUrl)))) return null;
+        const records = [mod.verifiedReleaseAsset, ...(Array.isArray(mod.verifiedReleaseAssets) ? mod.verifiedReleaseAssets : [])].filter(Boolean);
+        return records.find(record => normalizeSource(record.sourceUrl) === normalizeSource(mod.githubUrl)
+            && typeof record.sha256 === 'string' && /^[a-f0-9]{64}$/i.test(record.sha256) && typeof record.version === 'string' && record.version.trim()
+            && (mod.bootNames || []).includes(record.bootName) && Number.isSafeInteger(record.size) && record.size > 0) || null;
+    }
+
     /** 多产品发布的标题版号必须直接跟随本品名称，不能借用标题别处的其他产品版号。 */
     function ownedReleaseTitleVersion(title, mod) {
         const text = String(title || '').normalize('NFKC');
@@ -597,6 +629,49 @@
         return { dependencies };
     }
 
+    function assetPackageEditions(mod, name, sourceUrl) {
+        const editions = window.modHubMarketVariants?.normalizePackageEditions?.(mod?.packageEditions) || [];
+        const exact = editions.filter(edition => (edition.verifiedAssets || []).some(record => normalizeSource(record.sourceUrl) === normalizeSource(sourceUrl)));
+        return exact.length ? exact : editions.filter(edition => window.modHubMarket.getAssetSeries(edition.assetSeries) === window.modHubMarket.getAssetSeries(name));
+    }
+
+    function candidateRejectedVersions(mod, candidate, warnings) {
+        const market = window.modHubMarket;
+        return warnings.filter(warning => market.getAssetRole(warning.assetName) !== 'resource'
+            && !(mod.optionalResources || []).some(resource => resource.sourceUrl === warning.sourceUrl
+                || market.getAssetSeries(resource.assetSeries) === market.getAssetSeries(warning.assetName)))
+            .filter(warning => {
+                const editions = assetPackageEditions(mod, warning.assetName, warning.sourceUrl);
+                return !editions.length || !candidate.packageEdition || editions.some(edition => edition.id === candidate.packageEdition.id);
+            }).map(warning => warning.version);
+    }
+
+    /** 拒绝信息只约束对应附件；它不能悄悄将最新选择降为旧包。 */
+    function getHistorySelectionWarnings(mod, history) {
+        const source = getReleaseSource(normalizeSource(mod?.githubUrl));
+        const warnings = [...(history?.sourceWarnings || [])];
+        const records = [...(mod?.verifiedReleaseAssets || []), ...(mod?.verifiedReleaseAsset ? [mod.verifiedReleaseAsset] : []),
+            ...((mod?.packageEditions || []).flatMap(edition => edition.verifiedAssets || []))];
+        for (const release of Array.isArray(history) ? history : history?.releases || []) for (const asset of release.assets || []) {
+            const record = records.find(record => normalizeSource(record.sourceUrl) === normalizeSource(asset.downloadUrl));
+            const invalid = asset.versionSource === 'verified-boot' && !verifiedCandidateBootVersion(mod, asset)
+                && !registeredAssetBootVersion(mod, asset)
+                && !assetPackageEditions(mod, asset.name, asset.downloadUrl).some(edition => registeredAssetBootVersion(mod, asset, edition));
+            if (invalid) warnings.push({ code: 'RELEASE_ASSET_CHANGED', sourceUrl: asset.downloadUrl, assetName: asset.name,
+                tagName: release.tagName, version: record?.version || asset.version || release.version || '', message: '该历史附件与登记的包体证据不一致，已排除；请核对作者发布。' });
+        }
+        return [...new Map(warnings.filter(warning => warning.code === 'RELEASE_ASSET_CHANGED'
+            && source && getReleaseSource(normalizeSource(warning.sourceUrl))?.key === source.key
+            && (!(mod.sharedRepository || mod.releaseTrackingSourceUrl || window.modHubMarketVariants?.normalizeVariant?.(mod.variant))
+                || records.some(record => normalizeSource(record.sourceUrl) === normalizeSource(warning.sourceUrl))
+                || window.modHubMarket.matchesAssetIdentity({ name: warning.assetName }, mod))).map(warning => {
+                const record = records.find(record => normalizeSource(record.sourceUrl) === normalizeSource(warning.sourceUrl));
+                const version = warning.version || record?.version || window.modHubMarket.getAssetVersionParts(warning.assetName).join('.')
+                    || String(warning.tagName).match(/^v?(\d+(?:\.\d+)*)(?:[-+].*)?$/i)?.[1] || '';
+                return [warning.sourceUrl, { ...warning, version }];
+            })).values()];
+    }
+
     function buildCandidates(mod, history) {
         const market = window.modHubMarket;
         const source = getReleaseSource(normalizeSource(mod?.githubUrl));
@@ -606,12 +681,19 @@
         const gameVersion = getGameVersion();
         const candidates = [];
         const seen = new Set();
+        const legacy = getLegacyVerifiedRelease(mod);
+        const selectionWarnings = getHistorySelectionWarnings(mod, history);
+        const rejectedUrls = new Set(selectionWarnings.map(warning => normalizeSource(warning.sourceUrl)));
         for (const release of releases) {
             if (release?.draft || release?.prerelease || !validHistoricalRelease(release, mod, source)) continue;
-            const assets = release.assets || [];
-            const plan = market.buildReleaseAssetPlan(assets, '', mod, { preserveVersions: true });
+            const assets = legacy ? (release.assets || []).flatMap(asset => {
+                if (normalizeSource(asset.downloadUrl) !== normalizeSource(legacy.sourceUrl)
+                    || asset.digest && String(asset.digest).toLowerCase() !== `sha256:${legacy.sha256.toLowerCase()}` || asset.size !== legacy.size) return [];
+                return [{ ...asset, digest: `sha256:${legacy.sha256.toLowerCase()}`, bootName: legacy.bootName, version: legacy.version }];
+            }) : release.assets || [];
+            const plan = market.buildReleaseAssetPlan(assets, '', legacy ? { ...mod, packageEditions: [] } : mod, { preserveVersions: true });
             const availableAssets = plan.availableAssets || assets;
-            const optionalUrls = new Set(availableAssets.flatMap(asset => market.getMatchingOptionalAssets(asset, availableAssets))
+            const optionalUrls = new Set(availableAssets.flatMap(asset => market.getMatchingOptionalAssets(asset, availableAssets, mod))
                 .map(asset => asset.downloadUrl));
             const mainAssets = availableAssets.filter(asset => market.getAssetRole(asset.name) !== 'resource'
                 && !optionalUrls.has(asset.downloadUrl));
@@ -620,7 +702,12 @@
                 && mainAssets.some(asset => !market.matchesAssetIdentity(asset, mod)));
             const ownedTitleVersion = ownedReleaseTitleVersion(release.name, mod);
             for (const asset of plan.candidates || []) {
-                const verifiedVersion = verifiedCandidateBootVersion(mod, asset);
+                if (rejectedUrls.has(normalizeSource(asset.downloadUrl))) continue;
+                const editions = window.modHubMarketVariants?.normalizePackageEditions?.(mod.packageEditions) || [];
+                const packageEdition = editions.find(edition => market.getAssetSeries(edition.assetSeries) === market.getAssetSeries(asset.name));
+                const rejectedVersions = candidateRejectedVersions(mod, { packageEdition }, selectionWarnings);
+                if (mod._selectedPackageEdition && packageEdition?.id !== mod._selectedPackageEdition) continue;
+                const verifiedVersion = legacy?.version || verifiedCandidateBootVersion(mod, asset) || registeredAssetBootVersion(mod, asset, packageEdition);
                 if (asset.versionSource === 'verified-boot' && !verifiedVersion) continue;
                 const tagName = release.tagName || '';
                 const candidateKey = JSON.stringify([market.getMarketModKey(mod), tagName, asset.downloadUrl]);
@@ -635,22 +722,40 @@
                     || (mixedProducts ? ownedTitleVersion
                         : (release.versionSource !== 'verified-boot' ? release.version : '')
                             || ownedTitleVersion || titleVersion || tagVersion);
-                const selectedAssets = [{ ...asset, packageRole: market.getAssetRole?.(asset.name) || 'main' },
-                    ...market.getMatchingCompanionAssets(asset, plan.availableAssets || assets).map(companion => ({ ...companion, packageRole: 'resource' }))];
-                candidates.push({ candidateKey, selectedKey: candidateKey, seriesKey: market.getAssetSeries(asset.name),
+                const selectedAssets = [{ ...asset, version, ...(packageEdition ? { bootName: packageEdition.bootName } : {}), packageRole: market.getAssetRole?.(asset.name) || 'main' },
+                    ...market.getMatchingCompanionAssets(asset, plan.availableAssets || assets, mod).map(companion => ({ ...companion, packageRole: 'resource' }))];
+                // 纯版号文件名没有系列；单产品发布的唯一主包仍可按真实来源核对。
+                const seriesKey = market.getAssetSeries(asset.name) || (!mod.sharedRepository && !mod.releaseTrackingSourceUrl
+                    && !window.modHubMarketVariants?.normalizeVariant?.(mod.variant) && !editions.length && plan.candidates?.length === 1
+                    && normalizeGameVersion(market.normalizeModVersion(mod, version))
+                    ? `repository:${source.key}` : '');
+                candidates.push({ candidateKey, selectedKey: candidateKey, seriesKey,
                     tagName, releaseName: release.name || '', htmlUrl: release.htmlUrl || '', version,
                     assetName: asset.name, assetUrl: asset.downloadUrl, assetSize: Number(asset.size) || 0, assetDigest: asset.digest || '',
-                    assets: selectedAssets, optionalAssets: market.getMatchingOptionalAssets?.(asset, plan.availableAssets || assets) || [],
+                    assets: selectedAssets, optionalAssets: (market.getMatchingOptionalAssets?.(asset, plan.availableAssets || assets, mod) || []).map(optional => ({ ...optional,
+                        version: optional.version || market.getAssetVersionParts(optional.name).join('.') || version })),
+                    ...(packageEdition ? { packageEdition, packageEditions: editions } : {}),
+                    ...(legacy ? { legacyPackage: true } : {}),
+                    ...(rejectedVersions.length ? { automaticSelectionRejectedVersions: rejectedVersions } : {}),
                     availableAssets: plan.availableAssets || assets, candidateAssets: [asset],
                     requiresManualSelection: false, selectionReason: '', publishedAt: release.publishedAt || '',
                     updateDate: formatReleaseDate(release.publishedAt),
                     compatibility: candidateCompatibility(asset, release, gameVersion),
                     ...candidateDependencies(mod, asset, release),
-                    ...(verifiedVersion ? { versionSource: 'verified-boot', bootName: asset.bootName } : {}),
+                    ...(verifiedVersion ? { versionSource: 'verified-boot', bootName: asset.bootName || packageEdition?.bootName
+                        || (mod.bootNames?.length === 1 ? mod.bootNames[0] : '') } : {}),
                     stale: Boolean(history?.stale), fromCache: Boolean(history?.fromCache) });
             }
         }
         return candidates;
+    }
+
+    function editionCandidates(mod, candidates, localProfile) {
+        const editions = window.modHubMarketVariants?.normalizePackageEditions?.(mod?.packageEditions) || [];
+        if (!editions.length) return candidates;
+        if (getLegacyVerifiedRelease(mod)) return candidates.filter(candidate => candidate.legacyPackage);
+        const selected = mod._selectedPackageEdition || window.modHubMarketVariants?.getPackageEdition?.(mod, selectionLocalProfile(mod, localProfile))?.id;
+        return selected ? candidates.filter(candidate => candidate.packageEdition?.id === selected) : [];
     }
 
     function matchesCurrentGame(candidate, gameVersion) {
@@ -669,14 +774,14 @@
         return Date.parse(day);
     }
 
-    function latestUnambiguousCandidate(candidates) {
+    function latestUnambiguousCandidate(candidates, mod) {
         if (!candidates.length) return null;
         const market = window.modHubMarket;
         let latest = candidates;
         // 所有候选版号都可比较时才使用版号，不能把未知版号当作零或截取标签尾段。
-        if (candidates.every(candidate => normalizeGameVersion(candidate.version))) {
-            const highest = [...candidates].sort((a, b) => market.compareVersions(b.version, a.version))[0];
-            latest = candidates.filter(candidate => market.compareVersions(candidate.version, highest.version) === 0);
+        if (candidates.every(candidate => normalizeGameVersion(market.normalizeModVersion(mod, candidate.version)))) {
+            const highest = [...candidates].sort((a, b) => market.compareVersions(b.version, a.version, mod))[0];
+            latest = candidates.filter(candidate => market.compareVersions(candidate.version, highest.version, mod) === 0);
         }
         if (latest.length > 1) {
             const fullTime = latest.every(candidate => Number.isFinite(candidatePublicationTime(candidate, true)));
@@ -689,30 +794,60 @@
         return new Set(latest.map(candidate => candidate.assetUrl || candidate.assets?.[0]?.downloadUrl || candidate.candidateKey)).size === 1 ? latest[0] : null;
     }
 
-    function getLatestGameCandidate(mod, candidates) {
+    /** 历史旧附件名不应否决已明确归属本品的新系列；旧包仍保留供手动选择。 */
+    function automaticCandidates(mod, candidates, localProfile) {
+        candidates = editionCandidates(mod, candidates, localProfile);
+        const rejectedVersions = candidates.flatMap(candidate => candidate.automaticSelectionRejectedVersions || []);
+        if (rejectedVersions.length) candidates = candidates.filter(candidate => rejectedVersions.every(version =>
+            normalizeGameVersion(window.modHubMarket.normalizeModVersion(mod, version))
+                && normalizeGameVersion(window.modHubMarket.normalizeModVersion(mod, candidate.version))
+                && window.modHubMarket.compareVersions(candidate.version, version, mod) > 0));
+        if (new Set(candidates.map(candidate => candidate.seriesKey)).size <= 1) return candidates;
+        const market = window.modHubMarket, source = getReleaseSource(normalizeSource(mod?.githubUrl));
+        if (!source
+            || candidates.some(candidate => !normalizeGameVersion(market.normalizeModVersion(mod, candidate.version))
+                || getReleaseSource(normalizeSource(candidate.assetUrl))?.key !== source.key)) return candidates;
+        const scoped = Boolean(mod?.sharedRepository || mod?.releaseTrackingSourceUrl || window.modHubMarketVariants?.normalizeVariant?.(mod?.variant));
+        const names = scoped ? mod.bootNames || [] : [...(mod.bootNames || []), ...(mod.aliases || []), ...(mod.repositories || []), mod.name, source.key.split('/')[1]];
+        const identities = new Set(names.map(name => market.getAssetSeries(name)).filter(Boolean));
+        candidates.filter(candidate => candidate.versionSource === 'verified-boot' && (mod.bootNames || []).includes(candidate.bootName))
+            .forEach(candidate => identities.add(candidate.seriesKey));
+        const identified = candidates.filter(candidate => identities.has(candidate.seriesKey));
+        if (!identified.length || scoped && identified.length !== candidates.length) return candidates;
+        const latest = latestUnambiguousCandidate(identified, mod);
+        const current = identified.filter(candidate => candidate.seriesKey === latest?.seriesKey);
+        if (!latest || candidates.some(candidate => !current.includes(candidate)
+                && market.compareVersions(candidate.version, latest.version, mod) >= 0)) return candidates;
+        return current;
+    }
+
+    function getLatestGameCandidate(mod, candidates, localProfile) {
+        candidates = automaticCandidates(mod, candidates, localProfile);
         const gameVersion = getGameVersion();
         if (!gameVersion || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
-        return latestUnambiguousCandidate(candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion)));
+        return latestUnambiguousCandidate(candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion)), mod);
     }
 
     /** 全局最新只比较同一产品系列，适配证据不影响真实发行版号。 */
     function getLatestReleaseCandidate(mod, candidates) {
+        candidates = automaticCandidates(mod, candidates);
         const market = window.modHubMarket, source = getReleaseSource(normalizeSource(mod?.githubUrl));
         if (!source || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1
             || candidates.some(candidate => getReleaseSource(normalizeSource(candidate.assetUrl))?.key !== source.key
                 || candidate.candidateKey !== JSON.stringify([market.getMarketModKey(mod), candidate.tagName, candidate.assetUrl]))) return null;
-        return latestUnambiguousCandidate(candidates);
+        return latestUnambiguousCandidate(candidates, mod);
     }
 
     /** 缺少适配声明不代表没有新版；仅补充身份和版号明确的未知适配候选。 */
     function getLatestUpdateCandidate(mod, candidates) {
+        candidates = automaticCandidates(mod, candidates);
         const gameVersion = getGameVersion();
         if (!gameVersion || !candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return null;
         if (candidates.some(candidate => matchesCurrentGame(candidate, gameVersion))) return getLatestGameCandidate(mod, candidates);
         return latestUnambiguousCandidate(candidates.filter(candidate => {
             const info = candidate.compatibility || {};
             return info.status !== 'incompatible' && !info.referenceMismatch && (!info.evidence || info.evidence === 'unknown');
-        }));
+        }), mod);
     }
 
     /** 仅按精确技术身份回读摘要，展示名与同仓库关系不能证明本地包身份。 */
@@ -738,27 +873,37 @@
         const localDigest = normalizeDigest(profile?.packageDigest);
         const candidateDigest = normalizeDigest(asset?.digest || (!asset || asset.downloadUrl === candidate.assetUrl ? candidate.assetDigest : ''));
         return Boolean(localDigest && candidateDigest && localDigest !== candidateDigest
-            && market.isSameVersion(candidate?.version, localVersion) && market.isSameVersion(profile?.version, localVersion)
+            && market.isSameVersion(candidate?.version, localVersion, mod) && market.isSameVersion(profile?.version, localVersion, mod)
             && market.isReleaseInstalled?.(candidate, profile) === false);
     }
 
     function isDefaultUpdate(mod, candidate, localVersion, localProfile) {
-        if (!localVersion || !normalizeGameVersion(candidate?.version) || !normalizeGameVersion(localVersion)) return false;
-        const compared = window.modHubMarket.compareVersions(candidate.version, localVersion);
-        return compared > 0 || compared === 0 && isVerifiedRepackage(mod, candidate, localVersion, localProfile);
+        const market = window.modHubMarket;
+        if (!localVersion || !normalizeGameVersion(market.normalizeModVersion(mod, candidate?.version)) || !normalizeGameVersion(market.normalizeModVersion(mod, localVersion))) return false;
+        const compared = market.compareVersions(candidate.version, localVersion, mod);
+        if (compared > 0 || compared === 0 && isVerifiedRepackage(mod, candidate, localVersion, localProfile)) return true;
+        if (compared !== 0) return false;
+        return (candidate.optionalAssets || []).some(asset => {
+            const local = window.modHubMarket.getLocalInstalledProfiles?.().find(profile => String(profile.name).toLowerCase() === String(asset.bootName).toLowerCase());
+            if (!local || !normalizeGameVersion(market.normalizeModVersion(mod, asset.version, asset.bootName)) || !normalizeGameVersion(market.normalizeModVersion(mod, local.version, asset.bootName))) return false;
+            return market.compareVersions(asset.version, local.version, mod, asset.bootName) > 0
+                || market.compareVersions(asset.version, local.version, mod, asset.bootName) === 0 && /^sha256:[a-f0-9]{64}$/i.test(local.packageDigest || '')
+                    && /^sha256:[a-f0-9]{64}$/i.test(asset.digest || '') && local.packageDigest.toLowerCase() !== asset.digest.toLowerCase();
+        });
     }
 
     /** 默认选择仅减少操作步骤，不能替代安装包的实际适配核对。 */
     function getDefaultSelection(mod, candidates, { updateOnly = false, localProfile, localVersion = localProfile?.version || mod?._matchedLocal?.version || '' } = {}) {
         const empty = { defaultKey: '', defaultReason: '', defaultRisk: false };
+        candidates = automaticCandidates(mod, candidates, localProfile);
         if (!candidates[0]?.seriesKey || new Set(candidates.map(candidate => candidate.seriesKey)).size !== 1) return empty;
         const market = window.modHubMarket, gameVersion = getGameVersion();
         const matching = candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion));
-        const matched = getLatestGameCandidate(mod, candidates);
+        const matched = getLatestGameCandidate(mod, candidates, localProfile);
         const latest = matching.length ? matched : latestUnambiguousCandidate(
-            candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'));
-        if (!latest || localVersion && (!normalizeGameVersion(latest.version) || !normalizeGameVersion(localVersion)
-                || market.compareVersions(latest.version, localVersion) < 0)
+            candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'), mod);
+        if (!latest || localVersion && (!normalizeGameVersion(market.normalizeModVersion(mod, latest.version)) || !normalizeGameVersion(market.normalizeModVersion(mod, localVersion))
+                || market.compareVersions(latest.version, localVersion, mod) < 0)
             || updateOnly && !isDefaultUpdate(mod, latest, localVersion, localProfile)) return empty;
         let defaultReason;
         if (matched) defaultReason = latest.compatibility?.evidence === 'declaration'
@@ -771,8 +916,11 @@
         return { defaultKey: latest.candidateKey, defaultReason, defaultRisk: !matched };
     }
 
-    function rankCandidates(mod, candidates, { updateOnly = false, localProfile, localVersion = localProfile?.version || mod?._matchedLocal?.version || '' } = {}) {
+    function rankCandidates(mod, candidates, { updateOnly = false, localProfile, localVersion = localProfile?.version || mod?._matchedLocal?.version || '', sourceWarnings = [] } = {}) {
         const market = window.modHubMarket;
+        const selectionWarnings = getHistorySelectionWarnings(mod, { sourceWarnings });
+        if (selectionWarnings.length) candidates = candidates.map(candidate => ({ ...candidate,
+            automaticSelectionRejectedVersions: [...new Set([...(candidate.automaticSelectionRejectedVersions || []), ...candidateRejectedVersions(mod, candidate, selectionWarnings)])] }));
         const gameVersion = getGameVersion();
         const rank = candidate => {
             const info = candidate.compatibility || {};
@@ -780,7 +928,7 @@
             if (info.status === 'incompatible' || info.referenceMismatch) return 3;
             return 2;
         };
-        const numeric = candidates.every(candidate => normalizeGameVersion(candidate.version));
+        const numeric = candidates.every(candidate => normalizeGameVersion(market.normalizeModVersion(mod, candidate.version)));
         const fullTime = candidates.every(candidate => Number.isFinite(candidatePublicationTime(candidate, true))
             || !Number.isFinite(candidatePublicationTime(candidate, false)));
         const publicationTime = candidate => {
@@ -788,10 +936,10 @@
             return Number.isFinite(time) ? time : -Infinity;
         };
         const sorted = [...candidates].sort((a, b) => rank(a) - rank(b)
-            || (numeric ? market.compareVersions(b.version, a.version) : 0)
+            || (numeric ? market.compareVersions(b.version, a.version, mod) : 0)
             || publicationTime(b) - publicationTime(a)
             || String(a.candidateKey).localeCompare(String(b.candidateKey)));
-        const recommended = getLatestGameCandidate(mod, sorted);
+        const recommended = getLatestGameCandidate(mod, sorted, localProfile);
         return { candidates: sorted, recommendedKey: recommended
             && (!updateOnly || isDefaultUpdate(mod, recommended, localVersion, localProfile)) ? recommended.candidateKey : '',
             ...getDefaultSelection(mod, sorted, { updateOnly, localVersion, localProfile }), gameVersion };
@@ -807,5 +955,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, buildCandidates, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

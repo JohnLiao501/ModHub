@@ -211,6 +211,45 @@ module.exports = async function () {
         };
         return { ...base, mod, releaseInfo, mainBoot, audioBoot, mainName, audioName, syncState };
     };
+    for (const changed of [false, true]) {
+        const { sb, market, mod, releaseInfo, state } = fixture();
+        sb.crypto = webcrypto;
+        sb.fetch = async () => ({ ok: true, headers: { get: () => null }, blob: async () => new Blob([new Uint8Array([1])]) });
+        mod.verifiedReleaseAssets = [{ sourceUrl: releaseInfo.assets[0].downloadUrl, bootName: 'PreparedFixture', version: '1.0', size: 1,
+            sha256: createHash('sha256').update(new Uint8Array([changed ? 2 : 1])).digest('hex') }];
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, batchMode: true, askRestart: false,
+            onFailure: (message, code) => { failure = code; } }), !changed, '上游缺摘要时仍核验精确登记摘要，不能绕过批准旧附件的保护');
+        assert.equal(state.imports, changed ? 0 : 1);
+        if (changed) assert.equal(failure, 'DIGEST_MISMATCH');
+    }
+    {
+        const { market, mod, releaseInfo, state } = fixture();
+        releaseInfo.assets[0].size = 1;
+        let failure;
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, batchMode: true, askRestart: false,
+            onFailure: (message, code) => { failure = code; } }), false);
+        assert.equal(failure, 'DOWNLOAD_INCOMPLETE');
+        assert.equal(state.imports, 0, '所有线路大小核验失败后不能保留最后的无效 Blob 并导入');
+    }
+    {
+        const { sb, market, mod, releaseInfo, state, audioBoot, audioName, syncState } = optionalAudioFixture();
+        state.localBoots.set(audioBoot.name, { ...audioBoot, version: '1.3.0' });
+        state.disabledNames.add(audioBoot.name);
+        syncState();
+        const importFiles = sb.modHubHandleAddMod;
+        let atomicOptions;
+        sb.modHubHandleAddMod = async (files, options) => {
+            atomicOptions = options.atomicPackageChanges;
+            return importFiles(files, options);
+        };
+        assert.equal(await market.downloadAndInstallMod(mod, 'ddlc', { releaseInfo, batchMode: true, askRestart: false,
+            atomicPackageChanges: { preserveDisabledNames: [audioBoot.name] } }), true);
+        assert.deepEqual(Array.from(atomicOptions.preserveDisabledNames), [audioBoot.name], '真实市场下载入口必须把禁用保持传给管理器事务');
+        assert.deepEqual(state.importedFiles, [[audioName]], '同版主包仅复用，单独更新附加项');
+        assert.equal(state.localBoots.get(audioBoot.name).version, '1.3.1');
+        assert.ok(state.disabledNames.has(audioBoot.name));
+    }
     const sameBootPackageFixture = (marker = 1) => {
         const f = fixture(), { sb, mod, state, market } = f;
         sb.crypto = webcrypto;

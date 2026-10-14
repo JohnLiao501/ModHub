@@ -17,6 +17,10 @@ const qq = 'https://qm.qq.com/q/example';
 const dc = 'https://discord.gg/example';
 const anchor = (url, label) => `<a href="${url}">${label}</a>`;
 const cases = [
+    { label: '露出拓展真实 pre 名称列与开发状态',
+        cell: `<b><big>露出拓展</big></b><pre>${anchor('https://sb.alseece.top/2?=DoL-MEE', '下载链接')}</pre><pre>正在开发中</pre><pre>${anchor('https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion', 'Github')}</pre>`,
+        names: ['露出拓展'], github: ['https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion'],
+        other: ['https://sb.alseece.top/2?=DoL-MEE'], legacy: '正在开发中' },
     { label: '普通文本标题与贴吧来源', cell: `小小PC修复增强<br>${anchor(gh, 'GitHub')} ${anchor(tieba, '百度贴吧')}`,
         names: ['小小PC修复增强'], github: [gh], other: [tieba], legacy: '百度贴吧' },
     { label: '截图中的ModHub文本标题与居中社群入口',

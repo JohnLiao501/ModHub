@@ -776,7 +776,150 @@ async function restorePackageVersions() {
     console.log('还原包体版本对照、旧点兼容、最终确认重算与转义测试通过');
 }
 
+async function atomicPackageChanges() {
+    const create = async () => {
+        const h = harness({ confirm: () => true });
+        await h.api.startupReady;
+        h.sandbox._modHubDisabledModInfo = new Map([['modhub', { bootJson: { name: 'ModHub', dependenceInfo: [{ modName: '前置', version: '*' }] } }]]);
+        const context = await prepareChange(h, '原子安装及分支切换');
+        const enabled = JSON.parse(h.mod.data.get('enabled-custom'));
+        const disabled = JSON.parse(h.mod.data.get('disabled-custom'));
+        const changes = { context, packages: [
+            { name: 'A', data: pack('A 新包'), expectedData: h.mod.data.get('package-custom:A') },
+            { name: 'C', data: pack('C 新增包') }
+        ], expectedEnabled: enabled, expectedDisabled: disabled,
+        enabled: ['前置', 'ModHub', 'B'], disabled: ['A', 'C'] };
+        return { h, context, changes };
+    };
+    {
+        const { h, context, changes } = await create();
+        const beforeWrites = h.mod.writes;
+        assert.equal((await h.api.commitPackageChanges(changes)).committed, true);
+        assert.equal(h.mod.writes, beforeWrites + 1, '主包、附加项与两份列表仅提交一个真实写事务');
+        assert.deepEqual([...h.mod.data.get('package-custom:A')], [...pack('A 新包')]);
+        assert.deepEqual([...h.mod.data.get('package-custom:C')], [...pack('C 新增包')]);
+        assert.equal(h.mod.data.get('package-custom:C').constructor.name, 'Uint8Array', '新包保留原生二进制编码');
+        assert.equal(h.mod.data.get('enabled-custom'), JSON.stringify(changes.enabled));
+        assert.equal(h.mod.data.get('disabled-custom'), JSON.stringify(changes.disabled));
+        assert.deepEqual([...h.mod.data.get('package-custom:B')], [...pack('B 旧包')], '没有变更的旧分支包体仍保留');
+        assert.deepEqual(h.mod.data.get('unrelated-game-save'), { keep: true });
+        await h.api.finish(context); h.api.release(context);
+    }
+    for (const storageData of [Buffer.from('A 原生字符串包').toString('base64'), pack('A ArrayBuffer 包').buffer]) {
+        const { h, context, changes } = await create();
+        changes.packages[0].data = storageData;
+        await h.api.commitPackageChanges(changes);
+        const stored = h.mod.data.get('package-custom:A');
+        assert.equal(typeof stored, typeof storageData, '接口不改变调用方明确的原生存储编码');
+        if (typeof storageData === 'string') assert.equal(stored, storageData);
+        else assert.deepEqual([...new Uint8Array(stored)], [...new Uint8Array(storageData)]);
+        await h.api.finish(context); h.api.release(context);
+    }
+    for (const failedKey of ['package-custom:A', 'package-custom:C', 'enabled-custom', 'disabled-custom']) {
+        const { h, context, changes } = await create();
+        const oldA = [...h.mod.data.get('package-custom:A')], beforeWrites = h.mod.writes;
+        h.mod.failPut = key => key === failedKey ? new Error(`模拟 ${failedKey} 写入失败`) : null;
+        await assert.rejects(h.api.commitPackageChanges(changes), /写入失败/);
+        assert.equal(h.mod.writes, beforeWrites);
+        assert.deepEqual([...h.mod.data.get('package-custom:A')], oldA, '任一请求失败时旧包不会被部分覆盖');
+        assert.equal(h.mod.data.has('package-custom:C'), false);
+        assert.equal(h.mod.data.get('enabled-custom'), JSON.stringify(changes.expectedEnabled));
+        assert.equal(h.mod.data.get('disabled-custom'), JSON.stringify(changes.expectedDisabled));
+        h.mod.failPut = null;
+        await h.api.finish(context); h.api.release(context);
+    }
+    for (const externalChange of ['package', 'enabled', 'disabled', 'newPackage']) {
+        const { h, context, changes } = await create();
+        if (externalChange === 'package') h.mod.data.set('package-custom:A', pack('A 外部更改'));
+        if (externalChange === 'enabled') h.mod.data.set('enabled-custom', '["前置","ModHub"]');
+        if (externalChange === 'disabled') h.mod.data.set('disabled-custom', '["B","A"]');
+        if (externalChange === 'newPackage') h.mod.data.set('package-custom:C', pack('C 外部安装'));
+        const before = structuredClone([...h.mod.data]);
+        await assert.rejects(h.api.commitPackageChanges(changes), /其他操作更改/);
+        assert.deepEqual([...h.mod.data], before, '期望快照失配时不覆盖外部包体或启禁配置');
+        await h.api.finish(context); h.api.release(context);
+    }
+    {
+        const { h, context, changes } = await create();
+        changes.packages = [];
+        changes.guardedPackages = [{ name: 'A', expectedData: pack('A 旧包') }, { name: 'B', expectedData: pack('B 旧包') }];
+        changes.disabled = ['A'];
+        h.mod.failPut = key => key.startsWith('package-custom:') ? new Error('仅切换时不得重新写入保留包体') : null;
+        await h.api.commitPackageChanges(changes);
+        assert.equal(h.mod.data.get('enabled-custom'), '["前置","ModHub","B"]', '空包体清单可以只切换已有分支');
+        assert.deepEqual([...h.mod.data.get('package-custom:A')], [...pack('A 旧包')]);
+        await h.api.finish(context); h.api.release(context);
+    }
+    for (const mutation of ['targetDeleted', 'targetChanged', 'oldBranchChanged']) {
+        const { h, context, changes } = await create();
+        changes.packages = [];
+        changes.guardedPackages = [{ name: 'A', expectedData: pack('A 旧包') }, { name: 'B', expectedData: pack('B 旧包') }];
+        changes.disabled = ['A'];
+        if (mutation === 'targetDeleted') h.mod.data.delete('package-custom:B');
+        if (mutation === 'targetChanged') h.mod.data.set('package-custom:B', pack('B 外部更改'));
+        if (mutation === 'oldBranchChanged') h.mod.data.set('package-custom:A', pack('A 外部更改'));
+        const before = structuredClone([...h.mod.data]), writes = h.mod.writes;
+        await assert.rejects(h.api.commitPackageChanges(changes), /保留模组.*包体已被其他操作更改/);
+        assert.equal(h.mod.writes, writes, '纯启禁切换的包体快照失配须在写入列表前停止');
+        assert.deepEqual([...h.mod.data], before, '不能覆盖外部变动或重新补回已删除的目标包');
+        await h.api.finish(context); h.api.release(context);
+    }
+    {
+        const { h, context, changes } = await create();
+        changes.guardedPackages = [{ name: 'A', expectedData: pack('A 旧包') }, { name: 'B', expectedData: pack('B 旧包') }];
+        h.mod.failPut = key => key === 'package-custom:B' ? new Error('保留分支不得重新put') : null;
+        await h.api.commitPackageChanges(changes);
+        assert.deepEqual([...h.mod.data.get('package-custom:A')], [...pack('A 新包')], '变更包与只读守卫重叠时按新包回读，不误要求旧包');
+        assert.deepEqual([...h.mod.data.get('package-custom:B')], [...pack('B 旧包')]);
+        await h.api.finish(context); h.api.release(context);
+    }
+    {
+        const { h, context, changes } = await create();
+        changes.packages = [];
+        changes.guardedPackages = [{ name: 'A', expectedData: pack('A 旧包') }, { name: 'B', expectedData: pack('B 旧包') }];
+        changes.disabled = ['A'];
+        const useStore = h.loader.customStore;
+        h.loader.customStore = (mode, callback) => useStore(mode, callback).then(value => {
+            if (mode === 'readwrite') h.mod.data.delete('package-custom:B');
+            return value;
+        });
+        await assert.rejects(h.api.commitPackageChanges(changes), error => error.committed === true
+            && error.code === 'PACKAGE_COMMIT_VERIFY_FAILED' && /保留模组【B】提交后包体回读不一致/.test(error.message));
+        assert.equal(h.mod.data.get('enabled-custom'), '["前置","ModHub","B"]', '提交后的包体变化不能谎称列表已回滚');
+        assert.equal(h.mod.data.has('package-custom:B'), false, '回读不能重新put已删除的保留包体');
+        h.loader.customStore = useStore;
+        await h.api.finish(context); h.api.release(context);
+    }
+    for (const invalid of ['context', 'duplicate', 'removal', 'missingPackage']) {
+        const { h, context, changes } = await create();
+        if (invalid === 'context') changes.context = {};
+        if (invalid === 'duplicate') changes.disabled.push('a');
+        if (invalid === 'removal') changes.enabled = ['ModHub', 'B'];
+        if (invalid === 'missingPackage') changes.disabled.push('没有包体');
+        const beforeWrites = h.mod.writes;
+        await assert.rejects(h.api.commitPackageChanges(changes));
+        assert.equal(h.mod.writes, beforeWrites, '非法操作在写事务前拒绝');
+        await h.api.finish(context); h.api.release(context);
+    }
+    {
+        const { h, context, changes } = await create();
+        const useStore = h.loader.customStore;
+        let committed = false;
+        h.loader.customStore = (mode, callback) => {
+            if (mode === 'readonly' && committed) return Promise.reject(new Error('模拟提交后回读失败'));
+            return useStore(mode, callback).then(value => { if (mode === 'readwrite') committed = true; return value; });
+        };
+        await assert.rejects(h.api.commitPackageChanges(changes), error => error.committed === true
+            && error.code === 'PACKAGE_COMMIT_VERIFY_FAILED' && /安装已经提交.*回读核验未完成.*模拟提交后回读失败/.test(error.message));
+        assert.equal(h.mod.data.get('enabled-custom'), JSON.stringify(changes.enabled));
+        assert.deepEqual([...h.mod.data.get('package-custom:A')], [...pack('A 新包')], '提交后回读失败不能谎称已撤销新包');
+        h.loader.customStore = useStore;
+        await h.api.finish(context); h.api.release(context);
+    }
+}
+
 async function run() {
+    await atomicPackageChanges();
     await storageControls();
     await protectionControls();
     await remoteProtectionControls();

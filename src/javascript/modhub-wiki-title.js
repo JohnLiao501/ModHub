@@ -2,7 +2,7 @@
   'use strict';
 
   // Worker、目录提取器和浏览器回退只共享标题规则，不修改来源或安装身份。
-  const boundaryTags = Object.freeze(['br', 'hr', 'p', 'div', 'li', 'ul', 'ol', 'dl', 'dt', 'dd',
+  const boundaryTags = Object.freeze(['br', 'hr', 'p', 'div', 'pre', 'li', 'ul', 'ol', 'dl', 'dt', 'dd',
     'section', 'article', 'header', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
   const ignoredTags = Object.freeze(['script', 'style', 'noscript']);
   const symbols = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF\uFE0E\uFE0F\u200D]/gu;
@@ -14,6 +14,7 @@
   const inviteContact = /(?:discord|dc|telegram|tg|qq(?:群|频道)?)\s*[:：]\s*(?:https?:\/\/\S+|[a-z0-9_-]{3,})/i;
   const bareContactUrl = /^https?:\/\/(?:[^/]+\.)?(?:discord\.gg|discord\.com|qq\.com|telegram\.me|t\.me)\//i;
   const separator = /^(?:[\s/&|,，、;；:：()（）\[\]【】{}<>·+\-]|and|与|和|及)*$/i;
+  const developmentSource = 'anlinstudio/degrees-of-lewdity-myexhibitionismexpansion';
 
   function cleanLegacy(value) {
     return String(value || '').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
@@ -154,6 +155,26 @@
     return clean(value).normalize('NFKC').toLowerCase();
   }
 
+  function hasDevelopmentSource(urls) {
+    const sources = (Array.isArray(urls) ? urls : [urls]).filter(Boolean).map(value => {
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && !url.username && !url.password && !url.port && !url.search
+          ? githubSource(value) : null;
+      } catch { return null; }
+    });
+    return sources.length > 0 && sources.every(source => source?.exactKey === `${developmentSource}/`);
+  }
+
+  function isStatusName(value, urls) {
+    return clean(value) === '正在开发中' && hasDevelopmentSource(urls);
+  }
+
+  function normalizeStatusTitle(value, urls) {
+    // 仅核对真实名称列与已确认作者来源，不从简介或状态标签推断模组名。
+    return hasDevelopmentSource(urls) && /^(?:露出拓展|露出拓展\s+正在开发中)$/.test(clean(value)) ? '露出拓展' : '';
+  }
+
   function projectNameKey(value) {
     // 版本只参与判断是否为同一名称，不改写显示标题或精确来源。
     return nameKey(value).replace(/(?:\s+|[-_·(（]+)(?:v\d+(?:\.\d+)*|\d+(?:\.\d+)+)(?:[-+][a-z0-9._-]+)?[)）]?$/i, '').trim();
@@ -190,10 +211,16 @@
     const tokens = Array.isArray(input) ? input : [];
     const result = { name: '', status: 'missing', projects: [], legacyName: legacyName(tokens), contacts: [] };
     const candidates = [];
+    const githubUrls = tokens.filter(token => token?.type === 'link' && githubSource(token.href)).map(token => token.href);
+    let removedStatus = false;
     let uncertain = false;
     for (const line of linesFrom(options?.htmlEncoded === true ? htmlTitleTokens(tokens) : tokens)) {
       const fullText = clean(line.map(token => token.text).join(''));
       if (!fullText || separator.test(fullText)) continue;
+      if (isStatusName(fullText, githubUrls)) {
+        removedStatus = true;
+        continue;
+      }
       const fullLabel = label(fullText);
       const pureContact = contactLabel.test(fullLabel) || bareContactUrl.test(fullText)
         || numericContact.test(fullText) && !residual(fullText.replace(numericContact, ''), true)
@@ -243,6 +270,7 @@
     } else if (names.size === 1) {
       result.name = candidates[0].name;
       result.status = 'resolved';
+      if (removedStatus && normalizeStatusTitle(result.name, githubUrls)) result.legacyName = '正在开发中';
     }
     return result;
   }
@@ -271,7 +299,7 @@
     return extract(tokens);
   }
 
-  const api = Object.freeze({ extract, fromDom, isUtilityName, boundaryTags, ignoredTags });
+  const api = Object.freeze({ extract, fromDom, isUtilityName, isStatusName, normalizeStatusTitle, boundaryTags, ignoredTags });
   root.modHubWikiTitle = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof globalThis === 'object' ? globalThis : this);

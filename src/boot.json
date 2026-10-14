@@ -1,6 +1,6 @@
 {
   "name": "ModHub",
-  "version": "1.5.1",
+  "version": "1.6.0",
   "nickName": "模组管理器与市场套件",
   "description": "DoL 原生暗黑风格模组管理与市场套件",
   "styleFileList": [
@@ -22,6 +22,7 @@
     "javascript/modhub-log.js",
     "javascript/modhub-market-variants.js",
     "javascript/modhub-wiki-title.js",
+    "javascript/modhub-search.js",
     "javascript/modhub-market.js",
     "javascript/modhub-market-spells.js",
     "javascript/modhub-market-versions.js",

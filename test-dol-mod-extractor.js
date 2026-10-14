@@ -9,7 +9,8 @@ async function main() {
   const moduleUrl = pathToFileURL(path.join(__dirname, 'dol-mod-extractor.js')).href;
   const { mergeModIdentities, fetchModRelease, parseGithubReleaseTarget, markSharedRepositories,
     modHubFetchModReleases, modHubNormalizeReleaseCompatibility, modHubIsModPackageName, modHubGetDownloadUrl,
-    modHubNormalizeVariant, modHubNormalizeRequiredDependencies } = await import(moduleUrl);
+    modHubNormalizeVariant, modHubNormalizeRequiredDependencies, modHubNormalizeReleaseTrackingSource,
+    modHubNormalizeReleaseProductMetadata, modHubMatchReleaseAssetEvidence } = await import(moduleUrl);
   for (const name of ['Example.modpack', 'Example.MODPACK.CRYPT', 'Example.mod.zip', 'Example.mod']) {
     assert.equal(modHubIsModPackageName(name), true, `原生模组包后缀应识别：${name}`);
   }
@@ -38,6 +39,30 @@ async function main() {
   assert.deepEqual(await readFile(path.join(__dirname, 'mod-identities.json')),
     await readFile(path.join(__dirname, 'dolmod-site', 'dist', 'mod-identities.json')), '根目录与网站身份表必须逐字节相同');
   assert.equal(catalog.schemaVersion, 1);
+  for (const [id, expected] of [
+    ['better-cheat-command-management', {
+      sourceUrl: 'https://github.com/Tony70124/BetterCheatCommandManagement-for-DOL/releases/download/v2.1.4/BCCM_v2.1.4.zip',
+      sha256: 'd79fb858d72bb97702c766aff28905280fd0dd1214e5ffec7c549b56a498528a', bootName: 'BetterCheatCommandManagement',
+      version: '2.1.4', size: 19447, verifiedAt: '2026-10-14T12:18:21.985Z'
+    }],
+    ['evil-cockroach', {
+      sourceUrl: 'https://github.com/LooopSpiner/Evil-Cockroach-Mod/releases/download/v1.0.1/cockroach.zip',
+      sha256: 'a90ab52c150fa2d808e3be9539a6af1d1eac0bde255b25b89e3e387cad1a2f30', bootName: '蟑螂啊啊啊',
+      version: '1.0.1', size: 704260, verifiedAt: '2026-10-14T12:18:24.852Z'
+    }]
+  ]) {
+    const identity = catalog.mods.find(mod => mod.id === id);
+    const records = identity.verifiedReleaseAssets.filter(record => record.sourceUrl === expected.sourceUrl && record.sha256 === expected.sha256);
+    assert.deepEqual(records, [expected], '两份真实附件登记保留完整六字段证据且不得重复');
+    const target = parseGithubReleaseTarget(expected.sourceUrl);
+    const mod = { ...identity, githubUrl: `https://github.com/${target.owner}/${target.repo}` };
+    const asset = { name: target.assetName, size: expected.size, digest: `sha256:${expected.sha256}`, browser_download_url: expected.sourceUrl };
+    assert.equal(modHubMatchReleaseAssetEvidence(asset, mod)?.version, expected.version, '不同于技术名的附件名仍需靠真实完整证据识别');
+    for (const invalid of [{ ...asset, size: asset.size + 1 }, { ...asset, digest: `sha256:${'0'.repeat(64)}` },
+      { ...asset, browser_download_url: expected.sourceUrl.replace('/download/', '/download/other/') }]) {
+      assert.equal(modHubMatchReleaseAssetEvidence(invalid, mod), null, '来源、大小和摘要变化必须隔离旧核验事实');
+    }
+  }
   assert.equal(new Set(catalog.mods.map((mod) => mod.id)).size, catalog.mods.length, '身份 ID 不得重复');
   const categories = new Set(['框架与前置', '剧情与角色', '玩法与内容', '界面与便利', '外观与资源', '规则与数值', '修复与兼容', '待分类']);
   assert.ok(catalog.mods.every((mod) => categories.has(mod.category)), '每个身份都必须使用受控主分类');
@@ -80,7 +105,8 @@ async function main() {
   for (const id of ['lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en', 'eu-clothing-addition', 'layering-fixes']) {
     const identity = catalog.mods.find(item => item.id === id);
     assert.deepEqual(identity.repositories, [], `${id} 不得按共享仓库别名匹配`);
-    assert.deepEqual(identity.repositoryKeys, [], `${id} 不得绑定整仓库身份`);
+    assert.deepEqual(identity.repositoryKeys, id === 'eu-clothing-addition' ? ['Eudemonism00/DOL-Eu-ArtMods'] : [],
+      `${id} 仅允许明确登记的持续跟踪仓库授权`);
   }
   const [lnnChs, lnnEn] = ['lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en'].map(id => catalog.mods.find(item => item.id === id));
   assert.deepEqual(lnnChs.bootNames, ['LNN 战斗对手状态显示·简中']);
@@ -118,7 +144,7 @@ async function main() {
     { name: 'DOL-Eu-ArtMods', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
     { name: 'LJ改脸', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
     { name: 'Eu Clothing Addition', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
-  ], catalog).map(mod => mod.identityId), [null, null, null, null, null, null],
+  ], catalog).map(mod => mod.identityId), [null, null, null, null, null, 'eu-clothing-addition'],
   '通用名称与共享仓库不能替代维护者指定的语言或项目身份');
   assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-extra-clothes').bootNames, ['RAY额外服装']);
   assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-beautification').bootNames, ['Ray美化']);
@@ -132,6 +158,40 @@ async function main() {
     };
     assert.equal((await modHubFetchModReleases({ id: 'sample', githubUrl: `${sourceUrl}/#tab` }, { page: 2 })).page, 2);
     await assert.rejects(modHubFetchModReleases({ id: 'sample', githubUrl: 'https://github.com/Other/Repo' }, { page: 2 }), /发布来源/);
+    const trackingSource = `${sourceUrl}/releases`;
+    const registeredIdentity = { id: 'approved', repositoryKeys: ['owner/repo'], releaseTrackingSourceUrl: trackingSource };
+    const trackedMod = { id: 'sample', identityId: 'approved', githubUrl: `${sourceUrl}/releases/tag/old`,
+      repositoryKeys: ['owner/repo'], releaseTrackingSourceUrl: trackingSource };
+    const historyPayload = { schemaVersion: 1, id: 'sample', sourceUrl: trackingSource, page: 2, hasMore: false, stale: false, releases: [] };
+    globalThis.fetch = async () => Response.json(historyPayload);
+    assert.equal((await modHubFetchModReleases(trackedMod, { page: 2, identity: registeredIdentity })).sourceUrl, trackingSource,
+      '已批准身份的精确持续跟踪来源应接受 Worker 返回的仓库发布列表');
+    for (const identity of [undefined, { ...registeredIdentity, id: 'other' }, { ...registeredIdentity, repositoryKeys: [] },
+      { ...registeredIdentity, releaseTrackingSourceUrl: `${sourceUrl}/releases/tag/old` },
+      { ...registeredIdentity, releaseTrackingSourceUrl: 'https://github.com/Other/Repo/releases', repositoryKeys: ['other/repo'] }]) {
+      await assert.rejects(modHubFetchModReleases(trackedMod, { page: 2, identity }), error => error.code === 'RELEASE_SOURCE_CHANGED',
+        '条目自身、其他身份及未批准来源不能扩大固定标签范围');
+    }
+    globalThis.fetch = async () => Response.json({ ...historyPayload, sourceUrl });
+    await assert.rejects(modHubFetchModReleases(trackedMod, { page: 2, identity: registeredIdentity }),
+      error => error.code === 'RELEASE_SOURCE_CHANGED', '同仓库不同来源路径仍必须与批准的跟踪地址精确一致');
+    const renamedIdentity = { ...registeredIdentity, repositoryKeys: ['owner/repo', 'owner/renamed'],
+      releaseTrackingSourceUrl: 'https://github.com/Owner/Renamed/releases' };
+    globalThis.fetch = async () => Response.json({ ...historyPayload, sourceUrl: renamedIdentity.releaseTrackingSourceUrl });
+    assert.equal((await modHubFetchModReleases(trackedMod, { page: 2, identity: renamedIdentity })).sourceUrl,
+      renamedIdentity.releaseTrackingSourceUrl, '同作者的规范更名须由批准身份同时授权旧与新仓库');
+    for (const identity of [{ ...renamedIdentity, repositoryKeys: ['owner/renamed'] },
+      { ...renamedIdentity, id: 'other' }, { ...renamedIdentity, releaseTrackingSourceUrl: 'https://github.com/Other/Renamed/releases',
+        repositoryKeys: ['owner/repo', 'other/renamed'] }]) {
+      await assert.rejects(modHubFetchModReleases(trackedMod, { page: 2, identity }), error => error.code === 'RELEASE_SOURCE_CHANGED',
+        '未批准旧仓库、错身份和跨作者来源不能按仓库更名处理');
+    }
+    await assert.rejects(modHubFetchModReleases({ ...trackedMod, githubUrl: 'https://github.com/Owner/Unapproved/releases/tag/old' },
+      { page: 2, identity: renamedIdentity }), error => error.code === 'RELEASE_SOURCE_CHANGED');
+    globalThis.fetch = async () => Response.json({ ...historyPayload, sourceUrl: 'invalid-url' });
+    await assert.rejects(modHubFetchModReleases(trackedMod, { page: 2, identity: registeredIdentity }),
+      error => error.code === 'RELEASE_SOURCE_CHANGED', '无效来源应按来源变化拒绝');
+
     globalThis.fetch = async () => Response.json({ code: 'RELEASE_UPSTREAM_TIMEOUT',
       error: 'The user aborted a request.', details: { name: 'AbortError', message: 'The user aborted a request.' } }, { status: 504 });
     await assert.rejects(modHubFetchModReleases({ id: 'sample', githubUrl: sourceUrl }), error => {
@@ -156,6 +216,9 @@ async function main() {
   assert.ok(catalog.mods.every((mod) => !mod.repositories.length
     || (Array.isArray(mod.repositoryKeys) && mod.repositoryKeys.every((key) => /^[^/]+\/[^/]+$/.test(key)))),
   '带仓库别名的身份必须声明所有者/仓库完整键');
+  for (const identity of catalog.mods.filter(mod => mod.releaseTrackingSourceUrl !== undefined)) {
+    assert.ok(modHubNormalizeReleaseTrackingSource(identity), `${identity.id} 的持续跟踪来源必须由身份仓库授权且通过规范化`);
+  }
   const auditedRepositoryKeys = new Map([
     ['defrock-sydney', 'hxdnshx/sugarcube-2-modloader'],
     ['free-attitudes', 'emicoto/dolmods'],
@@ -298,6 +361,13 @@ async function main() {
   ]);
   assert.deepEqual(oldSharedIndex.map(mod => mod.version), ['1.0', '2.0'], '旧索引的共享最新版本不能继续显示为各产品版本');
   assert.ok(oldSharedIndex.every(mod => mod.sharedRepository));
+  const scopedShared = { name: '甲', githubUrl: 'https://github.com/Owner/Repo', sharedRepository: true, repo: 'owner/repo',
+    version: '2.0', versionSource: 'github', releaseProductScoped: true, releaseUrl: 'https://github.com/Owner/Repo/releases/tag/v2', wikiVersion: '1.0' };
+  assert.equal(markSharedRepositories([scopedShared])[0].version, '2.0', '新索引已按真实产品核验的共享版本不得清回 Wiki');
+  for (const extra of [{ releaseProductScoped: false }, { releaseUrl: 'https://github.com/Other/Repo/releases/tag/v2' },
+    { releaseUrl: 'https://github.com/Owner/Repo' }, { repo: 'other/repo' }]) {
+    assert.equal(markSharedRepositories([{ ...scopedShared, ...extra }])[0].version, '1.0', '旧标记或异源事实仍须清错');
+  }
   const originalFetch = global.fetch;
   const storageDescriptor = Object.getOwnPropertyDescriptor(global, 'localStorage');
   const cache = new Map();
@@ -400,7 +470,7 @@ async function main() {
       assert.deepEqual(release.assets.map(asset => asset.name), [fileName], '版别、修复后缀与加号不得破坏共享仓库的完整产品身份');
       assert.equal(release.fromCache, undefined, '新系列规则不得复用旧空候选缓存');
     }
-    assert.ok([...cache.keys()].some(key => decodeURIComponent(key).includes('asset-series-v2')), '新系列规则必须使用独立缓存签名');
+    assert.ok([...cache.keys()].some(key => decodeURIComponent(key).includes('asset-series-v3')), '新系列规则必须使用独立缓存签名');
     for (const bootName of ['SmartPhone', 'iolet', 'alkyrie']) {
       await assert.rejects(fetchModRelease({ githubUrl: repoUrl, name: bootName, sharedRepository: true, bootNames: [bootName] }, { useCache: false }),
         /未找到当前模组/, '不能将独立版别或原名首字母当作可删除的通用版本前缀');
@@ -443,6 +513,12 @@ async function main() {
     assert.equal((await fetchModRelease(ucbMod)).fromCache, true, '修正后的实际包版本仍可缓存');
 
     for (const [tag, name, assets, expected] of [
+      ['phone-old', '智能手机原版', ['SmartPhone-vAlpha.3.88.mod.zip'], '0.3.88'],
+      ['phone-photo', '智能手机摄像图包', ['SmartPhone-PhotoPack-vAlpha.3.87.mod.zip'], '0.3.87'],
+      ['phone-new', '智能手机原版', ['SmartPhone.Alpha-v0.3.89.1.mod.zip'], '0.3.89.1'],
+      ['other-alpha', '其他 Alpha 模组', ['Other-vAlpha.3.88.mod.zip'], '3.88'],
+      ['phone-other-alpha', '其他手机版号', ['SmartPhone-vAlpha.1.0.mod.zip'], '1.0'],
+      ['phone-omega', '智能手机简化版', ['SmartPhone-vOmega.1.0.mod.zip'], '1.0'],
       ['date', 'UCB-ZedFix', ['Example-DoL-v0.5.12.13-v2.1.zip'], '2.1'],
       ['v1.0', 'v2.0', ['Example.zip'], '2.0'],
       ['v1.0', '支持游戏 0.5.12，更新说明', ['Example.zip'], 'v1.0'],
@@ -453,6 +529,65 @@ async function main() {
       const release = await fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/${tag}` }, { useCache: false });
       assert.equal(release.version, expected, '唯一主包版号优先，缺失时沿用明确标题与语义标签');
       if (tag === 'ambiguous') assert.equal(release.assetName, null, '多个主包不能猜选其中一个的版号');
+    }
+    const exactIdentity = { githubUrl: repoUrl, sharedRepository: true, name: '产品甲', bootNames: ['FooMod'], aliases: ['BarMod'] };
+    const fooAsset = { name: 'FooMod-v1.0.zip', browser_download_url: `${repoUrl}/releases/download/foo1/FooMod-v1.0.zip` };
+    const barAsset = { name: 'BarMod-v99.0.zip', browser_download_url: `${repoUrl}/releases/download/bar99/BarMod-v99.0.zip` };
+    responses.set(`${apiUrl}?per_page=100`, [
+      { tag_name: 'bar99', published_at: '2026-10-14T00:00:00Z', assets: [barAsset] },
+      { tag_name: 'foo1', published_at: '2026-10-13T00:00:00Z', assets: [fooAsset] },
+    ]);
+    const exactRelease = await fetchModRelease(exactIdentity, { useCache: false });
+    assert.equal(exactRelease.version, '1.0', '共享产品不能凭展示别名借用较新的他品附件');
+    assert.equal(exactRelease.releaseProductScoped, true, '只有技术名命中真实主资产才标记产品事实');
+    responses.set(`${apiUrl}?per_page=100`, [{ tag_name: 'bar99', assets: [barAsset] }]);
+    await assert.rejects(fetchModRelease(exactIdentity, { useCache: false }), /未找到当前模组/, '没有主资产时不能误发产品证明');
+    responses.set(`${apiUrl}/tags/legacyAlias`, { tag_name: 'legacyAlias', assets: [barAsset] });
+    const legacyAlias = await fetchModRelease({ ...exactIdentity, sharedRepository: false, githubUrl: `${repoUrl}/releases/tag/legacyAlias` }, { useCache: false });
+    assert.equal(legacyAlias.assetName, barAsset.name, '非共享旧路径保留原有下载兼容');
+    assert.equal(legacyAlias.releaseProductScoped, false, '旧兼容展示名不能升级为真实产品证明');
+    const tracking = { githubUrl: `${repoUrl}/releases/tag/old`, repositoryKeys: ['AOKIUTAGE/UTAGEsDOL3.0'],
+      releaseTrackingSourceUrl: repoUrl, name: '工具', bootNames: ['Tool'] };
+    responses.set(`${apiUrl}?per_page=100`, [
+      { tag_name: 'other', published_at: '2026-10-14T00:00:00Z', assets: [{ name: 'Other-v99.0.zip', browser_download_url: `${repoUrl}/releases/download/other/Other-v99.0.zip` }] },
+      { tag_name: 'v2', published_at: '2026-10-13T00:00:00Z', assets: [{ name: 'Tool-v2.1.zip', browser_download_url: `${repoUrl}/releases/download/v2/Tool-v2.1.zip` }] },
+    ]);
+    assert.equal((await fetchModRelease(tracking, { useCache: false })).version, '2.1', '已登记持续跟踪须突破原固定标签但仍只认本品技术名');
+    assert.equal(modHubNormalizeReleaseTrackingSource({ ...tracking, releaseTrackingSourceUrl: 'https://github.com/Other/Repo' }), null);
+    const editions = [{ id: 'lite', label: '纯文本', bootName: 'Tool', assetSeries: 'ToolLite', bootEdition: 'Lite', exclusive: true },
+      { id: 'visual', label: '含图', bootName: 'Tool', assetSeries: 'ToolVisual', bootEdition: 'Visual', exclusive: true }];
+    responses.set(`${apiUrl}?per_page=100`, [{ tag_name: 'v3', published_at: '2026-10-14T00:00:00Z', assets:
+      ['ToolLite-v3.0.zip', 'ToolVisual-v3.0.zip'].map(name => ({ name, browser_download_url: `${repoUrl}/releases/download/v3/${name}` })) }]);
+    const typed = await fetchModRelease({ ...tracking, packageEditions: editions }, { useCache: false });
+    assert.equal(typed.version, '3.0');
+    assert.deepEqual(typed.assets.map(asset => asset.editionId), ['lite', 'visual'], '同技术名替代包只能明确选型，不猜选第一个');
+    assert.equal(typed.assetName, null);
+    assert.deepEqual(modHubNormalizeReleaseProductMetadata({ ...tracking, packageEditions: editions }).packageEditions, editions);
+    for (const [id, expected] of [['candy-and-robot', '2.4.4.2'], ['head-mask-compatibility', '0.5beta'], ['npc-social-avatars', '1.4.1']]) {
+      const identity = catalog.mods.find(item => item.id === id);
+      const record = identity.verifiedReleaseAssets[0];
+      const target = parseGithubReleaseTarget(record.sourceUrl);
+      const proofRepo = `https://github.com/${target.owner}/${target.repo}`;
+      const proofMod = { ...identity, githubUrl: proofRepo, sharedRepository: true };
+      const checkedAsset = { name: target.assetName, size: record.size, digest: null, browser_download_url: record.sourceUrl };
+      assert.equal(modHubMatchReleaseAssetEvidence(checkedAsset, proofMod)?.version, expected,
+        '完整批准附件证据应优先使用真实包内版号，旧 API 摘要为空时沿用预期摘要');
+      for (const invalid of [{ ...checkedAsset, digest: `sha256:${'0'.repeat(64)}` }, { ...checkedAsset, size: record.size + 1 },
+        { ...checkedAsset, browser_download_url: record.sourceUrl.replace('/releases/download/', '/releases/download/other/') }]) {
+        assert.equal(modHubMatchReleaseAssetEvidence(invalid, proofMod), null, '当前摘要、大小或精确附件来源不一致不得借用批准版号');
+      }
+      for (const invalid of [{ ...record, size: undefined }, { ...record, sha256: 'bad' }, { ...record, bootName: 'Other' }, { ...record, version: '' }]) {
+        assert.equal(modHubMatchReleaseAssetEvidence(checkedAsset, { ...proofMod, verifiedReleaseAssets: [invalid] }), null,
+          '批准记录必须完整包含真实身份、摘要、大小及版本');
+      }
+      const proofApi = `https://api.github.com/repos/${target.owner}/${target.repo}/releases?per_page=100`;
+      responses.set(proofApi, [{ tag_name: target.tag, assets: [checkedAsset] }]);
+      const checked = await fetchModRelease(proofMod, { useCache: false });
+      assert.equal(checked.version, expected, '提取器不能把附件中的游戏版号或发布标签当作已核验 boot.version');
+      assert.equal(checked.assets[0].versionSource, 'verified-boot');
+      assert.equal(checked.assets[0].digest, `sha256:${record.sha256}`);
+      responses.set(proofApi, [{ tag_name: target.tag, assets: [{ ...checkedAsset, size: record.size + 1 }] }]);
+      assert.notEqual((await fetchModRelease(proofMod, { useCache: false })).version, expected, '当前附件大小变化后不继承已审核版号');
     }
     console.log('GitHub Release 标签与缓存测试通过');
   } finally {

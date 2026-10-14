@@ -1,4 +1,4 @@
-/** ModHub - 显式语言变体目录与展示分组。 */
+/** ModHub - 显式发行分支、包型与附加资源目录。 */
 (function () {
     'use strict';
 
@@ -10,11 +10,65 @@
     };
 
     function normalizeVariant(value) {
-        if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'language') return null;
+        if (!value || typeof value !== 'object' || Array.isArray(value) || !['language', 'edition'].includes(value.type)) return null;
         const group = groupId(value.groupId), groupName = text(value.groupName, 200);
         const id = text(value.id, 48), label = text(value.label, 80);
-        if (!group || !groupName || !label || !/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(id)) return null;
-        return { groupId: group, groupName, type: 'language', id, label };
+        const validId = value.type === 'language' ? /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i : /^[a-z0-9][a-z0-9._-]*$/i;
+        if (!group || !groupName || !label || !validId.test(id)) return null;
+        return { groupId: group, groupName, type: value.type, id, label };
+    }
+
+    const assetUrl = value => {
+        try {
+            const url = new URL(value);
+            return url.protocol === 'https:' && url.hostname === 'github.com' && !url.port && !url.username && !url.password
+                && /^\/[^/]+\/[^/]+\/releases\/download\/[^/]+\/[^/]+$/.test(url.pathname) && !url.search && !url.hash ? url.href : '';
+        } catch (_) { return ''; }
+    };
+    function normalizePackageEditions(value) {
+        if (!Array.isArray(value)) return [];
+        const ids = new Set();
+        const result = [];
+        for (const item of value) {
+            const id = groupId(item?.id), label = text(item?.label, 80), bootName = text(item?.bootName, 200), assetSeries = text(item?.assetSeries, 200);
+            if (!id || ids.has(id) || !label || !bootName || !assetSeries || typeof item.exclusive !== 'boolean') return [];
+            const bootEdition = item.bootEdition === undefined ? '' : text(item.bootEdition, 80);
+            if (item.bootEdition !== undefined && !bootEdition) return [];
+            const verifiedAssets = (Array.isArray(item.verifiedAssets) ? item.verifiedAssets : []).flatMap(record => {
+                const sourceUrl = assetUrl(record?.sourceUrl), sha256 = text(record?.sha256, 64).toLowerCase(), version = text(record?.version, 200);
+                return sourceUrl && /^[a-f0-9]{64}$/.test(sha256) ? [{ sourceUrl, sha256, ...(version ? { version } : {}) }] : [];
+            });
+            ids.add(id);
+            result.push({ id, label, bootName, assetSeries, exclusive: item.exclusive, ...(bootEdition ? { bootEdition } : {}),
+                ...(verifiedAssets.length ? { verifiedAssets } : {}) });
+        }
+        return result;
+    }
+    function normalizeOptionalResources(value) {
+        if (!Array.isArray(value)) return [];
+        const names = new Set();
+        return value.flatMap(item => {
+            const bootName = text(item?.bootName, 200), label = text(item?.label, 80), assetSeries = text(item?.assetSeries, 200);
+            const sourceUrl = item?.sourceUrl === undefined ? '' : assetUrl(item.sourceUrl);
+            if (!bootName || names.has(bootName.toLowerCase()) || !label || !assetSeries || !['audio', 'resource'].includes(item.packageRole)
+                || item.sourceUrl !== undefined && !sourceUrl) return [];
+            names.add(bootName.toLowerCase());
+            const sha256 = text(item.sha256, 64).toLowerCase(), version = text(item.version, 200), evidenceUrl = text(item.evidenceUrl, 2000);
+            return [{ bootName, label, assetSeries, packageRole: item.packageRole, ...(sourceUrl ? { sourceUrl } : {}),
+                ...(version ? { version } : {}), ...(/^[a-f0-9]{64}$/.test(sha256) ? { sha256 } : {}),
+                ...(Number.isSafeInteger(item.size) && item.size > 0 ? { size: item.size } : {}),
+                ...(evidenceUrl ? { evidenceUrl } : {}) }];
+        });
+    }
+    function getPackageEdition(mod, profile) {
+        if (!profile) return null;
+        const boot = profile.bootJson || profile;
+        const digest = String(profile.packageDigest || '').replace(/^sha256:/i, '').toLowerCase();
+        const editions = normalizePackageEditions(mod?.packageEditions);
+        const sameName = editions.filter(item => item.bootName.toLowerCase() === String(boot.name || profile.name || '').trim().toLowerCase());
+        const matches = sameName.filter(item => item.verifiedAssets?.some(record => record.sha256 === digest)
+            || (item.bootEdition ? item.bootEdition === boot.edition : sameName.length === 1));
+        return matches.length === 1 ? matches[0] : null;
     }
 
     /** 作者说明中的必需前置独立于安装包的依赖声明，保留范围供安装器核验。 */
@@ -48,6 +102,7 @@
             const variants = members.map(mod => normalizeVariant(mod.variant));
             if (members.length < 2 || variants.some(variant => !variant)
                 || new Set(variants.map(variant => variant.groupName)).size !== 1
+                || new Set(variants.map(variant => variant.type)).size !== 1
                 || new Set(variants.map(variant => variant.id.toLowerCase())).size !== members.length) continue;
             const identities = members.map(mod => mod.identityId === null ? '' : text(mod.identityId || mod.id, 200).toLowerCase());
             const names = members.map(mod => Array.isArray(mod.bootNames)
@@ -61,7 +116,8 @@
                 owners.set(name, index);
             }));
             if (overlapping) continue;
-            valid.set(id, { isLanguageGroup: true, variantGroupId: id, name: variants[0].groupName, variants: members });
+            valid.set(id, { isLanguageGroup: true, variantGroupId: id, name: variants[0].groupName, variants: members,
+                ...(variants[0].type === 'edition' ? { variantType: 'edition', isEditionGroup: true } : {}) });
         }
         const emitted = new Set();
         return mods.flatMap(mod => {
@@ -83,5 +139,6 @@
         return variant ? `${name}（${variant.label}）` : name;
     }
 
-    window.modHubMarketVariants = { normalizeVariant, normalizeRequiredDependencies, groupMods, getMembers, getDisplayName };
+    window.modHubMarketVariants = { normalizeVariant, normalizeRequiredDependencies, normalizePackageEditions,
+        normalizeOptionalResources, getPackageEdition, groupMods, getMembers, getDisplayName };
 })();

@@ -81,13 +81,14 @@
     }
 
     function filter(search = '', sort = 'date') {
-        const keyword = String(search).toLowerCase();
-        const values = spells.filter(entry => !keyword || [entry.name, entry.author, entry.description, entry.spell.body,
-            entry.spell.syntax, entry.spell.inputLocation, entry.spell.prerequisites, entry.spell.gameVersionRange,
-            entry.spell.modVersions, entry.spell.verificationMethod]
-            .some(value => String(value || '').toLowerCase().includes(keyword)));
-        return values.sort((left, right) => sort === 'name' ? String(left.name).localeCompare(String(right.name), 'zh-CN')
-            : String(right.updateDate || right.spell.verifiedAt || '').localeCompare(String(left.updateDate || left.spell.verifiedAt || '')));
+        const query = search ? window.modHubSearch.compile(search) : { tokens: [] };
+        return spells.map(entry => ({ entry, score: query.tokens.length ? window.modHubSearch.score(entry, query) : 0 }))
+            .filter(item => item.score >= 0).sort((left, right) => {
+                if (sort === 'name') return String(left.entry.name).localeCompare(String(right.entry.name), 'zh-CN');
+                if (query.tokens.length && left.score !== right.score) return right.score - left.score;
+                return String(right.entry.updateDate || right.entry.spell.verifiedAt || '')
+                    .localeCompare(String(left.entry.updateDate || left.entry.spell.verifiedAt || ''));
+            }).map(item => item.entry);
     }
 
     function acquisitionHtml(entry) {

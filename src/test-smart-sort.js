@@ -19,6 +19,7 @@ process.on('beforeExit', () => {
     await require('../tests/restore-panel.test')();
     await require('../tests/restore-startup.test')();
     await require('../tests/market-catalog.test')();
+    await require('../tests/market-search.test')();
     await require('../tests/market-variants.test')();
     await require('../tests/market-language-cards.test')();
     await require('../tests/diagnostics-conflicts.test')();
@@ -38,7 +39,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.5.1 全部测试通过');
+    console.log('ModHub v1.6.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

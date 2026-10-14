@@ -3,7 +3,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
 
-const { extract, fromDom, isUtilityName, boundaryTags, ignoredTags } = require('../src/javascript/modhub-wiki-title.js');
+const { extract, fromDom, isUtilityName, isStatusName, normalizeStatusTitle, boundaryTags, ignoredTags } = require('../src/javascript/modhub-wiki-title.js');
 const text = value => ({ type: 'text', text: value });
 const link = (value, href) => ({ type: 'link', text: value, href });
 const br = () => ({ type: 'break' });
@@ -304,10 +304,33 @@ test('DOM 的 hr 也分隔标题，不能把两个候选拼成名字', () => {
   assert.equal(value.legacyName, '候选甲候选乙');
 });
 
+test('露出拓展名称列的 pre 开发状态不覆盖真实标题，保留旧名称锚', () => {
+  const source = 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion';
+  const cell = dom('td', [dom('b', [dom('big', [domText('露出拓展')])]),
+    dom('pre', [dom('a', [domText('下载链接')], { href: 'https://sb.alseece.top/2?=DoL-MEE' })]),
+    dom('pre', [domText('正在开发中')]), dom('pre', [dom('a', [domText('Github')], { href: source })])]);
+  const value = fromDom(cell);
+  assert.equal(value.status, 'resolved');
+  assert.equal(value.name, '露出拓展');
+  assert.equal(value.legacyName, '正在开发中');
+  assert.equal(isStatusName('正在开发中', [source]), true);
+  assert.equal(normalizeStatusTitle('露出拓展 正在开发中', [source]), '露出拓展');
+  for (const name of ['正在开发中', '简介中提到露出拓展', '露出拓展的新分支']) {
+    assert.equal(normalizeStatusTitle(name, [source]), '', '只能核对名称列全串，不能从状态或说明猜测名称');
+  }
+  for (const other of [source.replace('ANLINSTUDIO', 'Other'), source + '/tree/main', source + '?other=1',
+    source.replace('https://github.com/', 'https://user@github.com/'), source.replace('github.com', 'github.com.example.org')]) {
+    assert.equal(isStatusName('正在开发中', [other]), false, '其它完整来源不能继承该状态标签证据');
+    assert.equal(normalizeStatusTitle('露出拓展 正在开发中', [other]), '');
+  }
+  unresolved([text('正在开发中'), br(), link('Github', source)], 'missing');
+  unresolved([text('露出拓展'), br(), text('正在开发中'), br(), link('Github', gh)]);
+});
+
 test('边界与忽略标签列表由 API 冻结共享，DOM 忽略其文本', () => {
   assert.equal(Object.isFrozen(boundaryTags), true);
   assert.equal(Object.isFrozen(ignoredTags), true);
-  assert.deepEqual(boundaryTags, ['br', 'hr', 'p', 'div', 'li', 'ul', 'ol', 'dl', 'dt', 'dd',
+  assert.deepEqual(boundaryTags, ['br', 'hr', 'p', 'div', 'pre', 'li', 'ul', 'ol', 'dl', 'dt', 'dd',
     'section', 'article', 'header', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
   assert.deepEqual(ignoredTags, ['script', 'style', 'noscript']);
   const value = fromDom(dom('td', [domText('真实标题'), ...ignoredTags.map(tag => dom(tag, [domText('不属于标题')]))]));

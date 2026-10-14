@@ -5,6 +5,46 @@ const {
 } = require('./helpers');
 
 module.exports = async function() {
+    {
+        const market = loadMarket().modHubMarket;
+        const registry = JSON.parse(fs.readFileSync(path.join(srcRoot, '..', 'mod-identities.json'), 'utf8')).mods;
+        const npc = registry.find(mod => mod.id === 'npc-social-avatars');
+        const [migratedNpc] = market.normalizeReleaseIndex({ schemaVersion: 1, identities: [npc], mods: [{
+            ...npc, identityId: npc.id, githubUrl: 'https://github.com/Eudemonism00/DOL-npcicon-mods', releaseTrackingSourceUrl: 'https://github.com/Other/Repo'
+        }] });
+        assert.equal(migratedNpc.githubUrl, 'https://github.com/Eudemonism00/DOL-NPC-Avatars-Mod/releases', '同作者两仓身份已批准时使用规范更名来源，叶子字段不能覆盖登记');
+        const unauthorized = { ...npc, repositoryKeys: ['Eudemonism00/DOL-NPC-Avatars-Mod'] };
+        const [unchangedNpc] = loadMarket().modHubMarket.normalizeReleaseIndex({ schemaVersion: 1, identities: [unauthorized], mods: [{
+            ...unauthorized, identityId: npc.id, githubUrl: 'https://github.com/Eudemonism00/DOL-npcicon-mods'
+        }] });
+        assert.equal(unchangedNpc.githubUrl, 'https://github.com/Eudemonism00/DOL-npcicon-mods', '未批准原仓身份不能扩大为另一仓库跟踪');
+        const isolated = { bootNames: ['Foo'], aliases: ['Bar'], sharedRepository: true, githubUrl: 'https://github.com/Owner/Repo' };
+        assert.equal(market.matchesAssetIdentity({ name: 'Bar-v99.zip' }, isolated), false, '共享产品不能仅凭展示别名选中其他产品');
+        for (const id of ['candy-and-robot', 'head-mask-compatibility', 'clothing-trait-compatibility']) {
+            const product = registry.find(mod => mod.id === id), record = product.verifiedReleaseAssets[0];
+            assert.equal(market.matchesAssetIdentity({ name: record.fileName }, { ...product, githubUrl: record.sourceUrl }), true,
+                `${id}须通过完整登记附件确认产品归属，不能伪造技术名`);
+        }
+        const phone = { ...registry.find(mod => mod.id === 'smartphone'), githubUrl: 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone' };
+        const main = { name: 'SmartPhone.Alpha-v0.3.89.1.mod.zip', downloadUrl: `${phone.githubUrl}/releases/download/v0.3.89/SmartPhone.Alpha-v0.3.89.1.mod.zip` };
+        const phonePlan = market.buildReleaseAssetPlan([main], '', phone);
+        assert.deepEqual(Array.from(phonePlan.assets, asset => asset.name), [main.name]);
+        const phoneOptional = market.getMatchingOptionalAssets(main, [main], phone);
+        assert.equal(phoneOptional[0].bootName, 'SmartPhone PhotoPack');
+        assert.equal(phoneOptional[0].version, 'Alpha.3.87', '跨发布图包使用自身真实版本，不能借用手机版本');
+        assert.equal(market.getMatchingCompanionAssets(main, [main, phoneOptional[0]], phone).length, 0, '图包只能作为可选资源，不重复作为必需组件');
+        const omega = { ...registry.find(mod => mod.id === 'smartphone-omega'), githubUrl: phone.githubUrl };
+        assert.equal(market.getMatchingOptionalAssets({ name: 'SmartPhone-vOmega.1.0.mod.zip' }, [], omega).length, 0, '原版图包不能关联简化版');
+        const ui = { ...registry.find(mod => mod.id === 'dolsoftwetgameui-dol-game-ui'), githubUrl: 'https://github.com/102326/DoL-Game-UI' };
+        const uiAssets = ['DoLGameUI-v2.6.0.mod.zip', 'ModHubSoftWet-ModHub-1.3.0-plus-v0.2.4.mod.zip',
+            'MapleBirchSoftWet-maplebirch-5.2.3-plus-v0.2.4.mod.zip', 'DolOptimizationSoftWet-Optimization-1.1.1.2-plus-v0.1.6.mod.zip',
+            'ReOverfitsSoftWet-ReOverfits-4.1.1-plus-v0.2.2.mod.zip'].map(name => ({ name, downloadUrl: `${ui.githubUrl}/releases/download/v2.6.0/${name}` }));
+        const uiPlan = market.buildReleaseAssetPlan(uiAssets, '', ui);
+        assert.equal(uiPlan.assets.length, 1);
+        const uiOptional = market.getMatchingOptionalAssets(uiAssets[0], uiAssets, ui);
+        assert.equal(uiOptional.length, 4, '四份兼容包均可选');
+        assert.deepEqual(Array.from(uiOptional, asset => asset.version), ['0.2.4', '0.2.4', '0.1.6', '0.2.2'], '兼容包版本不能误取文件名中的前置版本');
+    }
     // 主安装、精确标签与图包查询复用国内历史接口，保留真实下载源和身份核验。
     {
         const sb = loadMarket();
@@ -175,6 +215,30 @@ module.exports = async function() {
         assert.deepEqual(Array.from(market.normalizeReleaseIndex({ schemaVersion: 1, communityRevision: 1,
             withdrawnIds: ['recovered', 'community-qq'], mods }), mod => mod.id),
             ['retained', 'real-qq', 'community-github'], '恢复标题及保留社区原名不能解除下架保护');
+    }
+    // 开发状态只按精确来源及完整 Wiki 名称证据纠正显示，不改变审核身份。
+    {
+        const sb = loadMarket(), market = sb.modHubMarket;
+        const source = 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion';
+        const original = { id: 'exhibition-legacy', identityId: null, name: '正在开发中', wikiName: '正在开发中',
+            wikiCandidateName: '露出拓展 正在开发中', githubUrl: source, wikiGithubUrl: source, bootNames: [],
+            version: '1.0.4', versionSource: 'github', titleStatus: 'resolved' };
+        const [fixed] = market.normalizeReleaseIndex({ schemaVersion: 1, mods: [original] });
+        assert.equal(fixed.name, '露出拓展', '完整名称及精确作者来源可修复旧状态标题');
+        for (const field of ['id', 'identityId', 'wikiName', 'githubUrl', 'version']) assert.equal(fixed[field], original[field]);
+        assert.equal(original.name, '正在开发中', '显示修正不修改输入快照');
+        for (const entry of [
+            { ...original, wikiCandidateName: '其他名称 正在开发中' },
+            { ...original, githubUrl: 'https://github.com/Other/Project', wikiGithubUrl: 'https://github.com/Other/Project' },
+            { ...original, name: '人工保留名称' },
+            { ...original, catalogSource: 'community' },
+        ]) assert.equal(market.normalizeReleaseIndex({ schemaVersion: 1, mods: [entry] })[0].name, entry.name,
+            '无完整证据、不同来源、人工名称与社区审核名称不得重写');
+        const key = 'modhub_market_wiki_v5', saved = JSON.stringify({ timestamp: Date.now(), data: [original] });
+        sb.localStorage.setItem(key, saved);
+        sb.fetch = async () => { throw new Error('模拟离线旧目录'); };
+        assert.equal((await market.loadMarketData())[0].name, '露出拓展', '离线列表应用相同显示修复');
+        assert.equal(sb.localStorage.getItem(key), saved, '离线修正不改写缓存内容或时间');
     }
     // 所有旧缓存读点共用标题校验，保留快照内容和时间，不让管理页复活污染项。
     {
@@ -969,7 +1033,7 @@ module.exports = async function() {
         assert.equal(elements.get('modHubMarketBtnSubmit').textContent, '投稿候选言灵', '言灵板块提供明确投稿入口');
         assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话进入言灵不清除 MOD 勾选');
         assert.equal(sb.modHubMarket.selectMarketSection('packages'), true);
-        assert.equal(elements.get('modHubMarketBtnSubmit').textContent, '推荐模组', '原模组推荐入口保持不变');
+        assert.equal(elements.get('modHubMarketBtnSubmit').textContent, '申请上架 / 推荐模组', '模组入口明确说明可申请收录');
         assert.ok(sb.modHubMarket.getBatchSelectionState().selected.includes(selectedKey), '同一会话返回 MOD 区恢复原勾选');
         assert.equal(sb.modHubMarket.selectMarketSection('spells'), true);
         let finishManagerRead, startedManagerRead;
@@ -1446,6 +1510,7 @@ module.exports = async function() {
         assert.ok(!card.includes('一键更新') && !card.includes('已是最新') && !card.includes('<img src=x'), '外链卡片不能承诺自动更新，也不能渲染投稿 HTML');
         const opened = [];
         let feedbackMode = 'correct';
+        let feedbackAuthor = manual.author;
         sb.modHubConfirm = async options => {
             opened.push(options);
             if (opened.length === 1) return feedbackMode;
@@ -1462,7 +1527,7 @@ module.exports = async function() {
                 search.oninput();
                 assert.equal(select.children.length, 1, '搜索无结果时不得保留旧目标');
                 assert.equal(confirm.disabled, true, '搜索后必须重新选择目标');
-                search.value = '作者';
+                search.value = feedbackAuthor;
                 search.oninput();
                 assert.equal(select.children.length, 2, '可按作者搜索完整目录');
                 return '0';
@@ -1490,6 +1555,7 @@ module.exports = async function() {
         const linkless = { id: '惩罚礼顿-external', name: '惩罚礼顿++', author: 'lyjjl',
             description: '目录中已有的无链接模组', identityId: null, githubUrl: null, otherUrl: null,
             catalogSource: 'community', sourcePlatform: 'catalog', sourceUrl: '', autoInstall: false };
+        feedbackAuthor = linkless.author;
         sb.fetch = async () => ({ ok: true, json: async () => ({ schemaVersion: 1, mods: [linkless] }) });
         await sb.modHubInitMarket(true);
         assert.ok(elements.get('modHubMarketCardsContainer').innerHTML.includes('暂无来源链接'),
@@ -1585,11 +1651,12 @@ module.exports = async function() {
         sb.removeEventListener = (name, handler) => { if (name === 'message' && listener === handler) listener = null; };
         const opened = [];
         function makeDialog() {
-            const inputs = Object.fromEntries(Object.entries({ name: 100, author: 100, sourceUrl: 1000, description: 1000, notes: 1000,
+            const inputs = Object.fromEntries(Object.entries({ name: 100, author: 100, sourceUrl: 1000, description: 1000, notes: 1000, category: 100,
                 body: 64000, syntax: 200, inputLocation: 1000, instructions: 8000, parameters: 4000, prerequisites: 4000,
                 gameVersionRange: 200, modVersions: 4000, verificationMethod: 4000, submittedEnvironmentVerified: 0, publicationConsent: 0 })
                 .map(([name, maxLength]) => [name, { value: '', maxLength, disabled: false, checked: false,
                     type: ['submittedEnvironmentVerified', 'publicationConsent'].includes(name) ? 'checkbox' : 'text',
+                    focus() { this.focused = true; },
                     addEventListener(event, handler) { this['on' + event] = handler; } }]));
             const form = { elements: { namedItem: name => inputs[name] }, onsubmit: null };
             const frame = { src: '', contentWindow: {}, dataset: {} };
@@ -1724,6 +1791,15 @@ module.exports = async function() {
         listener({ origin, source: first.frame.contentWindow,
             data: { type: 'modHubCommunityChallenge', nonce, token: '新挑战' } });
         await first.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted.length, 0, '新上架申请必须选择分类');
+        assert.equal(first.inputs.category.focused, true, '缺少分类时定位分类控件');
+        first.inputs.category.value = '玩法与内容';
+        first.inputs.category.oninput();
+        assert.equal(first.status.textContent, '安全验证已完成，可提交审核。', '选好分类后清除对应的旧校验提示');
+        assert.equal(JSON.parse(sb.localStorage.getItem('modhub_market_submission_drafts_v1'))['new:'].fields.category,
+            '玩法与内容', '分类随本机草稿保存');
+        await first.form.onsubmit({ preventDefault() {} });
+        assert.equal(posted[0].body.category, '玩法与内容', '选择的分类必须随投稿发送');
         const receipt = posted[0].body.receipt;
         assert.match(receipt, /^[A-Za-z0-9_-]{43}$/);
         assert.ok(first.status.textContent.includes('模拟响应丢失'), '提交失败的具体原因应留在外层状态区');
@@ -1737,6 +1813,7 @@ module.exports = async function() {
         const retryTask = market.openCommunitySubmission('new');
         const retry = opened.at(-1);
         assert.equal(retry.inputs.name.value, '测试模组', '重开时恢复原申请内容');
+        assert.equal(retry.inputs.category.value, '玩法与内容', '重试时恢复原分类');
         assert.equal(retry.inputs.name.disabled, true, '未确认申请锁定内容以保证幂等重试');
         assert.ok(retry.status.textContent.includes('上次提交结果尚未确认'), '待确认投稿重开后保留风险提示');
         nonce = new URL(retry.frame.src).searchParams.get('nonce');
@@ -1933,10 +2010,12 @@ module.exports = async function() {
 
         sb.innerWidth = 320;
         const correctTask = market.openCommunitySubmission('correct', {
-            id: 'community-target', name: '待纠错模组', author: '作者',
+            id: 'community-target', name: '待纠错模组', author: '作者', category: '玩法与内容',
             sourceUrl: 'https://tieba.baidu.com/p/123', description: '原简介'
         });
         const correct = opened.at(-1);
+        assert.equal(correct.inputs.category.value, '玩法与内容', '分类纠错先显示当前分类');
+        correct.inputs.category.value = '修复与兼容';
         assert.equal(new URL(correct.frame.src).searchParams.get('size'), 'compact', '窄屏验证控件应选紧凑尺寸');
         nonce = new URL(correct.frame.src).searchParams.get('nonce');
         listener({ origin, source: correct.frame.contentWindow,
@@ -1944,6 +2023,7 @@ module.exports = async function() {
         await correct.form.onsubmit({ preventDefault() {} });
         assert.equal(posted.at(-1).body.catalogId, 'community-target', '纠错必须绑定实际目录条目 ID');
         assert.equal(posted.at(-1).body.kind, 'correct');
+        assert.equal(posted.at(-1).body.category, '修复与兼容', '分类纠错随绑定目录的申请提交');
         correct.close(false);
         await correctTask;
 
@@ -2578,6 +2658,9 @@ module.exports = async function() {
             versions.fetchReleases = async () => ({ releases: [release], page: 1, hasMore: false });
             const candidates = versions.buildCandidates(target, { releases: [release] });
             assert.equal(candidates.length, 1);
+            assert.equal(candidates[0].legacyPackage, true, '明确固定的已登记旧附件保留历史安装入口');
+            assert.equal(candidates[0].packageEdition, undefined, '无edition旧包不能借用Lite或Visual身份核验');
+            assert.equal(candidates[0].assets[0].digest, `sha256:${identity.verifiedReleaseAssets[0].sha256}`, '固定旧包继续绑定已核验摘要');
             assert.equal(candidates[0].compatibility.status, scenario === '游戏版本不同' ? 'incompatible' : 'compatible',
                 '选版的游戏范围声明必须保留，不表示前置已满足');
             const prompts = [], alerts = [];
@@ -2602,6 +2685,7 @@ module.exports = async function() {
                 `${scenario}时采用停止处理，不得安装`);
             assert.equal(prepared, 1, `${scenario}必须核对原包声明，不能只测目录提示`);
             assert.equal(imported, 0, `${scenario}取消后不得导入`);
+            assert.ok(!prompts.some(item => item.title.endsWith('】版本类型')), '固定旧包不要求选择不存在的新版包型');
             if (scenario === '缺少TweeReplacer') {
                 assert.ok(prompts.some(item => item.title === '前置需要手动处理' && item.message.includes('TweeReplacer')
                     && item.message.includes('1.7.0')), '缺少真实包前置必须说明要求并默认停止');
@@ -2884,7 +2968,7 @@ module.exports = async function() {
             return { id: _mod.id, sourceUrl: mod.githubUrl, page, nextPage: page + 1, hasMore: page < pages.length,
                 fetchedAt: '2026-10-02T00:00:00Z', releases: [pages[page - 1]] };
         };
-        sb.localStorage.setItem('modhub_market_identities_v4', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
+        sb.localStorage.setItem('modhub_market_identities_v5', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
         sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
         [mod] = await market.loadMarketData();
         assert.notEqual(market.checkModInstallStatus(mod), 'update_available', '适配信息读取完成前不能用另一游戏版本误报更新');
@@ -3067,7 +3151,7 @@ module.exports = async function() {
         sb.document.getElementById = id => elements.get(id) || null;
         const notifications = [];
         sb.modHubNotifyUpdateState = (count, list) => notifications.push({ count, list });
-        sb.localStorage.setItem('modhub_market_identities_v4', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
+        sb.localStorage.setItem('modhub_market_identities_v5', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
         sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
         [mod] = await market.loadMarketData();
         market.checkModInstallStatus(mod);
@@ -3171,7 +3255,7 @@ module.exports = async function() {
             'Z-outdate-UCB-zedfix-1.0.2.zip', 'UCB-zedfix-1.0.3.zip'])];
         versions.fetchReleases = async source => ({ id: source.id, sourceUrl: source.githubUrl, page: 1, hasMore: false,
             fetchedAt: '2026-10-02T00:00:00Z', releases });
-        sb.localStorage.setItem('modhub_market_identities_v4', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
+        sb.localStorage.setItem('modhub_market_identities_v5', JSON.stringify({ data: { schemaVersion: 1, mods: [mod] }, timestamp: Date.now() }));
         sb.localStorage.setItem('modhub_market_wiki_v5', JSON.stringify({ data: [mod], timestamp: Date.now() }));
         [mod] = await market.loadMarketData();
         market.checkModInstallStatus(mod);
@@ -3600,7 +3684,7 @@ module.exports = async function() {
 
         const [normOriginal, normOmega] = normalizedMods;
         assert.notEqual(normOriginal.name, normOmega.name, '本体与 Omega 绝不能被覆盖成相同名称');
-        assert.equal(normOriginal.name, '万能的智能手机', '本体模组名称必须保持为万能的智能手机');
+        assert.equal(normOriginal.name, '万能的智能手机（原版）', '本体保留真实名称，并标明原版分支');
         assert.ok(
             normOmega.name.includes('Omega'),
             `Omega 模组名称必须包含 Omega 标识，实际为:【${normOmega.name}】`

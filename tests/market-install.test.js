@@ -7,6 +7,95 @@ const {
 
 module.exports = async function() {
     await require('./market-release-selection.test')();
+    // 点击后的只读准备必须立即可见，并在取消和异常后保留原按钮资格。
+    {
+        const sb = loadMarket();
+        loadScripts(sb, ['javascript/modhub-market-versions.js', 'javascript/modhub-market-install.js']);
+        sb.AbortController = AbortController;
+        const market = sb.modHubMarket;
+        const mod = { id: 'waiting-stage', name: '等待阶段验证', bootNames: ['WaitingFixture'],
+            githubUrl: 'https://github.com/ModHubTests/WaitingFixture' };
+        const card = createStubElement(); card.dataset.modName = mod.name;
+        const progress = card.querySelector('.modhub-download-progress'); progress.hidden = true;
+        const button = card.querySelector('.btn-market-install, .btn-market-update'); button.dataset.idleText = '更换版本';
+        const attributes = new Map();
+        button.setAttribute = (name, value) => attributes.set(name, value);
+        button.removeAttribute = name => attributes.delete(name);
+        const protectedButton = createStubElement('button'); protectedButton.disabled = true;
+        sb.document.querySelectorAll = selector => selector === '.modhub-market-card' ? [card]
+            : selector === '.btn-market-install, .btn-market-update' ? [button, protectedButton] : [];
+        let finishRead, versionDialogs = 0, imports = 0;
+        market.refreshLocalPackageProfiles = () => new Promise(resolve => { finishRead = resolve; });
+        sb.modHubHandleAddMod = async () => { imports++; return true; };
+        sb.modHubConfirm = async options => { assert.match(options.title, /^选择【等待阶段验证】版本$/); versionDialogs++; return false; };
+        sb.modHubAlert = async () => {};
+        for (let round = 0; round < 2; round++) {
+            const pending = market.promptDownloadMirrorAndInstall(mod);
+            assert.equal(progress.hidden, true, '准备期间只在按钮显示状态，不重复展示等待行');
+            assert.match(button.innerHTML, /modhub-progress-ring/, '点击位置必须立即显示加载环，不依赖长卡内的等待区可见');
+            assert.equal(attributes.get('aria-busy'), 'true');
+            assert.match(progress.querySelector('.modhub-download-label').textContent, /正在读取已安装模组信息/);
+            assert.equal(button.disabled, true);
+            assert.equal(versionDialogs, round, '慢读尚未结束时不能提前进入版本选择');
+            assert.equal(await market.promptDownloadMirrorAndInstall(mod), false, '同一等待期重复入口仍由任务锁拒绝');
+            assert.equal(progress.hidden, true, '拒绝重复点击仍不展示重复等待行');
+            assert.match(button.innerHTML, /modhub-progress-ring/, '拒绝重复点击不能清除第一项任务的按钮加载环');
+            finishRead();
+            assert.equal(await pending, false, '版本选择取消后结束本次准备');
+            assert.equal(button.disabled, false, '取消后同一个按钮可再次选择版本');
+            assert.equal(button.textContent, '更换版本');
+            assert.equal(attributes.has('aria-busy'), false);
+            assert.equal(progress.hidden, true);
+            assert.equal(protectedButton.disabled, true, '任务解锁不能启用原本不可安装的按钮');
+        }
+        market.refreshLocalPackageProfiles = async () => { throw new Error('模拟本地包读取失败'); };
+        assert.equal(await market.promptDownloadMirrorAndInstall(mod), false);
+        assert.equal(button.disabled, false, '准备异常后恢复原按钮');
+        assert.equal(progress.hidden, true, '准备异常后不遗留加载状态');
+        assert.equal(imports, 0, '准备、重复点击、取消和异常均不得写入模组');
+        market.updateDownloadProgress(mod.name, null, '下载失败详情保留', 'error');
+        assert.equal(sb.modHubClearMarketPreparationProgress(mod.name), false);
+        assert.equal(progress.querySelector('.modhub-download-label').textContent, '下载失败详情保留', '准备态清理不能擦掉下载失败详情');
+    }
+    // 原生包体核验的等待不冒充下载百分比，原取消入口继续可用。
+    for (const cancel of [false, true]) {
+        const sb = loadMarket(); sb.Blob = Blob; sb.AbortController = AbortController;
+        const market = sb.modHubMarket;
+        const mod = { id: 'checking-stage', name: '核验阶段验证', bootNames: ['CheckingFixture'],
+            githubUrl: 'https://github.com/ModHubTests/CheckingFixture' };
+        const card = createStubElement(); card.dataset.modName = mod.name;
+        const progress = card.querySelector('.modhub-download-progress');
+        const button = card.querySelector('.btn-market-install, .btn-market-update'); button.dataset.idleText = '下载安装';
+        sb.document.querySelectorAll = selector => selector === '.modhub-market-card' ? [card] : [];
+        let finishCheck, checkStarted;
+        const started = new Promise(resolve => { checkStarted = resolve; });
+        sb.modHubGetGui = () => ({});
+        sb.modHubGetController = () => ({ checkModZipFileIndexDB: async () => {
+            checkStarted(); return new Promise(resolve => { finishCheck = resolve; });
+        } });
+        sb.fetch = async () => ({ ok: true, headers: { get: () => null }, blob: async () => new Blob(['核验等待测试']) });
+        const pending = market.downloadAndInstallMod(mod, 'ddlc', { prepareOnly: true, batchMode: true,
+            releaseInfo: { version: '1.0.0', assets: [{ name: 'CheckingFixture-v1.0.0.zip',
+                downloadUrl: `${mod.githubUrl}/releases/download/v1.0.0/CheckingFixture-v1.0.0.zip` }] } });
+        await started;
+        assert.match(progress.querySelector('.modhub-download-label').textContent, /正在核验安装包身份与前置声明/);
+        assert.equal(progress.querySelector('.modhub-progress-ring').hidden, false);
+        assert.match(button.innerHTML, /modhub-progress-ring/);
+        assert.equal(button.textContent, '正在核验');
+        assert.equal(progress.querySelector('.modhub-download-cancel').hidden, false, '核验期间必须保留原下载取消入口');
+        if (cancel) assert.equal(market.cancelDownload(mod.name), true);
+        finishCheck({ name: 'CheckingFixture', version: '1.0.0' });
+        const result = await pending;
+        if (cancel) {
+            assert.equal(result, false, '核验期间取消仍阻止安装和计划继续');
+            assert.equal(button.disabled, false);
+        } else {
+            assert.equal(result.boots[0].name, 'CheckingFixture');
+            sb.modHubClearMarketPreparationProgress(mod.name);
+            assert.equal(button.disabled, false);
+            assert.equal(progress.hidden, true);
+        }
+    }
     // 保留旧来源入口：通过真实导入、列表保存和重载接口核验最外层完成边界。
     for (const route of ['旧单次安装', '旧批量安装', '旧全部更新']) {
         const sb = loadMarket(), market = sb.modHubMarket;

@@ -105,6 +105,7 @@ function bindLanguageCard(f) {
         return part.trim().startsWith('.') && element.className.split(/\s+/).includes(className);
     }));
     card.querySelectorAll = select;
+    card.querySelector = selector => select(selector)[0] || null;
     f.cards.querySelectorAll = select;
     f.market.renderMarketCards();
     return { choices: select('.btn-market-language-choice'), rows: select('.modhub-market-variant-row'),
@@ -181,15 +182,42 @@ module.exports = async function () {
         const card = css.match(/\.modhub-market-card\s*\{([^}]+)\}/)?.[1] || '';
         const description = css.match(/\.modhub-market-desc\s*\{([^}]+)\}/)?.[1] || '';
         const footer = css.match(/\.modhub-market-card-footer\s*\{([^}]+)\}/)?.[1] || '';
-        assert.match(grid, /align-items:\s*stretch/, '宽屏网格恢复同行等高卡片');
-        assert.match(card, /align-self:\s*stretch/, '卡片不得覆盖网格的同行等高布局');
+        assert.match(grid, /grid-auto-rows:\s*auto/, '各行卡片按当前内容独立计算高度');
+        assert.match(grid, /align-items:\s*stretch/, '同一行卡片保持等高');
+        assert.match(card, /align-self:\s*stretch/, '短卡与长卡仅在同行对齐');
         assert.match(card, /min-height:\s*0/, '普通卡片不得保留人为最小高度');
-        assert.match(description, /flex:\s*0\s+1\s+auto/, '简介不得自动填充卡片空白');
+        assert.match(card, /max-height:\s*480px/, '卡片不得被长内容无限撑高');
+        assert.match(card, /overflow-y:\s*auto/, '超过高度上限的全部内容仍可滚动查看');
+        assert.match(card, /padding:\s*10px\s+12px/, '卡片保留紧凑内部留白');
+        assert.match(description, /flex:\s*0\s+0\s+auto/, '简介不得被收缩到无法阅读');
+        assert.ok(!/max-height:|overflow-y:/.test(description), '简介不再嵌套独立滚动区');
+        assert.match(f.cards.innerHTML, /modhub-market-card[^>]+tabindex="0"[^>]+aria-label="语言测试模组的模组信息"/, '滚动卡片保留具名键盘入口');
         assert.match(footer, /margin-top:\s*auto/, '普通卡片的来源与操作固定在底部');
         assert.match(css, /\.modhub-market-variant-row\[hidden\]\s*\{[^}]*display:\s*none/, '隐藏的语言面板不占布局空间');
         const languageButtonCss = css.match(/\.modhub-market-language-switch\s*>\s*\.modhub-market-language-choice\s*\{([^}]+)\}/)?.[1] || '';
         assert.ok(Number(languageButtonCss.match(/min-height:\s*(\d+)px/)?.[1]) >= 32, '语言切换保留手机触控面积');
+        assert.match(languageButtonCss, /flex-direction:\s*row/, '切换选项的名称与状态使用紧凑单行布局');
+        assert.ok(f.cards.innerHTML.indexOf('modhub-market-language-switch') < f.cards.innerHTML.indexOf('modhub-market-variant-list'), '紧凑切换置于标题区域前部');
+        assert.match(f.cards.innerHTML, /aria-label="简体中文；[^\"]*最新版本：v1\.1\.0"/, '每个选项的状态与版本保留可读核验信息');
         assert.match(css, /\.modhub-market-actions button,\s*\.modhub-market-actions \.buttonlike\s*\{[^}]*min-height:\s*32px/, '安装操作保留最小触控高度');
+    }
+    {
+        const index = indexFor({ unrelated: true });
+        const target = index.mods.find(mod => mod.id === 'language-cards-unrelated');
+        const identity = index.identities.find(mod => mod.id === target.id);
+        const editions = ['lite', 'visual'].map(id => ({ id, label: id === 'lite' ? '轻量版 Lite' : '图像版 Visual',
+            bootName: target.bootNames[0], bootEdition: id, assetSeries: `LanguageCardsUnrelated-${id}`, exclusive: true }));
+        target.packageEditions = copy(editions);
+        identity.packageEditions = copy(editions);
+        const unknown = await fixture({ indexOverride: index });
+        assert.match(unknown.cards.innerHTML, /data-edition="lite" aria-pressed="true"/, '包型未知时默认预览首项');
+        assert.equal(unknown.mods.find(mod => mod.id === target.id)._selectedPackageEdition, undefined, '默认预览不猜测本地包型或替代安装时的明确选择');
+        assert.ok(!unknown.cards.innerHTML.includes('当前包型：'), '默认预览不显示推断的当前包型');
+        const known = await fixture({ indexOverride: index, providers: [{ name: target.bootNames[0],
+            bootJson: { name: target.bootNames[0], edition: 'lite', version: target.version } }] });
+        assert.match(known.cards.innerHTML, /data-edition="lite" aria-pressed="true"/, '可确认的已装类型继续由切换按钮高亮');
+        assert.ok(!known.cards.innerHTML.includes('当前包型：') && !known.cards.innerHTML.includes('请选择要处理的包型。'),
+            '已知包型不再重复显示整行当前包型说明');
     }
     {
         const f = await fixture();
@@ -201,9 +229,10 @@ module.exports = async function () {
             return false;
         } };
         let controls = bindLanguageCard(f);
-        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['true', 'false'], '首次只预览第一语言');
-        assert.deepEqual(controls.rows.map(row => row.hidden), [false, true], '同一时刻只显示一个语言面板');
-        assert.deepEqual(installed, [], '初始预览不会自动安装');
+        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['true', 'false'], '首次默认预览第一种语言');
+        assert.deepEqual(controls.rows.map(row => row.hidden), [false, true], '首项完整资料可见，其他成员仍隐藏');
+        assert.ok(!f.cards.innerHTML.includes('modhub-market-variant-placeholder'), '不再生成未选时的额外简介区');
+        assert.deepEqual(installed, [], '默认预览不会自动安装');
         for (const index of [1, 0]) {
             assert.equal(typeof controls.choices[index].onclick, 'function', '语言按钮绑定真实切换处理器');
             await controls.choices[index].onclick();
@@ -235,6 +264,34 @@ module.exports = async function () {
         } finally { f.market.batchInstallState.running = false; }
         assert.deepEqual(installed.map(mod => mod.id), [definitions[1].id, definitions[0].id]);
         assert.equal(f.requests(), 1, '预览、切换、重绘和路由测试不读取真实包体');
+    }
+    for (const installed of [[], [{ id: definitions[0].id, version: '1.1.0' }], [{ id: definitions[1].id, version: '2.0.0' }]]) {
+        const index = indexFor();
+        index.identities.forEach((identity, position) => {
+            identity.variant = { groupId: 'language-cards-fixture', groupName: '发行分支测试', type: 'edition',
+                id: position ? 'omega' : 'original', label: position ? 'Omega 简化版' : '原版' };
+        });
+        const f = await fixture({ indexOverride: index, installed });
+        f.sb.modHubRestore = null;
+        const received = [];
+        f.sb.modHubMarketInstaller = { install: async mod => { received.push(mod); return false; } };
+        let controls = bindLanguageCard(f);
+        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['true', 'false'], '发行分支默认预览首项，单个已装分支不改变首次显示顺序');
+        assert.deepEqual(controls.rows.map(row => row.hidden), [false, true]);
+        assert.ok(!f.cards.innerHTML.includes('modhub-market-variant-placeholder'));
+        assert.deepEqual(received, [], '默认预览不进入安装器');
+        await controls.choices[1].onclick();
+        assert.deepEqual(controls.rows.map(row => row.hidden), [true, false]);
+        f.market.renderMarketCards();
+        controls = bindLanguageCard(f);
+        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['false', 'true'], '已装原版不能在重绘时覆盖玩家明确选择的 Omega');
+        await controls.choices[0].onclick();
+        await controls.versions.find(button => Number(button.dataset.modIndex) === 0).onclick();
+        assert.equal(received.at(-1), f.mods[0], '切换后最新手选原版准确传入安装器');
+        await controls.choices[1].onclick();
+        await controls.versions.find(button => Number(button.dataset.modIndex) === 1).onclick();
+        assert.equal(received.at(-1), f.mods[1], '再切换后最新手选 Omega 准确传入安装器，不继承首个或已装分支');
+        assert.deepEqual(received.map(mod => mod.variant.id), ['original', 'omega']);
     }
     {
         const f = await fixture();
@@ -359,10 +416,10 @@ module.exports = async function () {
         assert.equal(f.market.findMarketModByLocalName(item.bootName).id, item.id, '管理页历史安装关联返回独立成员');
         assert.ok(f.cards.innerHTML.includes(`已安装${item.variant.label}`));
         const controls = bindLanguageCard(f);
-        assert.equal(controls.choices.find(button => Number(button.dataset.modIndex) === f.mods.indexOf(own)).getAttribute('aria-pressed'), 'true',
-            '仅安装一种语言时优先预览该语言');
-        assert.equal(controls.rows.find(row => Number(row.dataset.modIndex) === f.mods.indexOf(own)).hidden, false);
-        assert.equal(controls.rows.find(row => Number(row.dataset.modIndex) === f.mods.indexOf(other)).hidden, true);
+        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['true', 'false'],
+            '仅安装一种语言时仍预览首项，安装事实保持独立');
+        assert.equal(controls.rows.find(row => Number(row.dataset.modIndex) === 0).hidden, false);
+        assert.equal(controls.rows.find(row => Number(row.dataset.modIndex) === 1).hidden, true);
         f.market.filterInstalledOnly();
         assert.equal((f.cards.innerHTML.match(/class="modhub-market-variant-row"/g) || []).length, 2,
             '安装状态仅匹配一种语言时仍展示完整组，保留另一语言的明确选择');
@@ -404,7 +461,7 @@ module.exports = async function () {
         const updated = [];
         f.sb.modHubMarketInstaller = { install: async mod => { updated.push(mod); return false; } };
         const controls = bindLanguageCard(f);
-        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['true', 'false'], '多语言已安装时只预览第一成员，不默认安装');
+        assert.deepEqual(controls.choices.map(button => button.getAttribute('aria-pressed')), ['true', 'false'], '多语言已安装时预览首项，更新仍保留两个独立目标');
         await controls.choices[1].onclick();
         const englishUpdate = controls.versions.find(button => Number(button.dataset.modIndex) === 1);
         assert.ok(englishUpdate.className.split(/\s+/).includes('btn-market-update'), '英文新版使用共用更新按钮');
@@ -571,6 +628,21 @@ module.exports = async function () {
         assert.equal(failure, 'IDENTITY_METADATA_UNAVAILABLE');
         assert.equal(operations, 0, '缺精确身份时不创建还原事务或写入模组');
         assert.deepEqual(requestUrls, offlineCatalogUrls, '首轮离线回退后，缺少身份的安装仍不得继续请求包体');
+    }
+    {
+        const sb = loadMarket(), market = sb.modHubMarket;
+        const choices = ['btn-market-language-choice', 'btn-market-package-edition'].map(className => ({
+            disabled: false, dataset: {}, classList: { contains: name => name === className }, className
+        }));
+        sb.document.getElementById = () => null;
+        sb.document.querySelectorAll = selector => choices.filter(control => selector.split(',').some(part => part.trim() === `.${control.className}`));
+        assert.equal(await market.runInstallTask(async () => {
+            assert.ok(choices.every(control => control.disabled), '选版期间同时锁定语言和包型按钮');
+            return false;
+        }), false);
+        assert.ok(choices.every(control => !control.disabled), '取消选版后恢复两类按钮，允许连续选择其他模组');
+        await assert.rejects(market.runInstallTask(async () => { throw new Error('模拟选版失败'); }), /模拟选版失败/);
+        assert.ok(choices.every(control => !control.disabled), '选版失败也必须恢复按钮');
     }
     console.log('语言变体市场卡片测试通过');
 };
