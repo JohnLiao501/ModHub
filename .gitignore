@@ -17,6 +17,9 @@ dolmod-site/
 # 本地计划与工作记录
 /plans/
 
+# 测试用例仅在本地保留，不进入源码仓库
+/tests/
+
 # 打包产物（统一通过 GitHub Releases 分发，不入库）
 release/*.zip
 
