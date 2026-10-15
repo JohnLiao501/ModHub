@@ -97,7 +97,7 @@
         const unknown = reason => ({ status: 'unknown', reason });
         const version = normalizeGameVersion(gameVersion);
         if (!version) return unknown('当前游戏版本未能识别，请按作者说明选择安装包');
-        if (typeof range !== 'string' || !range.trim()) return unknown('适用的游戏版本尚未确定，下一步会核对安装包中的说明');
+        if (typeof range !== 'string' || !range.trim()) return unknown('支持的游戏版本将在下载后检查');
         if (!isNativeRangeSyntaxSupported(range)) return unknown('暂不能识别作者的游戏版本说明，请查看发布说明');
         const result = assessVersionRange(version, range, true);
         if (result.status === 'unknown') {
@@ -108,7 +108,7 @@
             return unknown(reasons[result.reason] || '暂不能核对作者的游戏版本说明，请查看发布说明');
         }
         return { status: result.status, reason: result.status === 'compatible'
-            ? `作者声明的支持范围包含当前 DoL ${version}；下一步会核对所选安装包`
+            ? `作者注明支持当前 DoL ${version}`
             : `作者声明支持 DoL ${formatVersionRange(range)}，当前游戏为 DoL ${version}，不在此范围内` };
     }
 
@@ -412,10 +412,10 @@
         const signatureFields = [base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
             mod.autoInstallScope || '', mod.revision, communityRevision, mod.identityId, mod.name,
             mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
-            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, mod.requiredDependencies || [], mod.variant || null, mod.verifiedReleaseAssets || [],
+            mod.bootNames || [], mod.aliases || [], mod.sharedRepository, mod.requiredDependencies || [], market.getRequiredDependencies?.(mod) || [], mod.variant || null, mod.verifiedReleaseAssets || [],
             mod.packageEditions || [], mod.optionalResources || [], mod._selectedPackageEdition || '',
             page, 'modpack-v1', 'asset-series-v2', 'asset-version-v3', 'source-warnings-v1'];
-        // 登记证据、语言或强制前置变化时废弃旧候选缓存。
+        // 来源证据、语言或前置要求更改后，旧候选缓存不再适用。
         if (mod.verifiedReleaseAsset) signatureFields.push(mod.verifiedReleaseAsset);
         const signature = JSON.stringify(signatureFields);
         const cacheKey = MODHUB_HISTORY_CACHE_PREFIX + encodeURIComponent(signature);
@@ -509,13 +509,13 @@
             const matches = Boolean(gameVersion && window.modHubMarket.compareVersions(target, gameVersion) === 0);
             return { status: 'unknown', evidence: 'filename', referenceMismatch: Boolean(gameVersion && !matches), gameVersion,
                 targetGameVersion: target, reason: !gameVersion
-                    ? `安装包名称标注支持 DoL ${target}；当前游戏版本未能识别，选择后还会核对安装包中的适配说明`
-                    : matches ? `安装包名称标注支持 DoL ${target}，选择后还会核对安装包中的适配说明`
-                        : `安装包名称标注支持 DoL ${target}，当前游戏为 DoL ${gameVersion}；选择后还会核对安装包中的适配说明` };
+                    ? `安装包名称标注适用于 DoL ${target}。当前游戏版本未能识别`
+                    : matches ? `安装包名称标注适用于当前 DoL ${target}`
+                        : `安装包名称标注适用于 DoL ${target}，当前游戏为 DoL ${gameVersion}` };
         }
         return { status: 'unknown', evidence: 'unknown', gameVersion, reason: gameVersion
-            ? '适用的游戏版本尚未确定，下一步会核对安装包中的说明'
-            : '当前游戏版本未能识别，请按作者说明选择；下一步会核对所选安装包' };
+            ? '支持的游戏版本将在下载后检查'
+            : '当前游戏版本未能识别，请查看作者说明' };
     }
 
     function getCandidateStatus(candidate, { recommended = false } = {}) {
@@ -534,7 +534,7 @@
                 tone = recommended ? 'gold' : 'grey';
             }
         } else if (info.evidence === 'declaration') label = '作者声明待核对';
-        return { label, tone, reason: info.reason || '适用的游戏版本尚未确定，下一步会核对安装包中的说明' };
+        return { label, tone, reason: info.reason || '支持的游戏版本将在下载后检查' };
     }
 
     /** 仅当前精确附件、摘要、大小和身份均匹配时采用登记的真实 boot 版本。 */
@@ -595,18 +595,19 @@
         return versions.size === 1 ? [...versions][0] : '';
     }
 
-    /** 目录强制前置独立于包体声明；空声明不能移除目录中已核验的要求。 */
+    /** 市场资料中的前置要求独立于包体声明；空声明不能移除已核验的要求。 */
     function candidateDependencies(mod, asset, release) {
         const declared = Array.isArray(asset.dependencies) ? asset.dependencies
             : Array.isArray(release.dependencies) ? release.dependencies : [];
-        const required = (Array.isArray(mod.requiredDependencies) ? mod.requiredDependencies : []).flatMap(item => {
+        const required = [...(Array.isArray(mod.requiredDependencies) ? mod.requiredDependencies : []),
+            ...(window.modHubMarket?.getRequiredDependencies?.(mod) || [])].flatMap(item => {
             const bootName = typeof item?.bootName === 'string' && item.bootName.trim()
                 || typeof item?.modName === 'string' && item.modName.trim() || '';
             const id = typeof item?.id === 'string' ? item.id.trim() : '';
             if (!bootName && !id) return [];
             return [{ ...item, ...(bootName ? { bootName } : {}), ...(id ? { id } : {}),
                 version: typeof item.version === 'string' && item.version.trim() || '*',
-                required: true, source: '目录强制前置', declaredBy: mod.name }];
+                required: true, source: item.source || '市场资料', declaredBy: mod.name }];
         });
         if (!required.length) return Array.isArray(asset.dependencies) || Array.isArray(release.dependencies)
             ? { dependencies: declared } : {};
@@ -617,7 +618,7 @@
             if (!identity || !positions.has(key)) {
                 if (identity) positions.set(key, dependencies.length);
                 dependencies.push(dependency);
-            } else if (dependency.source === '目录强制前置') {
+            } else if (dependency.required) {
                 const index = positions.get(key);
                 dependencies[index] = { ...dependencies[index], ...dependency };
             }
@@ -903,12 +904,12 @@
             || updateOnly && !isDefaultUpdate(mod, latest, localVersion, localProfile)) return empty;
         let defaultReason;
         if (matched) defaultReason = latest.compatibility?.evidence === 'declaration'
-            ? '已默认选择作者声明支持当前游戏的最新版本，下一步将核对安装包中的说明。'
-            : '已根据安装包名称默认选择匹配当前游戏的最新版本，下一步将核对安装包中的说明。';
-        else if (!gameVersion) defaultReason = '当前游戏版本未能识别，已默认选择最新版本；安装前需确认适配风险。';
+            ? '已默认选择作者注明支持当前游戏的最新版本。'
+            : '已根据安装包名称默认选择匹配当前游戏的最新版本。';
+        else if (!gameVersion) defaultReason = '当前游戏版本未能识别。已默认选择最新版本，请查看作者说明。';
         else if (latest.compatibility?.evidence === 'unknown' || !latest.compatibility?.evidence)
-            defaultReason = '作者未声明支持的游戏版本，已默认选择最新版本；安装前需确认适配风险。';
-        else defaultReason = '没有找到匹配当前游戏的版本，已默认选择最新版本；安装前需确认适配风险。';
+            defaultReason = '已默认选择最新版本。支持的游戏版本尚未注明。';
+        else defaultReason = '已默认选择最新版本。安装包标注的游戏版本与当前版本不同，请查看作者说明。';
         return { defaultKey: latest.candidateKey, defaultReason, defaultRisk: !matched };
     }
 

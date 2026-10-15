@@ -1834,6 +1834,11 @@ window.modHubUpdateManagerStatus = function() {
             window.modHubSetButtonBusy(button, busy && button.dataset.modhubBusyKey === window._modHubManagerBusyKey);
         });
     }
+    const toolsMenu = document.getElementById('modHubManagerToolsMenu');
+    toolsMenu?.querySelectorAll('button').forEach(button => {
+        if (button.dataset.modhubBusyKey) window.modHubSetButtonBusy(button, busy && button.dataset.modhubBusyKey === window._modHubManagerBusyKey);
+        button.disabled = busy;
+    });
     const status = document.getElementById('modHubManagerStatus');
     if (status) {
         const message = window._modHubManagerStatus || (busy ? '正在读取配置，请稍候...' : '配置自动保存；模组重新载入后生效，美化即时应用');
@@ -2004,7 +2009,129 @@ window.initModManage = async function(refresh = false) {
     return window._modHubManagerInit;
 };
 
+const MODHUB_MANAGER_TOOLS = [
+    { id: 'modHubSmartSortAllBtn', label: '智能排序', title: '根据依赖整理模组的加载顺序和美化包的覆盖顺序', action: 'window.modHubSmartSortAll()', busy: true },
+    { id: 'modHubRefreshListBtn', label: '刷新列表', title: '在原版管理器修改后，重新读取列表与模组资料', action: 'window.initModManage(true)', busy: true },
+    { id: 'modHubCompatibilityBtn', label: '兼容性检查', title: '检查已安装模组的依赖和兼容性', action: "window.modHubCompatibility?.show?.() || window.modHubAlert('兼容性检查尚未就绪，请等待模组加载完成后重试。')" },
+    { id: 'modHubRestorePointsBtn', label: '时间点还原', title: '查看和还原已保存的模组状态', action: 'window.modHubRestore.showHistory()' }
+];
+
+function modHubReadPinnedManagerTools() {
+    try {
+        const stored = JSON.parse(localStorage.getItem('modhub_manager_pinned_tools') || '[]');
+        return Array.isArray(stored) ? [...new Set(stored)].filter(id => MODHUB_MANAGER_TOOLS.some(tool => tool.id === id)) : [];
+    } catch (_) { return []; }
+}
+
+function modHubManagerToolHtml(tool, pinned = false) {
+    return `<button id="${tool.id}${pinned ? 'Pinned' : ''}" ${tool.busy ? `data-modhub-busy-key="${tool.id}"` : ''} ${pinned ? 'class="macro-button modhub-btn-primary modhub-manager-pinned-tool"' : 'class="modhub-manager-tool-action" role="menuitem" tabindex="-1"'} type="button" title="${tool.title}" onclick="${tool.action}">${tool.label}</button>`;
+}
+
+function modHubPinnedManagerToolsHtml(pinned) {
+    return pinned.map(id => modHubManagerToolHtml(MODHUB_MANAGER_TOOLS.find(tool => tool.id === id), true)).join('');
+}
+
+function modHubManagerToolsMenuHtml(pinned) {
+    return MODHUB_MANAGER_TOOLS.map(tool => {
+        const active = pinned.includes(tool.id), label = `${active ? '取消固定' : '固定'}${tool.label}${active ? '' : '到操作栏'}`;
+        return `<div class="modhub-manager-tool-row" role="none">${modHubManagerToolHtml(tool)}<button class="modhub-manager-tool-pin" type="button" tabindex="-1" data-modhub-pin-tool="${tool.id}" aria-label="${label}" title="${label}" aria-pressed="${active}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3M12 15v6"/></svg></button></div>`;
+    }).join('');
+}
+
+// 工具菜单临时移到页面顶层，避开管理器滚动区域的裁剪。
+function modHubBindManagerTools(container) {
+    const trigger = container.querySelector?.('#modHubManagerToolsBtn');
+    const menu = container.querySelector?.('#modHubManagerToolsMenu');
+    if (!trigger || !menu) return;
+    const holder = menu.parentNode;
+    const open = (last = false) => {
+        if (trigger.disabled || trigger.closest?.('fieldset')?.disabled) return;
+        if (window.modHubCloseManagerTools) { window.modHubCloseManagerTools(); return; }
+        menu.hidden = false;
+        menu.style.visibility = 'hidden';
+        document.body.appendChild(menu);
+        const rect = trigger.getBoundingClientRect();
+        const width = document.documentElement.clientWidth || window.innerWidth;
+        const height = document.documentElement.clientHeight || window.innerHeight;
+        menu.style.maxHeight = Math.max(0, height - 76) + 'px';
+        const bounds = menu.getBoundingClientRect();
+        const below = height - 68 - rect.bottom;
+        const top = below >= bounds.height || below >= rect.top - 8 ? rect.bottom + 6 : rect.top - bounds.height - 6;
+        menu.style.left = Math.max(8, Math.min(rect.right - bounds.width, width - bounds.width - 8)) + 'px';
+        menu.style.top = Math.max(8, Math.min(top, height - 68 - bounds.height)) + 'px';
+        menu.style.visibility = '';
+        trigger.setAttribute('aria-expanded', 'true');
+        const items = () => [...menu.querySelectorAll('button')].filter(button => !button.disabled);
+        const close = (restoreFocus = true) => {
+            menu.hidden = true;
+            holder?.appendChild(menu);
+            trigger.setAttribute('aria-expanded', 'false');
+            document.removeEventListener('pointerdown', outside, true);
+            document.removeEventListener('keydown', keydown, true);
+            document.removeEventListener('scroll', scrolled, true);
+            window.removeEventListener('resize', resized);
+            observer?.disconnect();
+            window.modHubCloseManagerTools = null;
+            if (restoreFocus && trigger.isConnected !== false) trigger.focus();
+        };
+        const outside = event => { if (!menu.contains(event.target) && !trigger.contains(event.target)) close(false); };
+        const keydown = event => {
+            if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close(); return; }
+            if (event.key === 'Tab') { close(); return; }
+            if (!menu.contains(event.target) || !['ArrowDown', 'ArrowUp', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+            event.preventDefault();
+            const pinColumn = Boolean(document.activeElement?.dataset.modhubPinTool);
+            if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                const rowButtons = [...(document.activeElement?.parentNode?.querySelectorAll('button') || [])].filter(button => !button.disabled);
+                rowButtons[event.key === 'ArrowLeft' ? 0 : rowButtons.length - 1]?.focus(); return;
+            }
+            const buttons = items().filter(button => Boolean(button.dataset.modhubPinTool) === pinColumn), index = buttons.indexOf(document.activeElement);
+            const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 : (index + (event.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+            buttons[next]?.focus();
+        };
+        const scrolled = event => { if (!menu.contains(event.target)) close(false); };
+        const resized = () => close(false);
+        const observer = typeof MutationObserver === 'function' ? new MutationObserver(() => {
+            if (!trigger.isConnected || !trigger.getClientRects().length) close(false);
+        }) : null;
+        observer?.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class', 'style', 'hidden'] });
+        window.modHubCloseManagerTools = close;
+        document.addEventListener('pointerdown', outside, true);
+        document.addEventListener('keydown', keydown, true);
+        document.addEventListener('scroll', scrolled, true);
+        window.addEventListener('resize', resized);
+        const buttons = items().filter(button => !button.dataset.modhubPinTool);
+        buttons[last ? buttons.length - 1 : 0]?.focus();
+    };
+    trigger.onclick = () => open();
+    trigger.onkeydown = event => {
+        if (!['ArrowDown', 'ArrowUp'].includes(event.key)) return;
+        event.preventDefault(); open(event.key === 'ArrowUp');
+    };
+    menu.addEventListener('click', event => {
+        const button = event.target.closest?.('button');
+        if (button?.dataset.modhubPinTool) {
+            if (button.disabled || trigger.disabled || trigger.closest?.('fieldset')?.disabled) return;
+            event.preventDefault(); event.stopPropagation();
+            const id = button.dataset.modhubPinTool;
+            if (!MODHUB_MANAGER_TOOLS.some(tool => tool.id === id)) return;
+            const pinned = modHubReadPinnedManagerTools(), next = pinned.includes(id) ? pinned.filter(value => value !== id) : [...pinned, id];
+            try { localStorage.setItem('modhub_manager_pinned_tools', JSON.stringify(next)); }
+            catch (_) { window.modHubShowToast('无法保存固定工具设置，请检查浏览器存储权限。', 'warning'); return; }
+            const pinnedTools = container.querySelector('#modHubManagerPinnedTools');
+            if (pinnedTools) pinnedTools.innerHTML = modHubPinnedManagerToolsHtml(next);
+            const active = next.includes(id), label = `${active ? '取消固定' : '固定'}${MODHUB_MANAGER_TOOLS.find(tool => tool.id === id).label}${active ? '' : '到操作栏'}`;
+            button.setAttribute('aria-pressed', String(active)); button.setAttribute('aria-label', label); button.setAttribute('title', label);
+            window.modHubUpdateManagerStatus();
+            window.modHubCloseManagerTools?.();
+            return;
+        }
+        if (button && !button.disabled) window.modHubCloseManagerTools?.();
+    }, true);
+}
+
 window.modHubRenderModManageUI = function() {
+    window.modHubCloseManagerTools?.(false);
     const container = document.getElementById('modHubModManageContainer');
     if (!container || !window._modHubModState) return;
 
@@ -2017,6 +2144,7 @@ window.modHubRenderModManageUI = function() {
     const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
     const totalSideCount = sideMods ? sideMods.length : 0;
     const beautyCount = (window._modHubBeautyState?.enabledList.length || 0) + (window._modHubBeautyState?.disabledList.length || 0);
+    const pinnedTools = modHubReadPinnedManagerTools();
 
     let html = '<fieldset id="modHubManagerControls" class="modhub-manager-controls">';
 
@@ -2043,9 +2171,13 @@ window.modHubRenderModManageUI = function() {
                 <div class="modhub-header-actions">
                     <button id="modHubImportModBtn" data-modhub-busy-key="modHubImportModBtn" class="macro-button modhub-btn-primary" type="button" title="从本地选择或直接拖拽 Zip / ModPack 模组文件导入" onclick="window.modHubTriggerImport()">导入模组</button>
                     <button id="modHubRestartGameBtn" class="macro-button modhub-btn-primary" type="button" title="重新载入游戏以使最新模组配置生效，美化调整即时应用" onclick="window.modHubRestartGame()">重新载入游戏</button>
-                    <button id="modHubSmartSortAllBtn" data-modhub-busy-key="modHubSmartSortAllBtn" class="macro-button modhub-btn-primary" type="button" title="根据明确依赖，同时整理已安装模组的加载顺序和美化包的覆盖顺序" onclick="window.modHubSmartSortAll()">智能整理模组与美化顺序</button>
-                    <button id="modHubRefreshListBtn" data-modhub-busy-key="modHubRefreshListBtn" class="macro-button modhub-btn-primary" type="button" title="在原版管理器修改后，重新读取列表与模组资料" onclick="window.initModManage(true)">刷新列表</button>
-                    <button id="modHubRestorePointsBtn" class="macro-button modhub-btn-primary" type="button" onclick="window.modHubRestore.showHistory()">时间点还原</button>
+                    <div id="modHubManagerPinnedTools" class="modhub-manager-pinned-tools">${modHubPinnedManagerToolsHtml(pinnedTools)}</div>
+                    <div class="modhub-manager-tools">
+                        <button id="modHubManagerToolsBtn" class="macro-button modhub-manager-tools-toggle" type="button" aria-haspopup="menu" aria-controls="modHubManagerToolsMenu" aria-expanded="false">更多工具</button>
+                        <div id="modHubManagerToolsMenu" class="modhub-manager-tools-menu" role="menu" aria-label="更多工具" hidden>
+                            ${modHubManagerToolsMenuHtml(pinnedTools)}
+                        </div>
+                    </div>
                 </div>
             </div>
         </div>
@@ -2179,6 +2311,7 @@ window.modHubRenderModManageUI = function() {
     html += '</ul></div></details>';
 
     container.innerHTML = html + '</fieldset>';
+    modHubBindManagerTools(container);
     window.modHubUpdateManagerStatus();
     container.onclick = async event => {
         const button = event.target?.closest?.('[data-mod-action]');
@@ -2287,7 +2420,12 @@ window.modHubRenderModManageUI = function() {
     }
 };
 
-// 判断模组是否属于核心框架（如秋枫白桦框架、简易框架等互斥或核心底层框架）
+const MODHUB_FRAMEWORK_IDENTITY_GROUPS = [
+    { key: 'maplebirch', aliases: ['maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework', 'scml-dol-maplebirchframework', 'scmldolmaplebirchframework'] },
+    { key: 'simpleframework', aliases: ['simpleframework', '简易框架', 'scmlsimpleframework', 'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks'] }
+];
+
+// 判断模组是否属于核心框架。
 window.modHubIsFrameworkMod = function(modName) {
     if (!modName) return false;
     const raw = String(modName).trim();
@@ -2296,30 +2434,10 @@ window.modHubIsFrameworkMod = function(modName) {
     const norm = normalize(raw);
     if (!norm) return false;
 
-    // 1. 优先比对冲突规则组
-    const conflictRules = window.modHubMarket?.KNOWN_MOD_CONFLICT_RULES || [
-        {
-            id: 'maplebirch-vs-simpleframework',
-            conflictingGroups: [
-                {
-                    key: 'maplebirch',
-                    aliases: ['maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework', 'scml-dol-maplebirchframework', 'scmldolmaplebirchframework']
-                },
-                {
-                    key: 'simpleframework',
-                    aliases: ['simpleframework', '简易框架', 'scmlsimpleframework', 'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks']
-                }
-            ]
-        }
-    ];
-
-    for (const rule of conflictRules) {
-        for (const grp of rule.conflictingGroups || []) {
-            const keys = [grp.key, ...(grp.aliases || [])].map(normalize);
-            if (keys.some(k => norm === k || (k.length >= 3 && norm.includes(k)) || (norm.length >= 3 && k.includes(norm)))) {
-                return true;
-            }
-        }
+    // 1. 优先比对框架身份。
+    for (const group of MODHUB_FRAMEWORK_IDENTITY_GROUPS) {
+        const keys = [group.key, ...(group.aliases || [])].map(normalize);
+        if (keys.some(k => norm === k || (k.length >= 3 && norm.includes(k)) || (norm.length >= 3 && k.includes(norm)))) return true;
     }
 
     // 2. 检查名称字面是否包含 framework 或 框架
@@ -2924,158 +3042,6 @@ window.modHubMoveSideMod = async function(index, deltaOrPosition) {
     });
 };
 
-// 两个框架共用真实包体声明；原生别名代供与两个包同时提供别名须区别展示。
-window.modHubGetFrameworkPairRisk = function(maple, simple) {
-    const mapleBoot = maple?.bootJson;
-    const simpleBoot = simple?.bootJson;
-    const canonical = value => String(value || '').trim().toLowerCase();
-    if (mapleBoot?.name && simpleBoot?.name && canonical(mapleBoot.name) === canonical(simpleBoot.name)) return null;
-    let providesSimple = Array.isArray(mapleBoot?.alias)
-        && mapleBoot.alias.some(alias => canonical(alias) === 'simple frameworks');
-    // 预检前仅允许已审计的精确发布预览，不能把目录最新版套到所选历史包。
-    if (!mapleBoot) {
-        const release = maple?.releaseInfo;
-        const source = release?.githubUrl || maple?.githubUrl;
-        const tag = String(release?.tag || release?.tagName || '');
-        providesSimple = String(release?.version || '') === '5.1.3' && tag === 'maplebirch-release-v5.1.3'
-            && /^https:\/\/github\.com\/MaplebirchLeaf\/SCML-DOL-maplebirchframework(?:\/|$)/i.test(String(source || ''));
-    }
-    return providesSimple ? {
-        ruleId: 'framework-alias-provider-overlap', kind: 'alias-provider-overlap', level: 'warning',
-        reason: '秋枫白桦框架通过原生 alias 声明提供 Simple Frameworks。两个独立框架包同时启用会重复提供这一技术名，ModLoader 的依赖解析可能选中不同提供者。',
-        advice: '通常只需启用一个提供者。请按模组作者要求选择框架，并核对版本范围；原生别名代供不代表两个框架必须同时加载。'
-    } : {
-        ruleId: 'maplebirch-vs-simpleframework', kind: 'unverified-framework-pair', level: 'warning',
-        reason: '当前秋枫白桦框架包没有可核验的 Simple Frameworks 原生别名声明，尚不能确认这两个框架同时加载的兼容性。',
-        advice: '请核对这两个实际版本的作者说明；没有明确兼容依据时，建议先只启用模组要求的框架。'
-    };
-};
-
-// 检测即将启用的框架与当前已启用提供者，保留原始技术名与包体边界。
-window.modHubCheckEnableConflicts = function(targetModName, activeMods) {
-    if (!targetModName || !Array.isArray(activeMods) || !activeMods.length) return null;
-
-    const conflictRules = window.modHubMarket?.KNOWN_MOD_CONFLICT_RULES || [
-        {
-            id: 'maplebirch-vs-simpleframework',
-            name: '秋枫白桦框架 与 简易框架 提供者检查',
-            conflictingGroups: [
-                {
-                    key: 'maplebirch',
-                    name: '秋枫白桦框架',
-                    aliases: [
-                        'maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework',
-                        'scml-dol-maplebirchframework', 'scmldolmaplebirchframework',
-                        'MaplebirchLeaf/SCML-DOL-maplebirchframework'
-                    ]
-                },
-                {
-                    key: 'simpleframework',
-                    name: '简易框架',
-                    aliases: [
-                        'simpleframework', '简易框架', 'scmlsimpleframework',
-                        'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks',
-                        'emicoto/SCMLSimpleFramework'
-                    ]
-                }
-            ],
-            reason: '需要按实际包体核对框架提供者与兼容依据。',
-            level: 'danger'
-        }
-    ];
-
-    const normalize = str => String(str || '').toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
-    const stripPrefix = str => String(str || '').replace(/^(?:degrees[-_\s]?of[-_\s]?lewdity[-_\s]?|dol[-_\s]?)/i, '');
-
-    // 核心识别引擎：判断模组名或模组对象归属于哪一个互斥冲突组
-    const resolveModConflictGroup = (modOrName, rule) => {
-        if (!modOrName || !Array.isArray(rule.conflictingGroups) || rule.conflictingGroups.length < 2) return null;
-        const [groupA, groupB] = rule.conflictingGroups;
-        const keysA = [groupA.key, ...(groupA.aliases || [])].map(normalize).filter(Boolean);
-        const keysB = [groupB.key, ...(groupB.aliases || [])].map(normalize).filter(Boolean);
-
-        const rawName = typeof modOrName === 'string' ? modOrName : (modOrName.name || '');
-        const norm = normalize(rawName);
-        const stripped = normalize(stripPrefix(rawName));
-
-        // 1. 直接名称高精比对（Direct Literal Match）：最高优先级，杜绝跨组别名串门
-        const directA = keysA.some(k => norm === k || stripped === k);
-        const directB = keysB.some(k => norm === k || stripped === k);
-
-        if (directA && !directB) return groupA;
-        if (directB && !directA) return groupB;
-        if (directA && directB) {
-            // 若两方同时模糊包含，优先完全相等者
-            if (keysA.some(k => norm === k || stripped === k)) return groupA;
-            if (keysB.some(k => norm === k || stripped === k)) return groupB;
-        }
-
-        // 2. 回退检查 bootJson（严禁使用对手别名与 boot.alias）
-        const info = window.modHubGetModInfo?.(rawName);
-        const disabledInfo = window._modHubDisabledModInfo?.get(rawName.trim().toLowerCase()) || window._modHubDisabledModInfo?.get(norm);
-        const boot = info?.bootJson || disabledInfo?.bootJson;
-        if (boot) {
-            const bootName = boot.name ? normalize(boot.name) : '';
-            const bootStripped = boot.name ? normalize(stripPrefix(boot.name)) : '';
-            const bootA = keysA.some(k => bootName === k || bootStripped === k);
-            const bootB = keysB.some(k => bootName === k || bootStripped === k);
-            if (bootA && !bootB) return groupA;
-            if (bootB && !bootA) return groupB;
-        }
-
-        return null;
-    };
-
-    // 获取防污染的友好中文名称
-    const getCleanDisplayName = (modName, group) => {
-        if (!group) return modName;
-        // 如果确定是简易框架组，强制统一展示其标准中文名，杜绝被 ModLoader 别名解析污染为秋枫白桦
-        if (group.key === 'simpleframework') return group.name || '简易框架';
-        if (group.key === 'maplebirch') return group.name || '秋枫白桦框架';
-
-        const subtext = window.modHubGetModSubtext(modName, window.modHubGetModInfo?.(modName), false, true);
-        return subtext || group.name || modName;
-    };
-    const profileFor = (name, item) => ({ name,
-        bootJson: item?.bootJson || window._modHubDisabledModInfo?.get(String(name).toLowerCase())?.bootJson
-            || window.modHubGetModInfo?.(name)?.bootJson });
-
-    for (const rule of conflictRules) {
-        if (!Array.isArray(rule.conflictingGroups) || rule.conflictingGroups.length < 2) continue;
-        const [groupA, groupB] = rule.conflictingGroups;
-
-        const targetGroup = resolveModConflictGroup(targetModName, rule);
-        if (!targetGroup) continue;
-
-        const opponentGroup = (targetGroup === groupA) ? groupB : groupA;
-
-        for (const active of activeMods) {
-            const activeName = typeof active === 'string' ? active : active?.name;
-            if (!activeName || activeName === targetModName || active?.enabled === false) continue;
-
-            const activeGroup = resolveModConflictGroup(activeName, rule);
-            if (activeGroup === opponentGroup) {
-                const target = profileFor(targetModName);
-                const local = profileFor(activeName, active);
-                const risk = window.modHubGetFrameworkPairRisk(targetGroup.key === 'maplebirch' ? target : local,
-                    targetGroup.key === 'simpleframework' ? target : local);
-                if (!risk) continue;
-                return {
-                    ...risk,
-                    targetDisplayName: getCleanDisplayName(targetModName, targetGroup),
-                    conflictDisplayName: getCleanDisplayName(activeName, opponentGroup),
-                    targetModName,
-                    conflictModName: activeName,
-                    targetRawName: targetModName,
-                    conflictRawName: activeName,
-                };
-            }
-        }
-    }
-
-    return null;
-};
-
 // 查找本地依赖于指定模组的其它模组列表（用于删除模组或禁用框架时的影响评估）
 window.modHubFindDependentMods = async function(targetModName) {
     if (!targetModName) return [];
@@ -3085,30 +3051,11 @@ window.modHubFindDependentMods = async function(targetModName) {
     const normalize = str => String(str || '').toLowerCase().replace(/[()（）\[\]【】_—\-—.\s'’"“”`]/g, '').trim();
     const stripPrefix = str => String(str || '').replace(/^(?:degrees[-_\s]?of[-_\s]?lewdity[-_\s]?|dol[-_\s]?)/i, '');
 
-    // 冲突规则定义
-    const conflictRules = window.modHubMarket?.KNOWN_MOD_CONFLICT_RULES || [
-        {
-            id: 'maplebirch-vs-simpleframework',
-            conflictingGroups: [
-                {
-                    key: 'maplebirch',
-                    name: '秋枫白桦框架',
-                    aliases: ['maplebirch', '秋枫白桦', '秋枫白桦框架', '枫叶框架', 'maplebirchframework', 'scml-dol-maplebirchframework', 'scmldolmaplebirchframework']
-                },
-                {
-                    key: 'simpleframework',
-                    name: '简易框架',
-                    aliases: ['simpleframework', '简易框架', 'scmlsimpleframework', 'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks']
-                }
-            ]
-        }
-    ];
-
     // 尝试获取目标模组自身的 bootJson
     const targetModInfo = window.modHubGetModInfo(targetModName);
     const targetBoot = targetModInfo?.bootJson || window._modHubDisabledModInfo?.get(normalize(targetModName))?.bootJson;
 
-    // 1. 判定目标模组匹配到的冲突组与对手冲突组
+    // 1. 判定目标模组匹配到的身份组与其他框架组
     const isNameMatchingGroup = (name, grp) => {
         if (!name) return false;
         const norm = normalize(name);
@@ -3117,28 +3064,12 @@ window.modHubFindDependentMods = async function(targetModName) {
         return grpKeys.some(k => norm === k || stripped === k || (k.length >= 4 && (norm.includes(k) || (stripped && stripped.includes(k)))));
     };
 
-    let matchingGroup = null;
-    let matchedRule = null;
-    for (const rule of conflictRules) {
-        for (const grp of rule.conflictingGroups || []) {
-            if (isNameMatchingGroup(targetModName, grp) || (targetBoot?.name && isNameMatchingGroup(targetBoot.name, grp))) {
-                matchingGroup = grp;
-                matchedRule = rule;
-                break;
-            }
-        }
-        if (matchingGroup) break;
-    }
+    const matchingGroup = MODHUB_FRAMEWORK_IDENTITY_GROUPS.find(group =>
+        isNameMatchingGroup(targetModName, group) || targetBoot?.name && isNameMatchingGroup(targetBoot.name, group));
 
-    // 2. 收集对手组别名，防止互斥组别名交叉污染导致误诊
-    const opponentKeySet = new Set();
-    if (matchedRule && matchingGroup) {
-        for (const grp of matchedRule.conflictingGroups || []) {
-            if (grp !== matchingGroup) {
-                [grp.key, ...(grp.aliases || [])].map(normalize).forEach(k => opponentKeySet.add(k));
-            }
-        }
-    }
+    // 其他框架的名称不用于推断本包的依赖。
+    const opponentKeySet = new Set(matchingGroup ? MODHUB_FRAMEWORK_IDENTITY_GROUPS.filter(group => group !== matchingGroup)
+        .flatMap(group => [group.key, ...(group.aliases || [])].map(normalize)) : []);
 
     const isOpponentKey = (norm) => {
         if (!norm) return false;
@@ -3149,7 +3080,7 @@ window.modHubFindDependentMods = async function(targetModName) {
         return false;
     };
 
-    // 3. 构建目标键集合（排除对手组所有标识）
+    // 3. 构建目标键集合（排除其他框架标识）
     const targetKeySet = new Set();
     const addKey = (name) => {
         if (!name) return;
@@ -3182,7 +3113,7 @@ window.modHubFindDependentMods = async function(targetModName) {
         }
     }
 
-    // 若属于冲突组，仅追加该同盟组的别名
+    // 若已识别框架身份，仅追加其自身别名
     if (matchingGroup) {
         [matchingGroup.key, ...(matchingGroup.aliases || [])].forEach(addKey);
     }
@@ -3192,7 +3123,7 @@ window.modHubFindDependentMods = async function(targetModName) {
         const norm = normalize(name);
         const stripped = normalize(stripPrefix(name));
 
-        // 关键防线：若依赖项明确指向对手冲突组，绝不视为依赖本目标模组
+        // 关键防线：依赖项明确指向其他框架时，不视为依赖本目标模组
         if (isOpponentKey(norm) || (stripped && isOpponentKey(stripped))) {
             return false;
         }
@@ -3289,147 +3220,6 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     const selfNoticeHtml = isModHub ? modHubSelfRemovalNoticeHtml(false) : '';
     if (item.enabled === targetEnable) return false;
 
-    // 当即将启用模组时，进行本地已知冲突检测
-    if (targetEnable) {
-        const conflict = window.modHubCheckEnableConflicts(modName, state.sideMods.filter(m => m.enabled && m.name !== modName));
-        if (conflict) {
-            const proceed = await window.modHubConfirm({
-                title: '模组冲突风险确认',
-                message: `检测到即将启用的框架与当前提供者需要进一步核对：\n\n· 即将启用：【${conflict.targetDisplayName}】\n· 当前已启用冲突模组：【${conflict.conflictDisplayName}】\n\n原因：${conflict.reason}\n\n请核对上述包体声明、版本要求与提供者选择。\n\n是否确认继续启用？`,
-                trustedMessageHtml: `
-                    <div class="modhub-modal-conflict-intro">检测到即将启用的框架与当前提供者需要进一步核对：</div>
-                    <div class="modhub-modal-conflict-alert-box" style="margin: 12px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
-                        <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
-                            · 即将启用：【${window.modHubEscapeHtml(conflict.targetDisplayName)}】<br>
-                            · 当前已启用冲突模组：【${window.modHubEscapeHtml(conflict.conflictDisplayName)}】
-                        </div>
-                        <div class="grey" style="font-size: 0.9em; line-height: 1.4;">
-                            ${window.modHubEscapeHtml(conflict.reason)}
-                        </div>
-                        <div class="modhub-conflict-action-row" style="margin-top: 8px;">
-                            <button type="button" class="macro-button modhub-conflict-disable-btn" id="modHubModalConflictDisableBtn" data-conflict-raw="${window.modHubEscapeHtml(conflict.conflictModName)}" data-conflict-name="${window.modHubEscapeHtml(conflict.conflictDisplayName)}">
-                                快捷禁用【${window.modHubEscapeHtml(conflict.conflictDisplayName)}】
-                            </button>
-                        </div>
-                    </div>
-                    <div class="modhub-modal-conflict-question grey">请核对上述包体声明、版本要求与提供者选择。<br>是否确认继续启用？</div>
-                `,
-                confirmText: '继续启用',
-                cancelText: '暂不启用',
-                confirmType: 'danger',
-                confirmDelay: 5,
-                onRender: (dialog) => {
-                    const disableBtn = dialog.querySelector('#modHubModalConflictDisableBtn');
-                    if (!disableBtn) return;
-
-                    disableBtn.onclick = async (e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-
-                        const rawName = conflict.conflictModName;
-                        const displayName = conflict.conflictDisplayName || rawName;
-                        if (!rawName) return;
-
-                        const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
-                        const affectedMods = typeof window.modHubFindDependentMods === 'function'
-                            ? await window.modHubFindDependentMods(rawName)
-                            : [];
-
-                        let confirmProceed = false;
-                        if (affectedMods.length > 0) {
-                            const modItemsHtml = affectedMods.map(m => `
-                                <div class="modhub-modal-affected-item">
-                                    · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}
-                                </div>
-                            `).join('');
-                            const modLinesText = affectedMods.map(m => `· 【${m.name}】${m.version ? ` (${m.version})` : ''}`).join('\n');
-
-                            confirmProceed = await window.modHubConfirm({
-                                title: `确认快捷禁用【${displayName}】？`,
-                                message: `禁用【${displayName}】后，以下依赖该框架的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n是否仍然确认禁用？`,
-                                trustedMessageHtml: `
-                                    <div class="modhub-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该框架的模组可能会受到影响或无法正常运行：</div>
-                                    <div class="modhub-modal-affected-box">
-                                        ${modItemsHtml}
-                                    </div>
-                                    <div class="grey modhub-modal-question" style="margin-top:10px;">是否仍然确认禁用该冲突框架？</div>
-                                `,
-                                confirmText: '确认禁用',
-                                cancelText: '暂不禁用',
-                                confirmType: 'danger'
-                            });
-                        } else {
-                            confirmProceed = await window.modHubConfirm({
-                                title: `确认快捷禁用【${displayName}】？`,
-                                message: `确定要禁用【${displayName}】吗？\n禁用后该框架将暂停加载，本次冲突风险将被排除。`,
-                                trustedMessageHtml: `
-                                    <div>确定要禁用 <span class="gold">【${escape(displayName)}】</span> 吗？</div>
-                                    <div class="grey" style="margin-top:6px;">禁用后该框架将暂停加载，本次冲突风险将被排除。</div>
-                                `,
-                                confirmText: '确认禁用',
-                                cancelText: '取消',
-                                confirmType: 'warning'
-                            });
-                        }
-
-                        if (!confirmProceed) return;
-
-                        disableBtn.disabled = true;
-                        disableBtn.textContent = '正在禁用...';
-
-                        try {
-                            if (!await window.modHubToggleSideMod(rawName, false, { skipConfirm: true, silentOfferReload: true, trackReload: true, restoreContext: options.restoreContext })) throw new Error('快捷禁用未完成');
-
-                            if (typeof dialog.modHubClearDelay === 'function') {
-                                dialog.modHubClearDelay();
-                            }
-
-                            const alertBox = dialog.querySelector('.modhub-modal-conflict-alert-box');
-                            if (alertBox) {
-                                alertBox.className = 'modhub-modal-conflict-alert-box is-resolved';
-                                alertBox.style.background = '';
-                                alertBox.style.border = '';
-                                alertBox.innerHTML = `
-                                    <div style="font-weight: bold; color: #4ade80; margin-bottom: 6px;">
-                                        · 即将启用：【${escape(conflict.targetDisplayName)}】<br>
-                                        · 冲突模组：【${escape(conflict.conflictDisplayName)}】<span style="color: #4ade80; font-size: 0.85em; font-weight: normal;">（已快捷禁用 · 风险已排除）</span>
-                                    </div>
-                                    <div class="grey" style="font-size: 0.9em; line-height: 1.4;">
-                                        框架同时加载风险已排除，可继续启用【${escape(conflict.targetDisplayName)}】。
-                                    </div>
-                                `;
-                            }
-
-                            const titleEl = dialog.querySelector('.modhub-modal-title');
-                            if (titleEl) {
-                                titleEl.className = 'gold modhub-modal-title';
-                                titleEl.textContent = '冲突已排除 · 确认启用';
-                            }
-
-                            const questionEl = dialog.querySelector('.modhub-modal-conflict-question');
-                            if (questionEl) {
-                                questionEl.className = 'modhub-modal-conflict-question green';
-                                questionEl.textContent = '冲突模组已成功禁用，本次启用无冲突风险。点击下方按钮即可完成启用。';
-                            }
-
-                            const confirmBtn = dialog.querySelector('.modhub-modal-btn-confirm');
-                            if (confirmBtn) {
-                                confirmBtn.className = confirmBtn.className.replace(/\bmodhub-btn-danger\b/, 'modhub-btn-primary');
-                                confirmBtn.disabled = false;
-                                confirmBtn.textContent = '确认启用';
-                            }
-                        } catch (err) {
-                            console.error('[modHubToggleSideMod] 快捷禁用冲突模组失败:', err);
-                            disableBtn.disabled = false;
-                            disableBtn.textContent = `快捷禁用【${escape(displayName)}】`;
-                        }
-                    };
-                }
-            });
-            if (!proceed) return false;
-        }
-    }
-
     // 当即将禁用模组时，进行下游依赖影响排查
     if (!targetEnable && !options.skipConfirm) {
         const affectedMods = typeof window.modHubFindDependentMods === 'function'
@@ -3476,6 +3266,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     const isFramework = window.modHubIsFrameworkMod(modName);
     const immediateReload = !options.silentOfferReload && (isFramework || isModHub);
     const saved = await window.modHubRunManagerAction(async () => {
+        await options.beforeSave?.();
         if (!await window.modHubSaveModManageState(false)) throw new Error('模组配置保存失败');
 
         // 禁用时始终同步停用所属图包；自动启用开关只控制启用方向。
@@ -3714,24 +3505,6 @@ window.modHubBatchEnable = async function() {
     if (!toEnable.length) {
         window.modHubShowToast('所选模组已全部处于启用状态', 'info');
         return false;
-    }
-
-    const currentEnabled = state.sideMods.filter(m => m.enabled).map(m => m.name);
-    for (const name of toEnable) {
-        const otherToEnable = toEnable.filter(n => n !== name);
-        const activeGroup = [...currentEnabled, ...otherToEnable];
-        const conflict = window.modHubCheckEnableConflicts(name, activeGroup);
-        if (conflict) {
-            const proceed = await window.modHubConfirm({
-                title: '模组冲突风险确认',
-                message: `待启用的模组中包含互斥框架：【${conflict.targetDisplayName}】与【${conflict.conflictDisplayName}】。\n\n原因：${conflict.reason}\n\n是否确认继续批量启用？`,
-                confirmText: '继续启用',
-                cancelText: '取消',
-                confirmType: 'danger'
-            });
-            if (!proceed) return false;
-            break;
-        }
     }
 
     const saved = await window.modHubRunManagerAction(async () => {

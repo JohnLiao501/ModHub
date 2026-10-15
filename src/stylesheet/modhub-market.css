@@ -92,6 +92,97 @@
     gap: 4px;
 }
 
+.modhub-batch-progress-details {
+    flex: 1 0 100%;
+    min-width: 0;
+    border-top: 1px solid var(--700, #444);
+    padding-top: 4px;
+}
+
+.modhub-market-batch-toolbar .modhub-batch-progress-toggle {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex: 0 0 auto;
+    width: 100% !important;
+    min-height: 32px;
+    margin: 0;
+    padding: 5px 0;
+    border: 0;
+    background: transparent;
+    color: var(--200, #ccc);
+    cursor: pointer;
+    font-size: 0.9em;
+    text-align: left;
+    justify-content: flex-start;
+}
+
+.modhub-batch-progress-toggle::before {
+    content: '';
+    flex: 0 0 auto;
+    border-left: 5px solid var(--gold, #d4af37);
+    border-top: 4px solid transparent;
+    border-bottom: 4px solid transparent;
+}
+
+.modhub-batch-progress-toggle[aria-expanded="true"]::before { transform: rotate(90deg); }
+
+#modHubBatchProgressContent[hidden] { display: none !important; }
+
+.modhub-batch-progress-list {
+    max-height: min(220px, 30vh);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 6px 4px;
+}
+
+.modhub-batch-progress-list:focus-visible,
+.modhub-batch-progress-toggle:focus-visible {
+    outline: 1px solid var(--gold, #d4af37);
+    outline-offset: -1px;
+}
+
+.modhub-batch-item {
+    min-width: 0;
+    padding: 8px 0;
+    border-top: 1px solid var(--750, #333);
+    font-size: 0.85em;
+}
+
+.modhub-batch-item-heading {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    justify-content: space-between;
+}
+
+.modhub-batch-item-heading > strong {
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+
+.modhub-batch-item-state {
+    flex: 0 0 auto;
+    white-space: nowrap;
+}
+
+.modhub-batch-item-detail {
+    margin-top: 3px;
+    overflow-wrap: anywhere;
+    font-size: 0.9em;
+}
+
+.modhub-batch-item-progress {
+    display: block;
+    width: 100%;
+    height: 4px;
+    margin-top: 5px;
+    accent-color: var(--gold, #d4af37);
+}
+
+.modhub-batch-item-progress[hidden] { display: none; }
+
 .modhub-market-select-label {
     display: inline-flex;
     align-items: center;
@@ -99,6 +190,34 @@
     gap: 8px;
     min-height: 32px;
     cursor: pointer;
+}
+
+.modhub-market-select-label[hidden] { display: none !important; }
+
+.modhub-batch-result-actions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    padding: 4px 6px 8px;
+    font-size: 0.85em;
+}
+
+.modhub-market-batch-toolbar .modhub-batch-result-remove {
+    flex: 0 0 auto;
+    border: 0;
+    background: transparent;
+    color: var(--300, #aaa);
+    padding: 0 3px;
+    font-size: 0.85em;
+    white-space: nowrap;
+}
+
+.modhub-market-batch-toolbar .modhub-batch-result-remove:hover,
+.modhub-market-batch-toolbar .modhub-batch-result-remove:focus-visible {
+    color: var(--red, #d35b5b);
+    text-decoration: underline;
 }
 
 .modhub-market-select-label input {
@@ -1265,6 +1384,7 @@
     overflow-wrap: anywhere;
 }
 
+
 .modhub-version-loading {
     padding: 10px 12px;
     border: 1px solid var(--600, #444);
@@ -1298,23 +1418,37 @@
 
 .modhub-install-plan {
     display: grid;
-    gap: 12px;
+    gap: 14px;
     min-width: 0;
     overflow-wrap: anywhere;
 }
 
 .modhub-install-plan-item {
     min-width: 0;
-    padding: 10px 12px;
-    border: 1px solid var(--600, #444);
-    background: var(--850, #181818);
-    border-radius: 3px;
+    padding: 0 0 12px;
+    border-bottom: 1px solid var(--600, #444);
 }
 
 .modhub-install-plan-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
     font-size: 0.95em;
     line-height: 1.5;
 }
+
+.modhub-install-plan-identity { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.modhub-install-plan-icon { flex: 0 0 34px; width: 34px; height: 34px; padding: 6px; box-sizing: border-box; color: var(--gold); background: var(--900); border: 1px solid var(--700); border-radius: 5px; }
+.modhub-install-plan-name { min-width: 0; color: var(--gold); font-size: 1.15em; font-weight: 700; line-height: 1.4; overflow-wrap: anywhere; }
+.modhub-install-plan-operation { white-space: nowrap; font-size: .92em; }
+
+.modhub-install-plan-intro { margin: 0; font-size: .9em; color: var(--300, #ccc); }
+.modhub-install-plan-section-title { font-size: .85em; font-weight: 400; color: var(--400, #aaa); }
+.modhub-install-plan-details { font-size: .85em; color: var(--400, #aaa); }
+.modhub-install-plan-details > summary { min-height: 32px; cursor: pointer; padding: 4px 0; }
+.modhub-install-plan .modhub-version-assets { margin-top: 6px; }
+.modhub-install-plan summary:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.modhub-install-dialog.modhub-version-dialog .modhub-modal-footer .macro-button { white-space: nowrap !important; }
 
 .modhub-install-plan-meta {
     display: block;
@@ -1365,7 +1499,6 @@
 
 @media (max-width: 768px) {
     .modhub-version-option,
-    .modhub-install-plan-item,
     .modhub-version-loading {
         padding: 8px;
     }

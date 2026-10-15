@@ -4,6 +4,7 @@
 
     const key = value => String(value || '');
     const detail = error => String(error?.message || error || '未提供具体原因');
+    const checkCancelled = signal => { if (signal?.aborted) throw Object.assign(new Error('已取消兼容性检查'), { name: 'AbortError' }); };
     function revealHelp(element) {
         if (!element || element.isConnected === false || element.closest?.('[hidden]') || document.hidden) return;
         if (!element.matches?.('button, input, select, textarea, a[href], [tabindex]')) element.setAttribute?.('tabindex', '-1');
@@ -13,7 +14,7 @@
     // 原生依赖索引按原文匹配技术名与 alias，不能套用市场的名称规范化。
     const namesOf = boot => [boot?.name, ...(Array.isArray(boot?.alias) ? boot.alias : [])]
         .filter(name => typeof name === 'string' && name.length);
-    const bootStamp = boot => JSON.stringify([boot?.name, boot?.version, boot?.alias, boot?.dependenceInfo, boot?.addonPlugin]);
+    const bootStamp = boot => JSON.stringify([boot?.name, boot?.version, boot?.alias, boot?.dependenceInfo, boot?.addonPlugin, boot?.replacePatchList]);
     const listStamp = lists => JSON.stringify([lists.ok, lists.enabled, lists.disabled]);
     const packageStamp = packages => JSON.stringify(packages.map(item => [item.name, item.missing, detail(item.error), bootStamp(item.bootJson)]));
     const escape = value => window.modHubEscapeHtml(String(value ?? ''));
@@ -98,52 +99,56 @@
                 analysis.errorMods?.find(name => String(issue.desc).includes(name)) || '');
         }
         if (analysis.errorCount && !analysis.matchedIssues?.length) {
-            addIssue(snapshot, 'log-unknown', 'problem', '日志记录了尚未定位原因的错误',
+            addIssue(snapshot, 'log-unknown', 'problem', '加载时出现错误',
                 '本次运行共记录 ' + analysis.errorCount + ' 条错误日志。',
-                '请查看具体错误及其前后日志；仅凭错误中出现的模组名，不能确定责任模组。', '加载日志');
+                '请打开加载日志，查看错误详情和处理建议。', '加载日志');
         }
         if (analysis.warnCount) {
-            addIssue(snapshot, 'log-warnings', 'review', '有警告日志需要核对',
+            addIssue(snapshot, 'log-warnings', 'review', '加载时出现警告',
                 '本次运行共记录 ' + analysis.warnCount + ' 条警告日志。',
-                '请结合实际异常和作者说明核对。警告本身不能证明模组冲突。', '加载日志');
+                '如果游戏运行异常，请打开加载日志查看相关模组和处理建议。', '加载日志');
         }
     }
 
-    async function readPackages(lists) {
+    async function readPackages(lists, signal) {
         const enabled = new Set(lists.enabled.map(key));
         const names = [...new Map([...lists.enabled, ...lists.disabled].map(name => [key(name), name])).values()];
         const packages = [];
         for (const name of names) {
+            checkCancelled(signal);
             let result;
             try {
                 result = await window.modHubReadInstalledModBoot(name);
             } catch (error) {
+                if (error?.name === 'AbortError') throw error;
                 result = { name, bootJson: null, error };
             }
+            checkCancelled(signal);
             packages.push({ ...result, name, enabled: enabled.has(key(name)) });
         }
         return packages;
     }
 
+    function getDependencyContext(snapshot, metadata = snapshot) {
+        const enabled = snapshot.lists?.enabled || [], packages = snapshot.packages || [];
+        const saved = new Map(packages.filter(item => item.enabled && item.bootJson).map(item => [item.name, item]));
+        // 原生依赖索引按加载顺序写入 name/alias，后写覆盖先写；旁加载同名包替换内置包。
+        const active = [...(metadata.builtins || []).filter(item => item.bootJson && !saved.has(item.name)),
+            ...enabled.map(name => saved.get(name)).filter(Boolean)];
+        const complete = snapshot.lists?.ok && metadata.builtinKnown && packages.every(item => item.bootJson || item.missing)
+            && enabled.every(name => packages.some(item => item.name === name && (item.bootJson || item.missing)));
+        const providers = new Map();
+        for (const item of active) for (const name of new Set(namesOf(item.bootJson))) {
+            if (!providers.has(name)) providers.set(name, []);
+            providers.get(name).push(item);
+        }
+        return { active, providers, complete };
+    }
+
     function checkDeclarations(snapshot, metadata) {
         const { packages } = snapshot;
-        // 加载器按精确技术名覆盖包体，已保存的启用包替换同名运行档案。
-        const active = [...new Map([...metadata.builtins, ...packages.filter(item => item.enabled && item.bootJson)]
-            .map(item => [key(item.bootJson?.name || item.name), item])).values()];
+        const { active, providers, complete } = getDependencyContext(snapshot, metadata);
         const disabled = packages.filter(item => !item.enabled && item.bootJson);
-        const complete = metadata.builtinKnown && packages.every(item => item.bootJson || item.missing);
-        const providers = new Map();
-        for (const item of active) {
-            for (const name of new Set(namesOf(item.bootJson).map(key))) {
-                if (!providers.has(name)) providers.set(name, []);
-                providers.get(name).push(item);
-            }
-        }
-        for (const [name, matches] of providers) {
-            if (matches.length > 1) addIssue(snapshot, 'providers-' + name, 'review', '依赖提供者不唯一',
-                '技术名或原生别名【' + name + '】由 ' + matches.map(item => '【' + item.name + '】').join('、') + ' 同时提供。',
-                '请按作者说明核对需要启用的提供者，不要仅凭兼容别名重复安装框架。');
-        }
         for (const item of packages) {
             if (item.missing || item.error || !item.bootJson) {
                 addIssue(snapshot, 'package-' + key(item.name), item.missing ? 'problem' : 'review',
@@ -154,7 +159,7 @@
         }
         if (!metadata.builtinKnown) addIssue(snapshot, 'builtin-unknown', 'review', '内置模组清单未能完整核对',
             '当前加载器没有提供完整的模组来源或包体声明。', '部分依赖只能结合本次运行日志及作者说明核对。');
-        const order = new Map(snapshot.lists.enabled.map((name, index) => [key(name), index]));
+        const order = new Map(active.map((item, index) => [item.name, index]));
         for (const item of active) {
             const dependencies = item.bootJson?.dependenceInfo;
             if (dependencies !== undefined && !Array.isArray(dependencies)) {
@@ -188,8 +193,13 @@
                             installed.length || !complete ? '模组管理' : '模组市场', '', canEnable ? { type: 'enable', enableName: installed[0].name } : null);
                         continue;
                     }
-                    if (matches.length !== 1) continue;
-                    const provider = matches[0];
+                    if (!complete) {
+                        addIssue(snapshot, 'providers-' + id, 'review', '依赖提供者尚不能确认',
+                            evidence + '部分包体或加载顺序未能完整读取，尚不能确认最终使用的提供者。',
+                            '请先处理未读取的资料，再重新检查。');
+                        continue;
+                    }
+                    const provider = matches[matches.length - 1];
                     version = provider.bootJson?.version;
                     if (order.has(key(item.name)) && order.has(key(provider.name)) && order.get(key(provider.name)) >= order.get(key(item.name))) {
                         const canOrder = window.modHubMarketVersions?.assessVersionRange?.(version, dependency.version)?.status === 'compatible';
@@ -207,28 +217,17 @@
                     '请核对游戏、加载器和模组的实际版本，并按作者声明选择适用安装包。', '模组说明');
             }
         }
-        const market = window.modHubMarket;
-        for (const rule of market?.KNOWN_MOD_CONFLICT_RULES || []) {
-            if (!market.isModMatchingConflictGroup || !Array.isArray(rule.conflictingGroups)) continue;
-            const [mapleGroup, simpleGroup] = rule.conflictingGroups;
-            if (mapleGroup?.key !== 'maplebirch' || simpleGroup?.key !== 'simpleframework') continue;
-            for (const maple of active.filter(item => item.bootJson && market.isModMatchingConflictGroup(item, mapleGroup))) {
-                for (const simple of active.filter(item => item.bootJson && market.isModMatchingConflictGroup(item, simpleGroup))) {
-                    const risk = window.modHubGetFrameworkPairRisk?.(maple, simple);
-                    if (risk) addIssue(snapshot, rule.id + '-' + key(maple.name) + '-' + key(simple.name),
-                        'review', '框架组合需要核对', '【' + maple.name + '】与【' + simple.name + '】：' + risk.reason, risk.advice);
-                }
-            }
-        }
+
     }
 
-    async function check() {
+    async function check(options = {}) {
+        checkCancelled(options.signal);
         const snapshot = { checkedAt: new Date().toISOString(), analysis: readLogs(), runtime: [], lists: { ok: false, enabled: [], disabled: [] },
             packages: [], issues: [], stale: false, different: false, gameVersion: String(window.StartConfig?.version || ''), loaderVersion: '' };
         logIssues(snapshot);
         const revision = window._modHubReloadRevision;
         try {
-            if (busy()) {
+            if (!options.allowBusy && busy()) {
                 snapshot.stale = true;
                 throw new Error('另一项模组操作尚未完成，请等待完成后重新检查');
             }
@@ -242,7 +241,7 @@
             const overlap = snapshot.lists.enabled.filter(name => snapshot.lists.disabled.some(disabled => key(name) === key(disabled)));
             if (overlap.length) addIssue(snapshot, 'list-overlap', 'review', '启禁配置存在重复登记',
                 overlap.join('、') + ' 同时出现在启用与禁用列表中。', '请在模组管理中刷新并核对配置。');
-            snapshot.packages = await readPackages(snapshot.lists);
+            snapshot.packages = await readPackages(snapshot.lists, options.signal);
             checkDeclarations(snapshot, metadata);
             const runtimeSide = snapshot.runtime.filter(item => item.source === 'IndexDB');
             const runtimeOrder = runtimeSide.map(item => key(item.name));
@@ -256,14 +255,17 @@
                 '启用清单、加载顺序或包体声明存在差异；本次运行日志仍属于重新载入前的环境。',
                 '请先保存游戏进度，再按模组管理中的提示重新载入。');
             const after = await window.modHubReadIndexDBModLists();
-            const afterPackages = after.ok && listStamp(after) === listStamp(snapshot.lists) ? await readPackages(after) : [];
-            snapshot.stale = busy() || revision !== window._modHubReloadRevision
+            const afterPackages = after.ok && listStamp(after) === listStamp(snapshot.lists) ? await readPackages(after, options.signal) : [];
+            snapshot.stale = (!options.allowBusy && busy()) || revision !== window._modHubReloadRevision
                 || listStamp(after) !== listStamp(snapshot.lists) || packageStamp(afterPackages) !== packageStamp(snapshot.packages);
             if (snapshot.stale) addIssue(snapshot, 'stale', 'review', '检查期间配置发生变化',
                 '本次检查结果已过期。', '请等待模组操作完成，然后重新检查。');
         } catch (error) {
+            if (error?.name === 'AbortError') throw error;
             addIssue(snapshot, 'read-failed', 'review', '检查未能完成', detail(error), '请处理上述原因后重新检查；已读取的日志仍可查看。');
         }
+        checkCancelled(options.signal);
+        if (options.compatibility !== false && window.modHubCompatibility?.enrich) return window.modHubCompatibility.enrich(snapshot, options);
         return snapshot;
     }
 
@@ -281,21 +283,16 @@
             enabled.push(enableName);
         }
         const disabled = snapshot.lists.disabled.filter(name => name !== enableName);
-        const profiles = [...new Map([...snapshot.builtins, ...snapshot.packages.filter(item => enabled.includes(item.name))]
-            .map(item => [key(item.bootJson?.name || item.name), item])).values()];
-        const providers = new Map();
-        profiles.forEach(item => [...new Set(namesOf(item.bootJson))].forEach(name => {
-            if (!providers.has(name)) providers.set(name, []);
-            providers.get(name).push(item.name);
-        }));
+        const { active: profiles, providers } = getDependencyContext({ ...snapshot, lists: { ...snapshot.lists, enabled },
+            packages: snapshot.packages.map(item => ({ ...item, enabled: enabled.includes(item.name) })) });
         // 复用排序引擎，但只传已核实的原生身份，不让市场昵称参与配置修复。
         const nodes = enabled.map(name => {
             const boot = snapshot.packages.find(item => item.name === name).bootJson;
-            const resolve = entries => (Array.isArray(entries) ? entries : []).flatMap(entry => {
+            const resolve = (entries, dependency) => (Array.isArray(entries) ? entries : []).flatMap(entry => {
                 const matches = providers.get(entry?.modName) || [];
-                return matches.length === 1 ? [{ ...entry, modName: matches[0] }] : [];
+                return matches.length && (dependency || matches.length === 1) ? [{ ...entry, modName: matches[matches.length - 1].name }] : [];
             });
-            return { key: name, modName: name, boot: { ...boot, nickName: undefined, dependenceInfo: resolve(boot.dependenceInfo), addonPlugin: resolve(boot.addonPlugin) } };
+            return { key: name, modName: name, boot: { ...boot, nickName: undefined, dependenceInfo: resolve(boot.dependenceInfo, true), addonPlugin: resolve(boot.addonPlugin, false) } };
         });
         const sorted = await window.modHubBuildSmartOrder(nodes, window.modHubGetGui?.(), false);
         const target = window.modHubKeepRecoveryOrder(sorted, profiles);
@@ -338,7 +335,7 @@
             }
             try { await window.modHubOfferReload?.('帮助中心的配置修复已保存并回读通过。请重新载入后验证问题是否解决。'); }
             catch (error) { return { ok: true, status: 'saved', reason: '配置已保存并回读通过，但重载提示未能打开：' + detail(error) + '。请保存游戏进度后手动重新载入。', snapshot: after }; }
-            return { ok: true, status: 'saved', reason: '配置修复已保存，等待重新载入验证。原有运行日志不会因此清除，也不代表问题已解决。', snapshot: after };
+            return { ok: true, status: 'saved', reason: '配置修复已保存。请重新载入游戏，重试之前的操作并查看最新日志。', snapshot: after };
         } catch (error) {
             return { ok: false, status: 'failed', reason: detail(error) };
         } finally { repairing = false; }
@@ -389,7 +386,7 @@
         const lines = ['ModHub 求助信息', '生成时间：' + snapshot.checkedAt,
             '游戏版本：' + (snapshot.gameVersion || '未识别'), 'ModLoader 版本：' + (snapshot.loaderVersion || '未识别'),
             'ModHub 运行版本：' + (modHub?.bootJson?.version || '未识别'),
-            '说明：运行日志属于本次运行；已保存配置可能尚未重新载入。检查只覆盖可读取的声明和已知规则，不代表全部兼容。', '',
+            '说明：以下分别列出本次启动日志与已保存配置。调整配置后，请重新载入游戏并查看最新日志。', '',
             '本次运行的模组（按可读取顺序）'];
         runtime.forEach((item, index) => lines.push((index + 1) + '. ' + item.name + ' | ' + (item.bootJson?.version || '未识别') + ' | 来源：' + (item.source || '未识别')));
         if (!runtime.length) lines.push('未能读取运行清单');
@@ -410,7 +407,17 @@
         lines.push('', '检查摘要', '错误日志：' + (snapshot.analysis.errorCount || 0) + '；警告日志：' + (snapshot.analysis.warnCount || 0));
         for (const issue of snapshot.issues) lines.push('[' + (issue.status === 'problem' ? '发现问题' : '需要核对') + '] ' + issue.title,
             '依据：' + issue.evidence, '建议：' + issue.advice);
-        if (!snapshot.issues.length) lines.push('未发现已知问题；这不代表全部模组已经验证兼容。');
+        if (!snapshot.issues.length) lines.push('未发现已知问题。');
+        if (snapshot.compatibility) {
+            lines.push('', snapshot.compatibility.projected ? '拟安装组合的兼容性依据（尚未运行）' : '兼容性依据（已保存配置）');
+            for (const finding of snapshot.compatibility.findings.filter(item => item.kind === 'overlap')) {
+                lines.push('[候选关联] ' + finding.title, '依据：' + finding.evidence);
+                for (const rule of finding.rules || []) lines.push('声明：【' + rule.modName + '】' + rule.engine + ' | ' + rule.field + ' | ' + rule.find + ' | ' + rule.replacement);
+                for (const log of finding.logs || []) lines.push('相关日志 ' + (log.index + 1) + '：' + log.message);
+            }
+            lines.push('尚未核对的内容');
+            for (const entry of snapshot.compatibility.coverage) lines.push('【' + entry.modName + '】' + entry.field + '：' + entry.reason);
+        }
         lines.push('', allLogs ? '全部已捕获日志' : '错误和警告日志');
         const logs = (snapshot.analysis.lines || []).filter(item => allLogs || ['error', 'warn'].includes(item.level));
         logs.forEach(item => lines.push((item.time ? '[' + item.time + '] ' : '') + '[' + item.level + '] ' + item.message));
@@ -444,7 +451,7 @@
     const MODHUB_AI_NOTICE = 'AI 辅助修复由 ModHub 提供。点击“发送并分析”确认范围后，才会向您填写的服务发送问题描述、所选源码、环境清单和已脱敏的错误与警告日志；发送前可查看完整材料。勾选自动补充时，可在已确认的声明文件范围内自动定位并生成修改，轮次上限可在 AI 连接设置中自定义，也可勾选“不限轮次”；找到方案或没有新证据时提前停止，可随时取消；新增范围需再次确认。不会读取游戏存档、其他服务的密钥或投稿凭证。分析轮次增加可能产生更多服务费用，请核对服务方的数据政策。\n'
         + '地址和模型名称可在本机保留。密钥默认仅在当前页面内存中保留；勾选“记住我”并保存后，密钥将保存在当前浏览器的本机数据中，取消勾选并保存即可移除。同一游戏的模组共享运行环境，可能读取已保存的密钥，请使用可信模组及限额密钥。\n'
         + 'AI 建议可能错误。代码改动须经您预览并确认，保存前强制建立时间点还原点；修改普通旁加载 ZIP 中选定的源码，保留启禁与顺序，不修改游戏 HTML、内嵌模组或 ModHub 恢复工具。重新导入或更新目标模组会覆盖修改。\n'
-        + '保存成功不代表问题已解决。请重新载入并重复原操作验证；撤销使用修复前时间点，会一并还原该点覆盖的旁加载包和管理配置，确认页将列出影响。';
+        + '保存后，请重新载入并重试原操作；撤销使用修复前时间点，会一并还原该点覆盖的旁加载包和管理配置，确认页将列出影响。';
     const aiConnection = { endpoint: '', model: '', key: '', remember: false, maxRounds: 5, finiteRounds: 5 };
     function redactRemoteCredentials(value) {
         let remembered = '';
@@ -544,7 +551,7 @@
             + '<textarea id="modHubAiDiff" class="modhub-help-report" readonly aria-label="AI 建议的代码改动"></textarea>'
             + '<p id="modHubAiCodeRepairHint" class="grey" hidden></p>'
             + '<div class="modhub-help-actions modhub-help-actions-primary">' + button('Retry', '查看分析材料') + button('Continue', '继续自动排查', true) + button('LocalRepair', '检查可用配置修复', true) + button('DescribeMore', '调整问题说明（可选）') + button('Apply', '确认并应用这份修改', true) + '</div></section><div id="modHubAiAdviceDetails"></div></div>'
-            + '<div id="modHubAiStep4" hidden><p id="modHubAiSaved" class="gold"></p><p>先保存游戏进度，再重新载入，重复原操作检查异常是否消失。加载完成只能说明已启动，不能证明原问题已经解决。</p>'
+            + '<div id="modHubAiStep4" hidden><p id="modHubAiSaved" class="gold"></p><p>请先保存游戏进度，再重新载入并重试原操作，检查问题是否已解决。</p>'
             + '<div class="modhub-help-actions modhub-help-actions-primary">' + button('Reload', '重新载入以验证', true) + button('Verified', '我已验证，问题已解决') + '</div>'
             + '<div id="modHubAiUndoActions" class="modhub-help-actions modhub-help-actions-links modhub-ai-restore-actions">' + button('Undo', '撤销本次修复（时间点还原）') + button('Again', '分析另一个问题') + '</div></div>'
             + '<footer id="modHubAiFooter" class="modhub-ai-footer" hidden><div id="modHubAiNavigation" class="modhub-help-actions modhub-ai-navigation" hidden>' + button('Back', '返回描述问题', true) + action('加载日志') + action('模组说明') + '</div>'
@@ -1224,8 +1231,8 @@
 
     const MODHUB_HELP_TOPICS = [
         { title: '加载卡住或无法进入游戏', steps: ['先查看加载进度是否仍在变化；有实际进展时继续等待。', '若加载页出现救援入口，可查看原因并选择已有时间点；没有历史时不能通过时间点还原补回配置。', '无法进入 ModHub 时，使用游戏原生模组管理器核对最近安装或更新的模组。'], tabs: ['加载日志', '模组管理'], restore: true },
-        { title: '出现报错或怀疑模组冲突', steps: ['先查看首处具体错误及其前后日志，避免只按日志中出现的名称判断责任模组。', '检查前置、版本要求与作者说明。补丁未匹配或警告不等于已经确定模组互斥。', '需要逐项禁用排查时，在模组管理中操作并重新载入，每次只改变一个可比较的条件。'], tabs: ['加载日志', '模组管理', '模组说明'] },
-        { title: '模组安装后没有生效', steps: ['核对是否已导入正式安装包、处于启用状态，并满足作者要求的前置。', '安装、启禁或排序调整后，先保存游戏进度，再重新载入。', '查看模组说明中的触发条件与使用入口；安装成功不代表所有功能会立即出现。'], tabs: ['模组管理', '模组说明'] },
+        { title: '出现报错或怀疑模组冲突', steps: ['打开加载日志，查看首处错误及其详细信息。', '检查前置模组、版本要求和作者的兼容说明。', '需要逐项禁用排查时，在模组管理中操作并重新载入，每次调整一个模组。'], tabs: ['加载日志', '模组管理', '模组说明'] },
+        { title: '模组安装后没有生效', steps: ['核对是否已导入正式安装包、处于启用状态，并满足作者要求的前置。', '安装、启禁或排序调整后，先保存游戏进度，再重新载入。', '请查看模组说明中的触发条件和使用入口。'], tabs: ['模组管理', '模组说明'] },
         { title: '图片缺失或美化显示异常', steps: ['使用分离图片的游戏本体时，核对原版图像包 GameOriginalImagePack 是否已安装、启用且适配当前游戏。', '查看美化图包的启用状态与覆盖顺序；可选美化不能代替原版基础图片。', '查看图像加载错误及作者适配说明，区分资源缺失与特定图包覆盖。'], tabs: ['加载日志', '模组管理', '模组说明'] },
         { title: '更新后出现异常', steps: ['核对当前游戏与实际安装模组版本，查看作者发布说明。', '先保存游戏进度；需要回退时可进入时间点还原，核对变更预览后再决定。', '时间点覆盖旁加载包与管理配置，不恢复游戏存档、游戏 HTML 或内嵌模组。'], tabs: ['模组说明', '模组市场'], restore: true },
         { title: '下载或导入失败', steps: ['保留具体错误原因，网络请求失败时可在原流程中重试。', '从正式 Release 附件获取安装包；GitHub 自动生成的 Source code 压缩包通常不能直接导入。', 'Zip 安装包根目录应包含 boot.json。只改文件名不能修复目录结构；其他格式需满足加载器原生校验要求。'], tabs: ['模组市场', '模组管理'] }
@@ -1252,11 +1259,12 @@
                 + (issue.repair ? '<button type="button" class="macro-button modhub-btn-primary" data-help-repair="' + escape(issue.id) + '">预览修复</button>' : '')
                 + action(issue.tab, issue.query) + '</div></article>').join('');
         container.innerHTML = '<p class="modhub-help-result-state ' + (problem ? 'red' : review || !checked ? 'gold' : 'green') + '">' + title + '</p>'
-            + '<p class="grey">' + (!checked ? '开始检查后，将查找可确认的前置和顺序问题。检查不会修改配置。' : '可直接处理的项目提供“预览修复”；其余项目保留具体原因和处理入口。检查不代表全部兼容。') + '</p>'
+            + '<p class="grey">' + (!checked ? '点击开始检查，核对前置模组和加载顺序。' : '可修复的问题可选择“预览修复”，其他问题请查看处理建议。') + '</p>'
             + cards(config) + (snapshot.different ? '<div class="modhub-help-actions"><button type="button" class="macro-button modhub-btn-primary" data-help-reload>重新载入以验证配置</button></div>' : '')
             + '<details id="modHubHelpLogDetails" class="modhub-help-topic"><summary>本次运行日志：错误 ' + snapshot.analysis.errorCount + ' 条，警告 ' + snapshot.analysis.warnCount + ' 条</summary>'
-            + '<p class="grey">这些日志属于本次运行，不能验证尚未重新载入的配置。代码错误或资源缺失需要结合作者说明处理。</p>'
-            + cards(logs) + action('加载日志') + '</details>';
+            + '<p class="grey">以下是本次启动日志。修改模组配置后，请重新载入游戏，再查看最新日志。</p>'
+            + cards(logs) + action('加载日志') + '</details>'
+            + (snapshot.compatibility && window.modHubCompatibility?.render ? '<details class="modhub-help-topic"><summary>兼容性依据与检查范围</summary>' + window.modHubCompatibility.render(snapshot, { compact: true }) + '</details>' : '');
     }
 
     function remoteSummary() {
@@ -1489,7 +1497,7 @@
         }
     }
 
-    window.modHubHelp = { init, openRemote, openProblem, suggestQuestions, check, buildRepairPlan, repair, buildReport, copyReport, previewRemoteConfiguration, applyRemoteConfiguration, redactRemoteCredentials };
+    window.modHubHelp = { init, openRemote, openProblem, suggestQuestions, check, getDependencyContext, checkDeclarations, buildRepairPlan, repair, buildReport, copyReport, previewRemoteConfiguration, applyRemoteConfiguration, redactRemoteCredentials };
     window.addEventListener('modHubRemoteAssistUpdate', updateRemoteBadges);
     window.jQuery?.(document).on?.(':passagedisplay.modHubRemoteAssistBadge', updateRemoteBadges);
     window.jQuery?.(document).one?.(':storyready.modHubRemoteAssist', () => {

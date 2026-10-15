@@ -50,6 +50,13 @@
 .modhub-restore-panel-settings{display:grid;grid-template-columns:1fr auto;gap:12px;align-items:center;border-top:1px solid var(--600,#666);padding-top:12px}
 .modhub-restore-panel input[type=text],.modhub-restore-panel select{min-width:0;max-width:100%;min-height:32px;background:var(--800,#333);color:var(--100,#eee);border:1px solid var(--600,#666);box-sizing:border-box;padding:6px}
 .modhub-restore-panel-actions,.modhub-restore-panel-manual{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.modhub-restore-point-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.modhub-restore-point-actions>button:only-child{grid-column:1/-1}
+.modhub-restore-history-actions{display:flex;justify-content:flex-end;border-top:1px solid var(--600,#666);padding-top:10px;margin-bottom:12px}
+.modhub-restore-panel .modhub-restore-point-actions button,.modhub-restore-panel .modhub-restore-history-actions button{white-space:nowrap!important;overflow-wrap:normal;min-height:36px}
+.modhub-restore-panel .modhub-restore-point-actions button{padding-left:6px;padding-right:6px}
+.modhub-restore-panel .modhub-restore-history-actions button{background:transparent;color:var(--400,#aaa)}
+.modhub-restore-point-actions button:focus-visible,.modhub-restore-history-actions button:focus-visible{outline:2px solid var(--gold,#d6b365);outline-offset:2px}
 .modhub-restore-panel-manual input{flex:1 1 240px}
 .modhub-restore-panel-point{display:flex;gap:10px;align-items:flex-start;padding:10px;border:1px solid var(--600,#666);cursor:pointer}
 .modhub-restore-panel-point:hover,.modhub-restore-panel-point:focus-within,.modhub-restore-panel-point-selected{border-color:var(--gold,#d6b365)}
@@ -64,8 +71,19 @@
 .modhub-restore-panel-protection{display:block;margin-top:8px;padding-left:10px;border-left:2px solid var(--gold,#d6b365)}
 .modhub-restore-panel-protection strong{font-size:.875em}
 .modhub-restore-panel-protection small{line-height:1.5}
-.modhub-restore-panel-status{margin:8px 0 0;min-height:1.6em}
+.modhub-restore-panel-status{display:flex;align-items:center;gap:8px;margin:8px 0 0;min-height:1.6em}
+.modhub-restore-panel-status>span:last-child{min-width:0}
 .modhub-restore-panel-status:empty{display:none}
+.modhub-restore-panel .modhub-progress-ring{display:inline-block;flex-shrink:0;width:18px;height:18px;vertical-align:middle;animation:modhub-restore-progress-spin 1s linear infinite!important}
+.modhub-restore-panel .modhub-progress-ring circle{fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;animation:none!important}
+.modhub-restore-panel .modhub-progress-ring .modhub-progress-indeterminate{display:block!important;stroke-dasharray:64 18}
+.modhub-restore-panel .modhub-progress-ring .modhub-progress-track,.modhub-restore-panel .modhub-progress-ring .modhub-progress-value,.modhub-restore-panel .modhub-progress-ring .modhub-progress-frames{display:none!important}
+.modhub-restore-panel .modhub-button-busy{display:inline-flex;align-items:center;justify-content:center;gap:6px}
+.modhub-restore-panel .modhub-button-busy-label{min-width:0;white-space:nowrap;overflow-wrap:normal}
+.modhub-restore-panel .modhub-button-busy-ring{display:inline-flex;flex-shrink:0}
+.modhub-restore-panel .modhub-button-busy-ring .modhub-progress-ring{width:14px;height:14px}
+@keyframes modhub-restore-progress-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.modhub-restore-panel .modhub-progress-ring{animation:none!important}}
 .modhub-restore-panel details{margin-bottom:14px}
 .modhub-restore-panel summary{cursor:pointer;min-height:32px}
 .modhub-restore-panel-points details{margin:0}
@@ -84,6 +102,7 @@
 .modhub-restore-panel-notice{margin:12px 0 0!important}
 @media(max-width:768px){.modhub-restore-panel-settings{grid-template-columns:1fr}.modhub-restore-panel-footer button{flex:1 1 0;min-width:0}.modhub-restore-panel-manual button,.modhub-restore-panel-actions button{flex:1 1 auto;min-width:0}.modhub-restore-panel-body{padding-left:12px;padding-right:12px}}
 @media(max-width:768px){.modhub-restore-panel-point-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.modhub-restore-panel-point-fields>span:first-child{grid-column:1/-1}}
+@media(max-width:600px){.modhub-restore-point-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.modhub-restore-point-actions>button:first-child{grid-column:1/-1}.modhub-restore-history-actions button{width:100%}}
 @media(max-height:560px){.modhub-restore-panel-header,.modhub-restore-panel-footer{padding:8px 12px}.modhub-restore-panel-body{padding:8px 12px}.modhub-restore-panel p{margin-bottom:8px}.modhub-restore-panel-actions{margin:6px 0}.modhub-restore-panel-notice{margin-top:6px!important}.modhub-restore-panel-status{margin-top:4px}}
 `;
         document.head.appendChild(style);
@@ -136,12 +155,18 @@
         footer.appendChild(back); footer.appendChild(next); footer.appendChild(cancel);
         dialog.appendChild(header); dialog.appendChild(body); dialog.appendChild(footer); overlay.appendChild(dialog);
         mount(overlay, rescue);
-        let status;
+        let status, busyButton = null, pendingMessage = '';
 
-        function message(text, error = false) {
+        function message(text, error = false, busy = false) {
             if (!status) return;
+            status.dataset.message = text;
             status.textContent = text;
             status.className = `modhub-restore-panel-status ${error ? 'red' : 'grey'}`;
+            if (busy && window.modHubProgressRingHtml) {
+                status.textContent = '';
+                const ring = element('span'); ring.innerHTML = window.modHubProgressRingHtml();
+                status.appendChild(ring); status.appendChild(element('span', text));
+            }
         }
 
         function selectedPoint() {
@@ -158,18 +183,27 @@
             close.disabled = cancel.disabled = working;
             back.disabled = working || step === 'intro' || rescue && step === 'points';
             next.disabled = working || dirty || !data || step === 'changes' || (step !== 'intro' && !selectedPoint()) || (step === 'preview' && !preview?.canRestore);
-            next.textContent = step === 'preview' ? '开始还原' : '下一步';
+            if (!working || busyButton !== next) next.textContent = step === 'preview' ? '开始还原' : '下一步';
             next.hidden = step === 'changes';
             back.textContent = step === 'changes' ? '返回' : '上一步';
-            cancel.textContent = step === 'changes' ? '关闭' : rescue ? '继续等待或启动' : '取消';
+            cancel.hidden = step === 'changes';
+            cancel.textContent = rescue ? '继续等待或启动' : '取消';
         }
 
-        async function task(action) {
+        async function task(action, button = null, pending = '') {
             if (working) return;
+            busyButton = button; pendingMessage = pending;
             working = true; sync();
-            try { return await action(); }
+            window.modHubSetButtonBusy?.(busyButton, true);
+            if (pendingMessage) message(pendingMessage, false, !busyButton);
+            try { await window.modHubYieldToBrowser?.(); return await action(); }
             catch (error) { message((error?.message || '操作未完成，请重试') + (api.isRestoring?.() ? '。恢复记录已保留，游戏加载保持暂停；重新打开游戏将继续恢复。' : ''), true); }
-            finally { working = false; sync(); if (active) (next.disabled ? close : next).focus(); }
+            finally {
+                window.modHubSetButtonBusy?.(busyButton, false);
+                if (pendingMessage && status?.dataset.message === pendingMessage) message('');
+                busyButton = null; pendingMessage = ''; working = false; sync();
+                if (active) (next.disabled ? close : next).focus();
+            }
         }
 
         async function refresh() {
@@ -219,6 +253,7 @@
             else renderPreview();
             status = element('p', '', 'modhub-restore-panel-status grey', 'modHubRestorePanelStatus');
             status.setAttribute('aria-live', 'polite'); body.appendChild(status);
+            if (working && pendingMessage) message(pendingMessage, false, !busyButton?.isConnected);
             sync(); (next.disabled ? close : next).focus();
         }
 
@@ -241,12 +276,12 @@
             const changed = () => { dirty = auto.checked !== data.config.autoCreate || Number(limit.value) !== data.config.maxPoints; save.disabled = undo.disabled = !dirty; message(dirty ? '设置尚未保存，请先保存或撤销修改再继续。' : ''); sync(); };
             auto.onchange = limit.onchange = changed;
             undo.onclick = () => { auto.checked = data.config.autoCreate; limit.value = String(data.config.maxPoints); changed(); };
-            save.onclick = () => task(async () => { if (await api.saveConfig({ autoCreate: auto.checked, maxPoints: Number(limit.value) })) { await refresh(); message('还原设置已保存'); } });
+            save.onclick = () => task(async () => { if (await api.saveConfig({ autoCreate: auto.checked, maxPoints: Number(limit.value) })) { await refresh(); message('还原设置已保存'); } }, save, '正在保存还原设置，请稍候。');
             actions.appendChild(save); actions.appendChild(undo); body.appendChild(actions);
             const manual = element('div', undefined, 'modhub-restore-panel-manual');
             const name = element('input', undefined, undefined, 'modHubRestorePointName'); name.type = 'text'; name.maxLength = 80; name.value = '手动还原点'; name.setAttribute('aria-label', '手动还原点名称，最多 80 字');
             const create = element('button', '创建还原点', undefined, 'modHubRestoreCreatePoint');
-            create.onclick = () => { if (dirty) { message('请先保存或撤销设置修改。', true); return; } return task(async () => { await api.createPoint(name.value.trim().slice(0, 80) || '手动还原点'); await refresh(); message('手动还原点已创建'); }); };
+            create.onclick = () => { if (dirty) { message('请先保存或撤销设置修改。', true); return; } return task(async () => { await api.createPoint(name.value.trim().slice(0, 80) || '手动还原点'); await refresh(); message('手动还原点已创建'); }, create, '正在创建还原点，请稍候。'); };
             manual.appendChild(name); manual.appendChild(create); body.appendChild(manual);
         }
 
@@ -311,7 +346,7 @@
             });
             body.appendChild(list);
             pointList = list; list.scrollTop = pointScroll;
-            const actions = element('div', undefined, 'modhub-restore-panel-actions');
+            const actions = element('div', undefined, 'modhub-restore-panel-actions modhub-restore-point-actions');
             actions.appendChild(scanButton());
             if (rescue) { body.appendChild(actions); return; }
             const current = selectedPoint();
@@ -325,20 +360,21 @@
                 if (!await api.setPointProtection(point.id, !point.userProtected)) return;
                 await refresh();
                 message(point.userProtected ? data.points.find(item => item.id === point.id)?.systemProtected ? '已取消手动保护；该点仍受系统保护。' : '已取消手动保护，该点将参与后续普通历史清理。' : '已手动保护该还原点，不参与自动淘汰或历史清理。');
-            }); };
-            remove.onclick = () => { const point = selectedPoint(); if (remove.disabled || !point || point.protected) return; return task(async () => { if (await api.deletePoints([point.id])) { await refresh(); message('所选还原点已删除'); } }); };
-            clear.onclick = () => task(async () => { if (await api.deletePoints(data.points.filter(point => !point.protected).map(point => point.id))) { await refresh(); message('未受保护的还原点已清理'); } });
-            actions.appendChild(protect); actions.appendChild(remove); actions.appendChild(clear); body.appendChild(actions);
+            }, protect, point.userProtected ? '正在取消手动保护，请稍候。' : '正在保护所选还原点，请稍候。'); };
+            remove.onclick = () => { const point = selectedPoint(); if (remove.disabled || !point || point.protected) return; return task(async () => { if (await api.deletePoints([point.id])) { await refresh(); message('所选还原点已删除'); } }, remove, '正在删除所选还原点，请稍候。'); };
+            clear.onclick = () => task(async () => { if (await api.deletePoints(data.points.filter(point => !point.protected).map(point => point.id))) { await refresh(); message('未受保护的还原点已清理'); } }, clear, '正在清理未受保护的还原点，请稍候。');
+            actions.appendChild(protect); actions.appendChild(remove); body.appendChild(actions);
+            const historyActions = element('div', undefined, 'modhub-restore-history-actions');
+            historyActions.appendChild(clear); body.appendChild(historyActions);
         }
 
         function scanButton() {
             const scan = element('button', '扫描受影响的模组', undefined, 'modHubRestoreScanPoint');
             scan.disabled = !selectedPoint();
             scan.onclick = () => { const point = selectedPoint(); if (working || scan.disabled || !point) return; return task(async () => {
-                message('正在扫描受影响的模组，请稍候。');
                 const result = await api.preview(point.id);
                 scanReturn = step; preview = result; step = 'changes'; render();
-            }); };
+            }, scan, '正在扫描受影响的模组，请稍候。'); };
             return scan;
         }
 
@@ -358,9 +394,9 @@
             list.tabIndex = 0; list.setAttribute('role', 'region'); list.setAttribute('aria-label', step === 'changes' ? '还原变更与风险列表，使用方向键滚动' : '还原影响摘要与风险列表，使用方向键滚动');
             if (!preview.canRestore) list.appendChild(element('p', preview.reason || '该还原点无法恢复，请选择其他还原点。', 'red'));
             let count = 0;
-            [['installed', '恢复已删除模组', 'green'], ['updated', '回退包体', 'gold'], ['removed', '移除后来安装的模组', 'red'], ['enabled', '恢复启用', 'green'], ['disabled', '恢复禁用', 'red']].forEach(([key, label, color]) => {
+            [['installed', '恢复已删除模组', 'green'], ['updated', '回退包体', 'gold'], ['removed', '将移除的模组', 'red'], ['enabled', '恢复启用', 'green'], ['disabled', '恢复禁用', 'red']].forEach(([key, label, color]) => {
                 if (!changes[key]?.length) return;
-                if (step === 'preview') { list.appendChild(element('p', `${label}：${changes[key].length} 个`, color)); count++; return; }
+                if (step === 'preview') { list.appendChild(element('p', key === 'removed' ? `将移除 ${changes[key].length} 个模组` : `${label}：${changes[key].length} 个`, color)); count++; return; }
                 const group = element('section');
                 group.appendChild(element('strong', `${label}：`, color));
                 const names = element('ul');
@@ -380,7 +416,7 @@
             if (!count && preview.canRestore) list.appendChild(element('p', '目标与当前模组状态一致', 'grey'));
             (preview.riskMessages || []).forEach(risk => list.appendChild(element('p', risk, 'red')));
             body.appendChild(list);
-            if (step === 'changes') { body.appendChild(element('p', '关闭扫描结果可返回之前的页面，所选还原点将保留。', 'grey', 'modHubRestoreScanInstruction')); return; }
+            if (step === 'changes') { body.appendChild(element('p', '返回后保留所选还原点。', 'grey', 'modHubRestoreScanInstruction')); return; }
             const note = element('p', undefined, 'modhub-restore-panel-notice');
             note.appendChild(element('span', '开始还原后仍需确认最终变更。', 'grey'));
             note.appendChild(element('strong', '还原前保存当前模组状态', 'gold'));
@@ -395,7 +431,7 @@
             if (step === 'intro') { step = 'points'; render(); }
             else if (step === 'points') { preview = await api.preview(point.id); step = 'preview'; render(); }
             else if (await api.restore(point.id)) finish(true);
-        }); };
+        }, step === 'intro' ? null : next, step === 'points' ? '正在读取还原点变更，请稍候。' : step === 'preview' ? '正在还原模组状态，请稍候。' : ''); };
         back.onclick = () => { if (working) return; if (step === 'changes') return leave(); step = step === 'preview' ? 'points' : 'intro'; preview = null; render(); };
         close.onclick = cancel.onclick = leave;
         overlay.onclick = event => { if (event.target === overlay) leave(); };
@@ -405,7 +441,7 @@
         }
         function keepFocus(event) {
             if (working || dialog.contains(event.target)) return;
-            (next.disabled ? cancel : next).focus();
+            (next.disabled ? cancel.hidden ? back : cancel : next).focus();
         }
         function keyboard(event) {
             if (working) return;
@@ -420,8 +456,8 @@
         }
         document.addEventListener('keydown', keyboard);
         document.addEventListener('focusin', keepFocus);
-        status = element('p', '正在读取还原点...', 'grey'); body.appendChild(status); sync();
-        task(refresh);
+        status = element('p', '', 'modhub-restore-panel-status grey', 'modHubRestorePanelStatus'); status.setAttribute('aria-live', 'polite'); body.appendChild(status); sync();
+        task(refresh, null, '正在读取还原点，请稍候。');
         return promise;
     };
 })();

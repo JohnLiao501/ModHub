@@ -1,5 +1,20 @@
 # 第三方数据许可
 
+## JSON5 2.2.3
+
+`src/vendor/json5/index.min.js` 包含 JSON5 2.2.3 官方浏览器 UMD 构建的完整原文，仅在外层增加局部模块包装并导出 `modHubParseJson5`，不改写全局 `JSON5`。本地兼容检查使用该解析器读取 JSON5 声明，不执行声明中的 JavaScript。
+
+- 官方项目：https://github.com/json5/json5/tree/v2.2.3
+- 发布元数据：https://registry.npmjs.org/json5/2.2.3
+- 发布包：https://registry.npmjs.org/json5/-/json5-2.2.3.tgz
+- 发布包完整性：`sha512-XmOWe7eyHYH14cLdVPoyg+GOH3rYX++KpzrylJwSW98t3Nk+U8XOl8FWKOgwtzdb8lXGf6zYwDUzeHMWfxasyg==`
+- 原始 `dist/index.min.js` SHA-256：`4bb96d9d53f380ac801819411b8c10868ac9a984de863e56402ac00c2289b9f1`
+- 原始 `LICENSE.md` SHA-256：`53e59feb13058722d977c699eb0407c7bce2f93c949b681bbd2ff31698535927`
+
+采用 MIT 许可证；版权与完整许可原文保留于 `src/vendor/json5/LICENSE.md`，并随安装包分发。
+
+## Unicode Unihan 数据
+
 `src/javascript/modhub-search.js` 中的汉字拼音数据来自 Unicode 17.0.0 Unihan 的 `kMandarin` 属性，整理为无声调检索数据。原始数据：https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip。以下保留 Unicode 数据许可原文。
 
 ```text

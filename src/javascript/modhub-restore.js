@@ -612,10 +612,10 @@
 
     function restoreConfirmationHtml(point, change, riskMessages, packageVersions) {
         const items = [];
-        [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '移除后来安装的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].forEach(([key, label]) => {
+        [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '将移除的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].forEach(([key, label]) => {
             if (!change[key].length) return;
             const color = key === 'removed' || key === 'disabled' ? 'red' : 'gold';
-            items.push(`<li><strong class="${color}">${label}（${change[key].length} 个）</strong><br>${change[key].map(name => `<strong class="gold">${escapeHtml(name)}</strong>${['installed', 'updated', 'removed'].includes(key) ? `<br><span class="grey">${escapeHtml(packageVersionText(packageVersions[name]))}</span>` : ''}`).join('<br>')}</li>`);
+            items.push(`<li><strong class="${color}">${key === 'removed' ? `将移除 ${change[key].length} 个模组` : `${label}（${change[key].length} 个）`}</strong><br>${change[key].map(name => `<strong class="gold">${escapeHtml(name)}</strong>${['installed', 'updated', 'removed'].includes(key) ? `<br><span class="grey">${escapeHtml(packageVersionText(packageVersions[name]))}</span>` : ''}`).join('<br>')}</li>`);
         });
         [['orderChanged', '恢复加载顺序'], ['beautyChanged', '恢复美化配置'], ['settingsChanged', '恢复管理配置']].forEach(([key, label]) => { if (change[key]) items.push(`<li><strong class="gold">${label}</strong></li>`); });
         const list = items.length ? `<ul class="modhub-restore-notice-list" tabindex="0" aria-label="还原变更">${items.join('')}</ul>` : '<p class="grey">目标与当前模组状态一致。</p>';
@@ -1106,7 +1106,7 @@
             if (!point) fail('还原点不存在或已过保留期限');
             // 每次提交从真实当前状态重新构建目标，不使用界面预览缓存。
             const { target, changes: change, riskMessages, packageVersions } = await buildTarget(env, current, point);
-            const changes = [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '移除后来安装的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].filter(([key]) => change[key].length).map(([key, label]) => `${label}：${change[key].map(name => `${name}${['installed', 'updated', 'removed'].includes(key) ? `（${packageVersionText(packageVersions[name])}）` : ''}`).join('、')}`);
+            const changes = [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '将移除的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].filter(([key]) => change[key].length).map(([key, label]) => `${label}：${change[key].map(name => `${name}${['installed', 'updated', 'removed'].includes(key) ? `（${packageVersionText(packageVersions[name])}）` : ''}`).join('、')}`);
             if (change.orderChanged) changes.push('恢复加载顺序');
             if (change.beautyChanged) changes.push('恢复美化配置');
             if (change.settingsChanged) changes.push('恢复管理配置');
