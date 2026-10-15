@@ -430,7 +430,7 @@
             if (unsafeHistoryError(error)) invalidateHistoryFamily(family, cacheKey);
             throw error;
         };
-        const verifyEmptyHistory = Boolean(mod.sharedRepository && mod.catalogSource !== 'community');
+        const verifyEmptyHistory = Boolean(mod.sharedRepository);
         if (market?.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
         if (mod.autoInstall === false || mod.catalogSource === 'community' && !market?.hasCommunityReleaseSource?.(mod)) rejectUnsafe(historyError('该模组未获准自动安装，请前往作者主页', 'MANUAL_SOURCE'));
         let cached = null;
@@ -464,10 +464,6 @@
             if (unsafeHistoryError(error)) rejectUnsafe(error);
             if (cached) return { ...cached.data, fromCache: true, stale: true };
             const fallback = buildDirectoryFallbackReleases(mod, source, page, communityRevision);
-            if (mod.catalogSource === 'community') {
-                if (fallback) return fallback;
-                throw error;
-            }
             try {
                 data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
                 checkCurrent();
@@ -479,7 +475,7 @@
                 rejectUnsafe(directError);
             }
         }
-        // 旧服务可能按旧文件名规则漏筛；只核对已获准的原仓库，不绕过社区审核。
+        // 旧服务可能按旧文件名规则漏筛；空历史只复核同一来源仓库。
         if (verifyEmptyHistory && !data.fromGithub && !data.releases.length && !data.hasMore) {
             checkCurrent();
             try {

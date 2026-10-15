@@ -89,20 +89,8 @@
 
 .modhub-batch-status {
     display: grid;
-    grid-template-columns: 20px minmax(0, 1fr);
     gap: 4px;
 }
-
-.modhub-batch-status > .modhub-progress-ring {
-    grid-column: 1;
-    grid-row: 1 / span 2;
-    align-self: center;
-    width: 20px;
-    height: 20px;
-}
-
-.modhub-batch-status > strong,
-.modhub-batch-status > span { grid-column: 2; }
 
 .modhub-market-select-label {
     display: inline-flex;
@@ -972,27 +960,13 @@
 .modhub-download-progress {
     display: flex;
     align-items: center;
+    flex: 1 1 150px;
+    min-width: 0;
     gap: 8px;
-    margin: 0 0 10px;
 }
 
 .modhub-download-progress[hidden] {
     display: none;
-}
-
-.modhub-download-progress > .modhub-progress-ring {
-    width: 20px;
-    height: 20px;
-}
-
-.modhub-download-progress > .modhub-progress-ring[hidden] { display: none; }
-
-.btn-market-install[aria-busy="true"] > .modhub-progress-ring,
-.btn-market-update[aria-busy="true"] > .modhub-progress-ring {
-    width: 18px;
-    height: 18px;
-    margin: 0 6px 0 0;
-    flex-shrink: 0;
 }
 
 .modhub-download-label {
@@ -1004,7 +978,7 @@
     overflow-wrap: anywhere;
 }
 
-.modhub-download-cancel {
+.modhub-market-actions .modhub-download-cancel {
     flex: 0 0 auto;
     padding: 2px 7px !important;
     border: 1px solid var(--red, #b64b4b) !important;
@@ -1436,6 +1410,11 @@
     .modhub-market-actions button,
     .modhub-market-actions .buttonlike {
         flex: 1 1 0;
+    }
+
+    .modhub-market-actions > .btn-market-install,
+    .modhub-market-actions > .btn-market-update {
+        flex: 0 0 auto;
     }
 }
 

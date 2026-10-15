@@ -128,7 +128,46 @@
     width: 100%;
     box-sizing: border-box;
 }
-#modHubManagerStatus { margin: 6px 0; font-size: 0.9em; overflow-wrap: anywhere; }
+#modHubManagerStatus {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin: 6px 0;
+    font-size: 0.9em;
+    overflow-wrap: anywhere;
+}
+#modHubManagerStatus > span { min-width: 0; }
+
+/* 管理行忙碌时以圆环原位替换文字，保留文字占位和按钮原尺寸。 */
+button.modhub-button-busy:disabled,
+#modHubModManageContainer button.modhub-button-busy:disabled {
+    position: relative;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    white-space: normal !important;
+    opacity: 1 !important;
+    filter: none !important;
+    background-color: var(--800, #28282e) !important;
+    border-color: var(--gold, #d4af37) !important;
+    color: var(--100, #ddd) !important;
+    cursor: progress !important;
+}
+.modhub-button-busy-label { min-width: 0; overflow-wrap: anywhere; }
+.modhub-btn-group .modhub-button-busy-label { opacity: 0; white-space: nowrap; overflow-wrap: normal; flex-shrink: 0; }
+.modhub-button-busy-ring { display: inline-flex; flex: 0 0 16px; }
+.modhub-button-busy-ring > .modhub-progress-ring { width: 16px; height: 16px; color: var(--gold, #d4af37); }
+.modhub-button-busy.modhub-btn-move > .modhub-button-busy-label { opacity: 0; }
+.modhub-btn-group .modhub-button-busy > .modhub-button-busy-ring,
+.modhub-button-busy.modhub-btn-move > .modhub-button-busy-ring {
+    position: absolute;
+    inset: 0;
+    align-items: center;
+    justify-content: center;
+}
 
 /* 还原确认与结果提示固定标题和按钮，仅条目名单滚动。 */
 .modhub-modal-backdrop:has(> .modhub-restore-notice) {

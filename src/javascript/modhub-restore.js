@@ -16,6 +16,7 @@
     let policyJournal = null;
     const MODHUB_TIMEOUT = 60000;
     const contexts = new WeakSet();
+    const operationPackages = new WeakMap();
     const startupLogs = [];
     let owner = null;
     let restoring = false;
@@ -77,17 +78,21 @@
         }));
     }
 
-    function entries(env) {
+    function entries(env, packageRows) {
         return transaction(env, 'readonly', (store, done) => {
             const rows = [];
+            const metadataKeys = new Set([env.enabledKey, env.disabledKey, MODHUB_POINTS_KEY, MODHUB_JOURNAL_KEY,
+                MODHUB_STARTUP_KEY, MODHUB_SUCCESS_KEY, configKey(env)]);
             const request = typeof store.openKeyCursor === 'function' ? store.openKeyCursor() : store.openCursor();
             request.onsuccess = () => {
                 const cursor = request.result;
                 if (cursor) {
                     const row = [cursor.key, undefined];
                     rows.push(row);
-                    // 历史包只保留键用于去重，不在每次建点时读取和复制全部历史字节。
-                    if (typeof cursor.key !== 'string' || !cursor.key.startsWith(MODHUB_BLOB_PREFIX)) {
+                    // 纯配置收尾复用本操作的原包体，最终写事务仍逐字节核对真实仓库。
+                    if (packageRows?.has(cursor.key) && typeof cursor.key === 'string' && cursor.key.startsWith(env.prefix)) {
+                        row[1] = packageRows.get(cursor.key);
+                    } else if (metadataKeys.has(cursor.key) || typeof cursor.key === 'string' && cursor.key.startsWith(env.prefix)) {
                         const value = store.get(cursor.key);
                         value.onsuccess = () => { row[1] = value.result; };
                     }
@@ -117,8 +122,24 @@
 
     async function bytes(value) {
         if (typeof value === 'string') {
-            const binary = window.atob(value);
-            return Uint8Array.from(binary, character => character.charCodeAt(0));
+            const encoded = value.replace(/[\t\n\f\r ]/g, '');
+            const padding = encoded.indexOf('=');
+            // 分块前核验全局填充位置，避免中途的填充被误当作合法块尾。
+            if (encoded.length % 4 === 1 || padding !== -1 && (encoded.length % 4 !== 0 || padding < encoded.length - 2)) {
+                fail('模组包体的 Base64 编码无效，已停止还原写入');
+            }
+            const data = new Uint8Array(Math.floor(encoded.length * 3 / 4) - (encoded.endsWith('==') ? 2 : encoded.endsWith('=') ? 1 : 0));
+            const chunkSize = 256 * 1024;
+            let written = 0;
+            for (let offset = 0; offset < encoded.length; offset += chunkSize) {
+                const binary = window.atob(encoded.slice(offset, offset + chunkSize));
+                for (let index = 0; index < binary.length; index++) data[written++] = binary.charCodeAt(index);
+                if (offset + chunkSize < encoded.length) {
+                    if (typeof window.scheduler?.yield === 'function') await window.scheduler.yield();
+                    else await new Promise(resolve => setTimeout(resolve, 0));
+                }
+            }
+            return data;
         }
         if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
         if (Object.prototype.toString.call(value) === '[object ArrayBuffer]') return new Uint8Array(value);
@@ -214,20 +235,30 @@
         } else if (beauty.value !== null) fail('空美化配置格式未知');
     }
 
-    async function snapshot(env = environment(), knownRows) {
+    async function snapshot(env = environment(), knownRows, packageMetadata) {
         const rows = knownRows || await entries(env);
         const enabled = parseNames(rows.get(env.enabledKey));
         const disabled = parseNames(rows.get(env.disabledKey));
         if (enabled.some(name => disabled.includes(name))) fail('模组启用与禁用列表重复，无法建立完整还原点');
         const packages = [];
         const blobs = new Map();
+        let lastYield = Date.now();
         for (const [key, value] of rows) {
             if (typeof key !== 'string' || !key.startsWith(env.prefix)) continue;
             const name = key.slice(env.prefix.length);
             if (!name || env.loader.constructor.calcModNameKey(name) !== key) fail('模组包体键格式未知');
-            const blob = await digest(value);
-            packages.push({ name, hash: blob.hash, size: blob.size });
-            blobs.set(blob.hash, blob.data);
+            const known = packageMetadata?.get(name);
+            if (known) packages.push(known);
+            else {
+                const blob = await digest(value);
+                packages.push({ name, hash: blob.hash, size: blob.size });
+                blobs.set(blob.hash, blob.data);
+                if (Date.now() - lastYield >= 12) {
+                    if (typeof window.scheduler?.yield === 'function') await window.scheduler.yield();
+                    else await new Promise(resolve => setTimeout(resolve, 0));
+                    lastYield = Date.now();
+                }
+            }
         }
         packages.sort((a, b) => a.name.localeCompare(b.name));
         // 启禁记录可能残留已缺失的包名；分别保存原始列表与真实仓库包体，不虚构安装包。
@@ -363,7 +394,7 @@
     }
 
     const createOperation = (meta = {}) => {
-        const context = { id: `point-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`, label: typeof meta.label === 'string' ? meta.label.slice(0, 200) : '模组配置操作', kind: ['manual', 'aiRepair', 'remoteRepair'].includes(meta.kind) ? meta.kind : 'auto', roundId: bootRound, prepared: false, pointId: null, finished: false, withoutPoint: false, cancelled: false };
+        const context = { id: `point-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`, label: typeof meta.label === 'string' ? meta.label.slice(0, 200) : '模组配置操作', kind: ['manual', 'aiRepair', 'remoteRepair'].includes(meta.kind) ? meta.kind : 'auto', packagesUnchanged: meta.packagesUnchanged === true, roundId: bootRound, prepared: false, pointId: null, finished: false, withoutPoint: false, cancelled: false };
         contexts.add(context);
         return context;
     };
@@ -450,6 +481,10 @@
             context.before = before.state;
             context.pointId = point.id;
             context.prepared = true;
+            if (context.packagesUnchanged) operationPackages.set(context, {
+                rows: before.rows, packages: new Map(before.state.packages.map(item => [item.name, { ...item }])),
+                schema: { ...before.state.schema }
+            });
             return true;
         } catch (error) {
             context.prepareError = error;
@@ -477,7 +512,13 @@
         try {
             if (context.pointId) {
                 const env = environment();
-                const after = await snapshot(env);
+                const known = operationPackages.get(context);
+                if (known && !same(known.schema, { dbName: env.dbName, storeName: env.storeName,
+                    enabledKey: env.enabledKey, disabledKey: env.disabledKey, prefix: env.prefix })) {
+                    fail('操作期间模组存储位置已变化，未能确认操作结果');
+                }
+                const rows = known ? await entries(env, known.rows) : undefined;
+                const after = await snapshot(env, rows, known?.packages);
                 const changed = !sameState(after.state, context.before);
                 const all = readPoints(after.rows).map(point => ({ ...point }));
                 const point = all.find(item => item.id === context.pointId);
@@ -500,7 +541,7 @@
         } catch (error) {
             context.finishError = error;
             console.warn('[ModHub] 操作回读失败，已保留操作前还原点', error);
-        } finally { context.finished = true; release(context); }
+        } finally { operationPackages.delete(context); context.finished = true; release(context); }
     }
 
     async function withOperation(meta, action) {
@@ -671,6 +712,7 @@
     }
 
     function equalPackage(a, b) {
+        if (typeof a === 'string' && a === b) return true;
         const unpack = value => {
             if (typeof value === 'string') return Uint8Array.from(window.atob(value), character => character.charCodeAt(0));
             if (ArrayBuffer.isView(value)) return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
@@ -678,7 +720,21 @@
             fail('存储包体类型无法在事务内确认，已停止覆盖');
         };
         const left = unpack(a), right = unpack(b);
-        return left.length === right.length && left.every((byte, index) => byte === right[index]);
+        if (left.length !== right.length) return false;
+        let index = 0;
+        if (left.byteOffset % 4 === 0 && right.byteOffset % 4 === 0) {
+            const length = Math.floor(left.length / 4);
+            const leftWords = new Uint32Array(left.buffer, left.byteOffset, length);
+            const rightWords = new Uint32Array(right.buffer, right.byteOffset, length);
+            for (let word = 0; word < length; word++) {
+                if (leftWords[word] !== rightWords[word]) return false;
+            }
+            index = length * 4;
+        }
+        for (; index < left.length; index++) {
+            if (left[index] !== right[index]) return false;
+        }
+        return true;
     }
 
     /** 限定安装只增改本次包体，并与两份启禁列表在真实仓库中一起提交。 */

@@ -44,6 +44,56 @@ window.modHubSetProgressRing = function(ring, percent) {
     }
 };
 
+const modHubBusyButtons = new WeakMap();
+
+window.modHubSetButtonBusy = function(button, busy) {
+    if (!button) return;
+    const previous = modHubBusyButtons.get(button);
+    if (busy) {
+        if (previous) return;
+        const label = document.createElement('span');
+        label.className = 'modhub-button-busy-label';
+        while (button.firstChild) label.appendChild(button.firstChild);
+        const ring = document.createElement('span');
+        ring.className = 'modhub-button-busy-ring';
+        ring.innerHTML = window.modHubProgressRingHtml();
+        modHubBusyButtons.set(button, {
+            disabled: button.disabled,
+            ariaBusy: button.getAttribute('aria-busy'),
+            label,
+            ring
+        });
+        button.appendChild(ring);
+        button.appendChild(label);
+        button.classList.add('modhub-button-busy');
+        button.disabled = true;
+        button.setAttribute('aria-busy', 'true');
+    } else if (previous) {
+        previous.ring.remove();
+        while (previous.label.firstChild) button.insertBefore(previous.label.firstChild, previous.label);
+        previous.label.remove();
+        button.classList.remove('modhub-button-busy');
+        button.disabled = previous.disabled;
+        if (previous.ariaBusy === null) button.removeAttribute('aria-busy');
+        else button.setAttribute('aria-busy', previous.ariaBusy);
+        modHubBusyButtons.delete(button);
+    }
+};
+
+window.modHubYieldToBrowser = function() {
+    if (typeof window.requestAnimationFrame !== 'function') return Promise.resolve();
+    return new Promise(resolve => {
+        const fallback = setTimeout(() => {
+            window.cancelAnimationFrame?.(frame);
+            resolve();
+        }, 80);
+        const frame = window.requestAnimationFrame(() => {
+            clearTimeout(fallback);
+            setTimeout(resolve, 0);
+        });
+    });
+};
+
 window.modHubLoadingHtml = function(message) {
     return '<div class="modhub-loading-state grey" role="status" aria-live="polite">' + window.modHubProgressRingHtml()
         + '<p>' + window.modHubEscapeHtml(message) + '</p></div>';

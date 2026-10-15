@@ -321,19 +321,21 @@
         ['料理', /料理|菜谱|烹饪/i]
     ];
 
-    // 下载线路配置：经国内直连网络真实压测，DDLC 与 Boki 具备极速稳定且带 CORS 优势；自建反代专线与 GitHub 直连作为补充。
+    // 镜像按顺序回退，自建线路统一核验目录授权；浏览器直连仅供手动下载。
     const MIRROR_SERVERS = [
-        { id: 'ddlc', name: '加速通道 1（DDLC 加速·推荐）', shortName: 'DDLC', prefix: 'https://gh.ddlc.top/' },
-        { id: 'boki', name: '加速通道 2（Boki 高速）', shortName: 'Boki', prefix: 'https://github.boki.moe/' },
-        { id: 'worker', name: '加速通道 3（自建反代专线）', shortName: '自建专线', prefix: '', useWorker: true },
+        { id: 'ghproxy', name: 'GH-Proxy 镜像（推荐）', shortName: 'GH-Proxy', prefix: 'https://gh-proxy.org/' },
+        { id: 'llkk', name: 'LLKK 镜像', shortName: 'LLKK', prefix: 'https://gh.llkk.cc/' },
+        { id: 'fastgit', name: 'FastGit 镜像', shortName: 'FastGit', prefix: 'https://fastgit.cc/' },
+        { id: 'ddlc', name: 'DDLC 镜像', shortName: 'DDLC', prefix: 'https://gh.ddlc.top/' },
+        { id: 'boki', name: 'Boki 镜像', shortName: 'Boki', prefix: 'https://github.boki.moe/' },
+        { id: 'worker', name: '自建反代专线', shortName: '自建专线', prefix: '', useWorker: true },
         { id: 'github', name: 'GitHub 直连（浏览器）', shortName: 'GitHub', prefix: '', browserOnly: true }
     ];
-    let currentMirrorId = 'ddlc';
+    let currentMirrorId = 'ghproxy';
 
     function resolveMirrorServer(mirrorId) {
         let normId = mirrorId;
         if (normId === 'jasonzeng') normId = 'ddlc';
-        if (normId === 'llkk') normId = 'boki';
         if (normId === 'ghfast') normId = 'boki';
         return MIRROR_SERVERS.find(m => m.id === normId) || MIRROR_SERVERS[0];
     }
@@ -463,7 +465,7 @@
         toolbar.classList.toggle('is-entry', !state.selecting && !state.running);
         if (state.running) {
             toolbar.innerHTML = `
-                <div class="modhub-batch-status" role="status" aria-live="polite">${window.modHubProgressRingHtml(state.progressPhase === 'installing' && state.total > 0 ? state.completed * 100 / state.total : null, '批量安装总进度')}<strong class="gold">批量安装 ${state.completed}/${state.total}</strong><span>${state.current ? `正在处理：${escapeHtml(state.current)}` : '正在准备安装计划'}</span></div>
+                <div class="modhub-batch-status" role="status" aria-live="polite"><strong class="gold">批量安装 ${state.completed}/${state.total}</strong><span>${state.current ? `正在处理：${escapeHtml(state.current)}` : '正在准备安装计划'}</span></div>
                 <button id="modHubBatchStop" type="button" class="macro-button modhub-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>`;
             const stopButton = document.getElementById('modHubBatchStop');
             if (stopButton) stopButton.onclick = () => { state.stopRequested = true; renderBatchInstallToolbar(); };
@@ -539,26 +541,8 @@
         return candidates.map(safeHttpsUrl).find(Boolean) || null;
     }
 
-    function sameGithubRepoOrSource(sourceA, sourceB) {
-        if (!sourceA || !sourceB) return false;
-        if (sourceUrlKey(sourceA) === sourceUrlKey(sourceB)) return true;
-        const repoA = parseGithubRepo(sourceA);
-        const repoB = parseGithubRepo(sourceB);
-        return Boolean(repoA && repoB && repoA.key === repoB.key);
-    }
-
     function hasCommunityReleaseSource(mod) {
-        const githubUrl = safeHttpsUrl(mod?.githubUrl);
-        const repo = parseGithubRepo(githubUrl);
-        const repositoryKeys = Array.isArray(mod?.repositoryKeys) ? mod.repositoryKeys : [];
-        return mod?.autoInstall === true && typeof mod.identityId === 'string' && !!mod.identityId.trim()
-            && Array.isArray(mod.bootNames) && mod.bootNames.length > 0
-            && !!repo && repositoryKeys.some(key => String(key).toLowerCase() === repo.key)
-            && (/^\/[^/]+\/[^/]+\/releases\/(?:latest|tag\/[^/]+|download\/[^/]+\/[^/]+)\/?$/.test(new URL(githubUrl).pathname)
-                || sourceUrlKey(mod.releaseTrackingSourceUrl) === sourceUrlKey(githubUrl))
-            && (sameGithubRepoOrSource(mod.sourceUrl, githubUrl)
-                || (Array.isArray(mod.sources) && mod.sources.some(source => source?.platform === 'github'
-                    && sameGithubRepoOrSource(source.url, githubUrl))));
+        return mod?.autoInstall === true && Boolean(parseGithubRepo(safeHttpsUrl(mod.githubUrl)));
     }
 
     function sourceUrlKey(value) {
@@ -2684,11 +2668,11 @@
         return `${mirror.prefix}${url}`;
     }
 
-    function getDownloadUrl(url, mirrorId) {
+    function getDownloadUrl(url, mirrorId, workerBackup = false) {
         const mirror = resolveMirrorServer(mirrorId);
         const targetUrl = getAcceleratedUrl(url, mirrorId);
         if (!targetUrl || !mirror.useWorker) return targetUrl;
-        const proxyUrl = new URL('/download', RELEASE_WORKER_API_BASE);
+        const proxyUrl = new URL('/download', workerBackup ? BACKUP_RELEASE_INDEX_URL : RELEASE_WORKER_API_BASE);
         proxyUrl.searchParams.set('url', targetUrl);
         return proxyUrl.toString();
     }
@@ -3068,7 +3052,7 @@
                 && !tracking.releaseTag && !tracking.sourcePath && originalTarget && originalTarget.owner.toLowerCase() === tracking.owner.toLowerCase()
                 && approvedKeys.includes(originalTarget.key) && approvedKeys.includes(tracking.key);
             const githubUrl = safeHttpsUrl(trackingAllowed ? mod.releaseTrackingSourceUrl : mod.githubUrl);
-            const autoInstall = !isCommunity || hasCommunityReleaseSource(mod);
+            const autoInstall = mod.autoInstall !== false && (!isCommunity || hasCommunityReleaseSource(mod));
             mod = {
                 ...mod,
                 sourceUrl,
@@ -3161,38 +3145,6 @@
             }
         }
         throw lastError || new Error('所有自动版本索引镜像均不可用');
-    }
-
-    async function verifyCurrentCommunityInstall(mod) {
-        const controller = typeof AbortController === 'function' ? new AbortController() : null;
-        const timer = controller ? setTimeout(() => controller.abort(), IDENTITY_FETCH_TIMEOUT_MS) : null;
-        try {
-            const response = await fetch(getReleaseWorkerUrl('/release-index.json'), {
-                cache: 'no-store', ...(controller ? { signal: controller.signal } : {})
-            });
-            if (!response.ok || response.headers?.get('X-ModHub-Community-Fresh') !== '1') {
-                throw new Error('无法确认社区目录的最新审核状态');
-            }
-            const index = await response.json();
-            if (!Number.isSafeInteger(index.communityRevision) || index.communityRevision < withdrawnRevision) {
-                throw new Error('社区目录修订号已过期');
-            }
-            const current = normalizeReleaseIndex(index).find(item => item.id === mod.id && item.catalogSource === 'community');
-            const sameNames = (a, b) => JSON.stringify((Array.isArray(a) ? a : []).map(value => String(value).toLowerCase()).sort())
-                === JSON.stringify((Array.isArray(b) ? b : []).map(value => String(value).toLowerCase()).sort());
-            if (!current || !hasCommunityReleaseSource(current) || isWithdrawn(current)
-                || sourceUrlKey(current.sourceUrl) !== sourceUrlKey(mod.sourceUrl)
-                || sourceUrlKey(current.githubUrl) !== sourceUrlKey(mod.githubUrl)
-                || sourceUrlKey(current.releaseUrl) !== sourceUrlKey(mod.releaseUrl)
-                || current.identityId !== mod.identityId || current.version !== mod.version
-                || !sameNames(current.repositoryKeys, mod.repositoryKeys)
-                || !sameNames(current.bootNames, mod.bootNames)) {
-                throw new Error('社区条目审核信息已变化，请刷新市场后再安装');
-            }
-            return true;
-        } finally {
-            if (timer !== null) clearTimeout(timer);
-        }
     }
 
     async function loadIdentityCatalog(forceRefresh = false) {
@@ -3471,9 +3423,6 @@
         mod._matchedLocal = null;
         mod._matchedScore = 0;
         if (isWithdrawn(mod)) return 'unavailable';
-        if (mod.catalogSource === 'community' && !mod.identityId) {
-            return marketExternalUrl(mod) ? 'external_only' : 'unavailable';
-        }
 
         // 兼容传入 Map 的老接口 (如单元测试)
         let profileList = profiles;
@@ -4931,30 +4880,35 @@
         if (!progress) return;
 
         const value = state === 'active' && Number.isFinite(percent) ? Math.max(0, Math.min(100, Math.round(percent))) : null;
-        const ring = progress.querySelector('.modhub-progress-ring');
         const label = progress.querySelector('.modhub-download-label');
         const cancelButton = progress.querySelector('.modhub-download-cancel');
         const button = card.querySelector('.btn-market-install, .btn-market-update');
         if (button && status.button !== button) { status.button = button; status.idleDisabled = button.disabled; }
         const waiting = state === 'preparing' || state === 'checking';
-        progress.hidden = state === 'preparing';
+        const busy = ['active', 'installing', 'cancelling', 'preparing', 'checking'].includes(state);
+        progress.hidden = false;
         progress.classList.toggle('is-error', state === 'error');
-        if (ring) {
-            window.modHubSetProgressRing(ring, value);
-            ring.hidden = !['active', 'installing', 'cancelling', 'preparing', 'checking'].includes(state);
-            ring.setAttribute('aria-label', modName + (waiting ? '安装准备进度' : state === 'installing' ? '安装进度' : state === 'cancelling' ? '取消下载进度' : '下载进度'));
-        }
         label.textContent = text;
         if (cancelButton) cancelButton.hidden = !['active', 'checking'].includes(state) || !activeDownloadControllers.has(modName);
         if (button) {
+            window.modHubSetButtonBusy(button, busy);
             button.disabled = batchInstallState.running || !['error', 'cancelled'].includes(state);
-            button.setAttribute('aria-busy', String(['active', 'installing', 'cancelling', 'preparing', 'checking'].includes(state)));
-            button.textContent = waiting ? state === 'checking' ? '正在核验' : '正在准备' : state === 'installing'
+            if (!busy) button.removeAttribute('aria-busy');
+            const buttonLabel = busy ? button.querySelector('.modhub-button-busy-label') : button;
+            buttonLabel.textContent = waiting ? state === 'checking' ? '正在核验' : '正在准备' : state === 'installing'
                 ? '正在安装'
                 : (state === 'error'
                     ? '重试'
                     : (state === 'cancelled' ? (button.dataset.idleText || '下载安装') : state === 'prepared' ? '等待确认' : state === 'cancelling' ? '正在取消' : (value === null ? '正在下载' : `下载 ${value}%`)));
-            if (waiting) button.innerHTML = window.modHubProgressRingHtml(null) + `<span>${window.modHubEscapeHtml(button.textContent)}</span>`;
+            if (busy) {
+                const ring = button.querySelector('.modhub-progress-ring');
+                ring.removeAttribute('aria-hidden');
+                ring.setAttribute('role', 'progressbar');
+                ring.setAttribute('aria-valuemin', '0');
+                ring.setAttribute('aria-valuemax', '100');
+                ring.setAttribute('aria-label', modName + (waiting ? '安装准备进度' : state === 'installing' ? '安装进度' : state === 'cancelling' ? '取消下载进度' : '下载进度'));
+                window.modHubSetProgressRing(ring, value);
+            }
         }
     }
 
@@ -4965,16 +4919,15 @@
         const card = cards.find(item => item.dataset.modName === modName);
         const progress = card?.querySelector('.modhub-download-progress');
         if (!progress) return;
-        const ring = progress.querySelector('.modhub-progress-ring');
         const label = progress.querySelector('.modhub-download-label');
         const cancelButton = progress.querySelector('.modhub-download-cancel');
         const button = card.querySelector('.btn-market-install, .btn-market-update');
         progress.hidden = true;
         progress.classList.remove?.('is-error');
-        if (ring) { window.modHubSetProgressRing(ring, null); ring.hidden = true; }
         if (label) label.textContent = '等待下载';
         if (cancelButton) cancelButton.hidden = true;
         if (button) {
+            window.modHubSetButtonBusy(button, false);
             button.disabled = batchInstallState.running || Boolean(previous?.button === button && previous.idleDisabled);
             button.removeAttribute('aria-busy');
             button.textContent = button.dataset.idleText || '下载安装';
@@ -4998,34 +4951,54 @@
         return error;
     }
 
-    async function readDownloadResponse(response, onProgress, maxBytes = MAX_DOWNLOAD_BYTES, expectedBytes = 0) {
+    async function readDownloadResponse(response, onProgress, maxBytes = MAX_DOWNLOAD_BYTES, expectedBytes = 0, signal = null) {
         const total = Number(response.headers?.get?.('Content-Length')) || Number(expectedBytes) || 0;
         if (total > maxBytes) throw createFileTooLargeError();
-        if (!response.body?.getReader) {
-            const blob = await response.blob();
-            if (blob.size > maxBytes) throw createFileTooLargeError();
-            return blob;
-        }
-        const chunks = [];
-        const reader = response.body.getReader();
-        let received = 0;
-        let lastReportedProgress;
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-            received += value.byteLength;
-            if (received > maxBytes) {
-                await reader.cancel();
-                throw createFileTooLargeError();
+        const reader = response.body?.getReader?.();
+        const waitForData = async read => {
+            let timer, onAbort;
+            try {
+                return await new Promise((resolve, reject) => {
+                    onAbort = () => reject(signal.reason || Object.assign(new Error('已取消下载'), { name: 'AbortError' }));
+                    if (signal?.aborted) { onAbort(); return; }
+                    signal?.addEventListener('abort', onAbort, { once: true });
+                    timer = setTimeout(() => reject(Object.assign(new Error('下载中断（连续 30 秒未收到数据）'),
+                        { name: 'TimeoutError', code: 'ETIMEDOUT' })), 30000);
+                    Promise.resolve().then(read).then(resolve, reject);
+                });
+            } finally {
+                clearTimeout(timer);
+                signal?.removeEventListener('abort', onAbort);
             }
-            chunks.push(value);
-            const progress = total ? Math.round(Math.min(100, received * 100 / total)) : null;
-            if (progress !== lastReportedProgress) {
-                lastReportedProgress = progress;
-                onProgress(progress);
+        };
+        try {
+            if (!reader) {
+                const blob = await waitForData(() => response.blob());
+                if (blob.size > maxBytes) throw createFileTooLargeError();
+                return blob;
             }
+            const chunks = [];
+            let received = 0;
+            let lastReportedProgress;
+            while (true) {
+                const { done, value } = await waitForData(() => reader.read());
+                if (done) break;
+                received += value.byteLength;
+                if (received > maxBytes) throw createFileTooLargeError();
+                chunks.push(value);
+                const progress = total ? Math.round(Math.min(100, received * 100 / total)) : null;
+                if (progress !== lastReportedProgress) {
+                    lastReportedProgress = progress;
+                    onProgress(progress);
+                }
+            }
+            return new Blob(chunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' });
+        } catch (error) {
+            if (reader) Promise.resolve(reader.cancel()).catch(() => {});
+            throw error;
+        } finally {
+            reader?.releaseLock?.();
         }
-        return new Blob(chunks, { type: response.headers.get('Content-Type') || 'application/octet-stream' });
     }
 
     async function getPackageDigest(data) {
@@ -5255,16 +5228,8 @@
             options.onFailure?.(reason, code);
             return false;
         };
-        if (isWithdrawn(mod) || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod))) {
+        if (isWithdrawn(mod) || mod.autoInstall === false) {
             return failBatch('该来源不支持自动安装');
-        }
-        if (mod.catalogSource === 'community') {
-            try {
-                await verifyCurrentCommunityInstall(mod);
-            } catch (error) {
-                window.modHubShowToast?.(error.message || '无法确认社区条目的最新审核状态', 'warning');
-                return failBatch(error.message || '无法确认社区条目的最新审核状态');
-            }
         }
         const gui = window.modHubGetGui ? window.modHubGetGui() : null;
         if (!gui) {
@@ -5417,11 +5382,11 @@
             const preparedLimit = options.maxPreparedBytes === undefined ? MAX_DOWNLOAD_BYTES
                 : Math.min(MAX_DOWNLOAD_BYTES, Number(options.maxPreparedBytes));
             if (!(preparedLimit >= 0) || (preparedSnapshot && preparedPackage.bytes > preparedLimit)) throw createFileTooLargeError();
-            let activeMirror = selectedMirror;
             const availableMirrors = [
                 selectedMirror,
                 ...MIRROR_SERVERS.filter(m => !m.browserOnly && m.id !== selectedMirror.id)
-            ];
+            ].flatMap(mirror => mirror.useWorker
+                ? [mirror, { ...mirror, name: '自建反代专线（备用入口）', workerBackup: true }] : [mirror]);
 
             for (let assetIndex = 0; !preparedSnapshot && assetIndex < installAssets.length; assetIndex++) {
                 const asset = installAssets[assetIndex];
@@ -5441,18 +5406,14 @@
                 const remainingBytes = preparedLimit - fileObjects.reduce((sum, file) => sum + file.size, 0);
                 if (remainingBytes <= 0 || assetSize > remainingBytes) throw createFileTooLargeError();
 
-                const candidateMirrors = [
-                    activeMirror,
-                    ...availableMirrors.filter(m => m.id !== activeMirror.id)
-                ];
-
                 let blob = null;
                 let lastError = null;
+                const failures = [];
 
-                for (let cIdx = 0; cIdx < candidateMirrors.length; cIdx++) {
-                    const currentCandidate = candidateMirrors[cIdx];
+                for (let cIdx = 0; cIdx < availableMirrors.length; cIdx++) {
+                    const currentCandidate = availableMirrors[cIdx];
                     failedMirror = currentCandidate;
-                    const fetchUrl = getDownloadUrl(asset.downloadUrl, currentCandidate.id);
+                    const fetchUrl = getDownloadUrl(asset.downloadUrl, currentCandidate.id, currentCandidate.workerBackup);
 
                     if (cIdx > 0) {
                         console.warn(`[ModHub] 下载线路故障转移，正在自动切换至 ${currentCandidate.name} 下载【${fileName}】`);
@@ -5467,7 +5428,8 @@
                             reportProgress(null, `${assetIndex + 1}/${installAssets.length} 连接中断，正在自动重试...`);
                         }
 
-                        // 连接握手超时控制（8 秒内未建立响应则超时中断并自动故障转移）
+                        // 自建线路需先核验目录并回源；各附件仍优先使用玩家所选线路。
+                        const connectTimeoutMs = currentCandidate.useWorker ? 20000 : 8000;
                         const connectTimeoutController = typeof AbortController === 'function' ? new AbortController() : null;
                         let abortHandler = null;
                         if (controller && connectTimeoutController) {
@@ -5480,11 +5442,11 @@
                         }
                         const timeoutId = connectTimeoutController
                             ? setTimeout(() => {
-                                const timeoutErr = new Error(`连接 ${currentCandidate.name} 超时（超过 8 秒未响应）`);
+                                const timeoutErr = new Error(`连接超时（超过 ${connectTimeoutMs / 1000} 秒未响应）`);
                                 timeoutErr.name = 'TimeoutError';
                                 timeoutErr.code = 'ETIMEDOUT';
                                 connectTimeoutController.abort(timeoutErr);
-                            }, 8000)
+                            }, connectTimeoutMs)
                             : null;
 
                         try {
@@ -5492,19 +5454,19 @@
                             if (timeoutId !== null) clearTimeout(timeoutId);
 
                             if (!response.ok) {
+                                response.body?.cancel?.().catch(() => {});
                                 const error = new Error(`网络响应异常 HTTP ${response.status}`);
                                 error.status = response.status;
-                                if (response.status === 413) error.code = 'FILE_TOO_LARGE';
                                 throw error;
                             }
 
-                            // 握手成功后读取流（流式下载过程不再受 8 秒连接握手限制，仅受外层取消信号控制）
+                            // 接收阶段按实际数据重置等待时间，慢速传输不受总时长限制。
                             blob = await readDownloadResponse(response, percent => {
                                 reportProgress(
                                     percent,
                                     `${assetIndex + 1}/${installAssets.length} ${percent === null ? '正在接收' : `正在下载 ${Math.round(percent)}%`}：${fileName}`
                                 );
-                            }, remainingBytes, assetSize);
+                            }, remainingBytes, assetSize, connectTimeoutController?.signal || controller?.signal);
 
                             if (assetSize && blob.size !== assetSize) {
                                 const error = new Error(`安装包大小不完整（预期 ${assetSize} 字节，实际 ${blob.size} 字节）`);
@@ -5515,19 +5477,22 @@
                             await verifyAssetDigest(blob, assetDigest);
                             const digest = await getPackageDigest(blob);
                             if (digest) downloadedPackageDigests.set(asset.downloadUrl, digest);
-                            activeMirror = currentCandidate;
                             success = true;
                             break;
                         } catch (err) {
                             if (timeoutId !== null) clearTimeout(timeoutId);
                             blob = null;
-                            lastError = err;
-                            const nonRetryableCodes = ['FILE_TOO_LARGE', 'DIGEST_MISMATCH', 'DIGEST_UNSUPPORTED', 'DIGEST_UNAVAILABLE'];
+                            lastError = connectTimeoutController?.signal.reason?.code === 'ETIMEDOUT'
+                                ? connectTimeoutController.signal.reason : err;
+                            failures.push(`${currentCandidate.name}：${lastError.message || String(lastError)}`);
+                            connectTimeoutController?.abort(lastError);
+                            const nonRetryableCodes = ['FILE_TOO_LARGE', 'DIGEST_UNSUPPORTED', 'DIGEST_UNAVAILABLE'];
                             if (controller?.signal.aborted || nonRetryableCodes.includes(err?.code)) {
                                 throw err;
                             }
+                            if (['DIGEST_MISMATCH', 'DOWNLOAD_INCOMPLETE'].includes(err?.code) || err?.status >= 400 && err.status < 500) break;
                             if (attempt === 0) {
-                                console.warn(`[ModHub] ${currentCandidate.name} 下载中断，自动重试一次:`, err);
+                                console.warn(`[ModHub] ${currentCandidate.name} 下载中断，自动重试一次:`, lastError);
                                 continue;
                             }
                         } finally {
@@ -5542,7 +5507,11 @@
                 }
 
                 if (!blob) {
-                    throw lastError || new Error('所有可用下载线路均尝试失败');
+                    const error = new Error(`安装包【${fileName}】下载失败。\n${[...new Set(failures)].join('\n') || '所有可用下载线路均尝试失败'}`);
+                    error.code = lastError?.code || 'DOWNLOAD_FAILED';
+                    error.downloadFailures = true;
+                    error.status = lastError?.status;
+                    throw error;
                 }
 
                 const contentType = /\.modpack(?:\.crypt)?$/i.test(fileName) ? 'application/octet-stream' : 'application/zip';
@@ -5556,14 +5525,11 @@
             }
             // 写入前统一核验所有包，避免主包错误或附属包无效时留下部分安装。
             const modController = window.modHubGetController?.() || gui.modModLoadController;
-            const communityInstall = mod.catalogSource === 'community' && mod.autoInstall === true;
             const boots = [];
             const sameComponents = new Set();
-            if ((options.prepareOnly || preparedPackage || communityInstall || options.dependencyRequirements?.some(item => item.bootVersions))
+            if ((options.prepareOnly || preparedPackage || options.dependencyRequirements?.some(item => item.bootVersions))
                 && typeof modController?.checkModZipFileIndexDB !== 'function') {
-                const error = new Error(communityInstall
-                    ? '当前 ModLoader 无法核验社区模组安装包，请手动下载并导入。'
-                    : '当前 ModLoader 无法核验所选安装包，请手动下载并导入。');
+                const error = new Error('当前 ModLoader 无法核验所选安装包，请手动下载并导入。');
                 error.code = 'INSTALL_PACKAGE_INVALID';
                 throw error;
             }
@@ -5574,11 +5540,6 @@
                     ? mod._matchedLocal?.name || mod.bootNames?.find(name => normalizeKey(name) === getAssetSeries(fileObjects[0]?.name)) : '';
                 const expectedNames = (edition ? [edition.bootName] : auModelName ? [auModelName] : (mod.bootNames?.length ? mod.bootNames : [mod._matchedLocal?.name]))
                     .filter(name => typeof name === 'string' && name.trim()).map(name => name.trim().toLowerCase());
-                if (communityInstall && (!mod.bootNames?.length || !expectedNames.length)) {
-                    const error = new Error('社区模组缺少已确认的技术名，无法核验安装包身份。');
-                    error.code = 'INSTALL_PACKAGE_INVALID';
-                    throw error;
-                }
                 for (const [index, file] of fileObjects.entries()) {
                     try {
                         const boot = await modController.checkModZipFileIndexDB(new Uint8Array(await file.arrayBuffer()));
@@ -5587,7 +5548,7 @@
                             throw new Error(`【${file.name}】没有可识别的模组清单，不能作为 ModLoader 模组导入。`);
                         }
                         const asset = installAssets[index];
-                        if ((index === 0 || communityInstall && !asset?.optional) && expectedNames.length && !expectedNames.includes(actualName.toLowerCase())) {
+                        if (index === 0 && expectedNames.length && !expectedNames.includes(actualName.toLowerCase())) {
                             throw new Error(`所选【${mod.name}】的安装包实际为【${actualName}】，与已确认的模组身份不符，已停止安装。`);
                         }
                         if (index === 0 && edition?.bootEdition && boot.edition !== edition.bootEdition) {
@@ -5864,7 +5825,7 @@
                 : `${failedMirror.name} 页面内下载连接中断，自动重试仍未成功。`;
             const fallbackMsg = isTooLarge
                 ? `模组【${mod.name}】安装包较大，不适合在页面内缓存。\n\n请选择 GitHub 直连，由浏览器下载后手动导入。`
-                : `模组【${mod.name}】下载失败。\n\n${failureReason}\n\n请选择其他下载线路重试。`;
+                : `模组【${mod.name}】下载失败。\n\n${err?.downloadFailures ? err.message : failureReason}\n\n请选择其他下载线路重试。`;
             let retryMirrorId = '';
             if (typeof window.modHubConfirm === 'function') {
                 retryMirrorId = await window.modHubConfirm({
@@ -6286,8 +6247,7 @@
                 <div class="modhub-market-meta modhub-market-versions grey"><span>已安装版本：${escapeHtml(mod._matchedLocal?.version || (mod._matchedLocal ? '未知' : '未安装'))}</span><span class="purple">最新版本：${escapeHtml(latest.text)}</span></div>
                 <div class="modhub-market-desc">${escapeHtml(mod.description || '暂无说明')}</div>
                 ${requirementsHtml}
-                <div class="modhub-download-progress" hidden aria-live="polite">${window.modHubProgressRingHtml(null, label + '下载进度')}<span class="modhub-download-label grey">等待下载</span><button type="button" class="modhub-download-cancel" data-mod-index="${mod._marketIndex}" hidden>取消下载</button></div>
-                <div class="modhub-market-card-footer">${source}${ignore}<div class="modhub-market-actions">${action}</div></div>
+                <div class="modhub-market-card-footer">${source}${ignore}<div class="modhub-market-actions">${action}<div class="modhub-download-progress" hidden role="status" aria-live="polite"><span class="modhub-download-label grey">等待下载</span><button type="button" class="modhub-download-cancel" data-mod-index="${mod._marketIndex}" hidden>取消下载</button></div></div></div>
             </div>`;
         }).join('');
         return `<div class="childItem modhub-market-card modhub-market-language-card ${selected ? 'is-batch-selected' : ''}" data-variant-group="${escapeHtml(group.variantGroupId)}" data-mod-name="${escapeHtml(group.name)}" tabindex="0" aria-label="${escapeHtml(group.name)}的模组信息">
@@ -6500,15 +6460,10 @@
                     <div class="modhub-market-desc">
                         ${escapeHtml(mod.description)}
                     </div>
-                    <div class="modhub-download-progress" hidden aria-live="polite">
-                        ${window.modHubProgressRingHtml(null, mod.name + '下载进度')}
-                        <span class="modhub-download-label grey">等待下载</span>
-                        <button type="button" class="modhub-download-cancel" data-mod-index="${modIndex}" hidden>取消下载</button>
-                    </div>
                     <div class="modhub-market-card-footer">
                         ${acquisitionDetailsHtml}
                         ${ignoreActionsHtml}
-                        ${actionBtnHtml ? `<div class="modhub-market-actions">${actionBtnHtml}</div>` : ''}
+                        ${actionBtnHtml ? `<div class="modhub-market-actions">${actionBtnHtml}<div class="modhub-download-progress" hidden role="status" aria-live="polite"><span class="modhub-download-label grey">等待下载</span><button type="button" class="modhub-download-cancel" data-mod-index="${modIndex}" hidden>取消下载</button></div></div>` : ''}
                     </div>
                 </div>
             `;
@@ -7360,7 +7315,7 @@
 
         const selectedMirror = MIRROR_SERVERS.find(m => m.id === currentMirrorId) || MIRROR_SERVERS[0];
         if (selectedMirror.browserOnly) {
-            await window.modHubAlert('GitHub 直连受浏览器跨域限制，只支持逐个浏览器下载后手动导入。\n\n请切换至加速通道 1、2 或 3 后再使用一键全部更新。', '当前线路不支持批量更新');
+            await window.modHubAlert('GitHub 直连受浏览器跨域限制，只支持逐个浏览器下载后手动导入。\n\n请切换至自建专线或加速通道后再使用一键全部更新。', '当前线路不支持批量更新');
             return;
         }
 

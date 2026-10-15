@@ -182,11 +182,11 @@ window.modHubRenderBeautyUI = function() {
                         </div>
                     </div>
                     <div class="modhub-btn-group">
-                        <button class="macro-button modhub-btn-move modhub-beauty-move-up" data-index="${index}" title="上移一位（长按直接置顶）" aria-label="上移或置顶">▲</button>
-                        <button class="macro-button modhub-btn-move modhub-beauty-move-down" data-index="${index}" title="下移一位（长按直接置底）" aria-label="下移或置底">▼</button>
+                        <button data-modhub-busy-key="${window.modHubEscapeHtml('beauty:up:' + item.type)}" class="macro-button modhub-btn-move modhub-beauty-move-up" data-index="${index}" title="上移一位（长按直接置顶）" aria-label="上移或置顶">▲</button>
+                        <button data-modhub-busy-key="${window.modHubEscapeHtml('beauty:down:' + item.type)}" class="macro-button modhub-btn-move modhub-beauty-move-down" data-index="${index}" title="下移一位（长按直接置底）" aria-label="下移或置底">▼</button>
                         ${isAuto ?
                             '<button class="macro-button modhub-btn-toggle btn-auto-disabled" disabled title="已跟随旁加载模组自动启用，无法手动调整">已自动启用</button>' :
-                            `<button class="macro-button modhub-btn-toggle" data-beauty-enabled="false" title="禁用该美化包">禁用</button>`
+                            `<button data-modhub-busy-key="${window.modHubEscapeHtml('beauty:toggle:' + item.type)}" class="macro-button modhub-btn-toggle" data-beauty-enabled="false" title="禁用该美化包">禁用</button>`
                         }
                     </div>
                 </li>
@@ -218,7 +218,7 @@ window.modHubRenderBeautyUI = function() {
                         </div>
                     </div>
                     <div class="modhub-btn-group">
-                        <button class="macro-button modhub-btn-toggle btn-enable" data-beauty-enabled="true" title="启用该美化包">启用</button>
+                        <button data-modhub-busy-key="${window.modHubEscapeHtml('beauty:toggle:' + item.type)}" class="macro-button modhub-btn-toggle btn-enable" data-beauty-enabled="true" title="启用该美化包">启用</button>
                     </div>
                 </li>
             `;
@@ -245,73 +245,79 @@ window.modHubRenderBeautyUI = function() {
 
 // 美化项排序移动（支持短按步进与长按置顶/置底）
 window.modHubMoveBeauty = async function(index, deltaOrPosition) {
+    const type = window._modHubBeautyState?.enabledList?.[index]?.type;
     return window.modHubRunManagerAction(async () => {
-        const state = window._modHubBeautyState;
-        if (!state || !state.enabledList) return false;
-        const list = state.enabledList;
-        if (index < 0 || index >= list.length) return false;
-
-        let targetIndex = index;
-        if (deltaOrPosition === 'top') {
-            targetIndex = 0;
-        } else if (deltaOrPosition === 'bottom') {
-            targetIndex = list.length - 1;
-        } else if (typeof deltaOrPosition === 'number') {
-            targetIndex = index + deltaOrPosition;
-        }
-
-        if (targetIndex < 0 || targetIndex >= list.length || targetIndex === index) return false;
-
-        const [item] = list.splice(index, 1);
-        list.splice(targetIndex, 0, item);
-
         if (!await window.modHubSaveBeautyState(false)) throw new Error('美化配置保存失败');
-
-
-        const type = item.type;
         if (deltaOrPosition === 'top') {
             window.modHubShowToast(`已将美化包【${type}】置顶（最高覆盖优先级）`, 'success');
         } else if (deltaOrPosition === 'bottom') {
             window.modHubShowToast(`已将美化包【${type}】置底（最低覆盖优先级）`, 'success');
         }
-    }, undefined, { trackReload: true });
+    }, undefined, {
+        trackReload: true,
+        busyKey: `beauty:${deltaOrPosition === 'top' || deltaOrPosition < 0 ? 'up' : 'down'}:${type}`,
+        updateState: () => {
+            const state = window._modHubBeautyState;
+            if (!state || !state.enabledList) return false;
+            const list = state.enabledList;
+            if (index < 0 || index >= list.length) return false;
+
+            let targetIndex = index;
+            if (deltaOrPosition === 'top') {
+                targetIndex = 0;
+            } else if (deltaOrPosition === 'bottom') {
+                targetIndex = list.length - 1;
+            } else if (typeof deltaOrPosition === 'number') {
+                targetIndex = index + deltaOrPosition;
+            }
+
+            if (targetIndex < 0 || targetIndex >= list.length || targetIndex === index) return false;
+
+            const [item] = list.splice(index, 1);
+            list.splice(targetIndex, 0, item);
+        }
+    });
 };
 
 // 美化项启用/禁用
 window.modHubToggleBeauty = async function(typeKey, enable) {
     return window.modHubRunManagerAction(async () => {
-        const state = window._modHubBeautyState;
-        if (!state) return false;
-
-        const targetItem = state.allMap.get(typeKey);
-        if (!targetItem) return false;
-
-        const modName = modHubGetBeautyModName(targetItem);
-        if (enable && state.blockedModNames?.has(String(modName).trim().toLowerCase())) {
-            window.modHubShowToast(`请先启用所属模组，再启用美化包【${typeKey}】`, 'warning');
-            return false;
-        }
-
-        if (!enable && window.modHubIsAutoBeautyEnabled() && targetItem.isAutoManaged) {
-            window.modHubShowToast(`美化包【${typeKey}】已跟随旁加载模组自动启用，无需手动调整`, 'warning');
-            return false;
-        }
-
-        if (enable) {
-            state.disabledList = state.disabledList.filter(item => item.type !== typeKey);
-            if (!state.enabledList.some(item => item.type === typeKey)) {
-                state.enabledList.push(targetItem);
-            }
-        } else {
-            state.enabledList = state.enabledList.filter(item => item.type !== typeKey);
-            if (!state.disabledList.some(item => item.type === typeKey)) {
-                state.disabledList.push(targetItem);
-            }
-        }
-
         if (!await window.modHubSaveBeautyState()) throw new Error('美化配置保存失败');
+    }, undefined, {
+        trackReload: true,
+        busyKey: `beauty:toggle:${typeKey}`,
+        updateState: () => {
+            const state = window._modHubBeautyState;
+            if (!state) return false;
 
-    }, undefined, { trackReload: true });
+            const targetItem = state.allMap.get(typeKey);
+            if (!targetItem) return false;
+
+            const modName = modHubGetBeautyModName(targetItem);
+            if (enable && state.blockedModNames?.has(String(modName).trim().toLowerCase())) {
+                window.modHubShowToast(`请先启用所属模组，再启用美化包【${typeKey}】`, 'warning');
+                return false;
+            }
+
+            if (!enable && window.modHubIsAutoBeautyEnabled() && targetItem.isAutoManaged) {
+                window.modHubShowToast(`美化包【${typeKey}】已跟随旁加载模组自动启用，无需手动调整`, 'warning');
+                return false;
+            }
+            if (state.enabledList.some(item => item.type === typeKey) === !!enable) return false;
+
+            if (enable) {
+                state.disabledList = state.disabledList.filter(item => item.type !== typeKey);
+                if (!state.enabledList.some(item => item.type === typeKey)) {
+                    state.enabledList.push(targetItem);
+                }
+            } else {
+                state.enabledList = state.enabledList.filter(item => item.type !== typeKey);
+                if (!state.disabledList.some(item => item.type === typeKey)) {
+                    state.disabledList.push(targetItem);
+                }
+            }
+        }
+    });
 };
 
 // 配置切换后，旧请求不得把原图写回 Renderer 的缓存与图层。
