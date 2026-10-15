@@ -14,8 +14,9 @@ dolmod-site/
 # 聊天附件仅供本地核对，不进入源码仓库
 .codex-remote-attachments/
 
-# 本地计划与工作记录
+# 本地计划、参考资料与工作记录
 /plans/
+/资料/
 
 # 测试用例仅在本地保留，不进入源码仓库
 /tests/
