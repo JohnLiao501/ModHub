@@ -46,6 +46,9 @@ def pack_mod():
         # 1. 临时包也放在 release 内，完整校验后才替换正式包。
         expected_files = set()
         with zipfile.ZipFile(temporary_target, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as zf:
+            for license_file in ('LICENSE', 'THIRD_PARTY_NOTICES.md'):
+                expected_files.add(license_file)
+                zf.write(license_file, arcname=license_file)
             for root, dirs, files in os.walk(src_dir):
                 for f in files:
                     full_path = os.path.join(root, f)

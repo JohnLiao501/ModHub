@@ -166,7 +166,7 @@
    - 升版时同步更新 `tests/manager.test.js` 中的版本号断言及 `src/test-smart-sort.js` 的成功提示。
 2. **自动化打包与归档（仅限 release，严禁放别处）**：
    - 执行根目录打包脚本：`python pack.py`。
-   - 脚本按现有排除规则打包 `src/` 中的运行资源，正式包路径为 `release/ModHub-v<version>.zip`；`src/test-smart-sort.js` 被排除，根目录 `tests/` 不进入安装包。
+   - 脚本按现有排除规则打包 `src/` 中的运行资源，并将根目录 `LICENSE`、`THIRD_PARTY_NOTICES.md` 放入 ZIP 根目录；许可文件缺失时停止打包并保留原正式包。正式包路径为 `release/ModHub-v<version>.zip`；`src/test-smart-sort.js` 被排除，根目录 `tests/` 不进入安装包。
    - 保持 Zip 根目录扁平规范。
    - 先在 `release/` 内生成临时包，完成 Zip 完整性、包内版本、清单、重复条目及相对路径校验后，再替换正式包；校验或替换失败时保留原正式包，不清理历史归档。
    - 同版本重打包默认覆盖当前最新版本的正式包，不另存同版备份；若当前源码版本低于本地最新数值版本，脚本拒绝覆盖或重新生成该历史版本。

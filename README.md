@@ -93,7 +93,7 @@ ModHub 是 Degrees of Lewdity（DoL）的模组管理套件，基于 ModLoader 2
 
 ## 开发与文档
 
-运行源码位于 `src/`，版本以 `src/boot.json` 为准；更新记录统一放在 [CHANGELOG.md](CHANGELOG.md)，开发与发布要求见 [AGENTS.md](AGENTS.md)，第三方许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+运行源码位于 `src/`，版本以 `src/boot.json` 为准；更新记录统一放在 [CHANGELOG.md](CHANGELOG.md)，开发与发布要求见 [AGENTS.md](AGENTS.md)。
 
 根目录 `tests/` 仅在本地保留，由 `.gitignore` 排除。首次克隆后如需回归，可从 v1.6.0 历史提交恢复到工作区：
 
@@ -109,3 +109,7 @@ git restore --source=f6b9b1b --worktree -- tests/
 - 本地打包：`python pack.py`
 
 正式安装包只生成到 `release/ModHub-v<版本号>.zip`；本地保留最近三个版本，GitHub Releases 历史永久保留。打包不自动升版、提交源码或更新远端 Release。
+
+## 许可证
+
+本项目采用 [MIT 许可证](LICENSE)。第三方数据与资源遵循各自许可，详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。
