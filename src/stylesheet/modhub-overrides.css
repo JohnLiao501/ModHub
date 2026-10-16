@@ -1,8 +1,19 @@
 /* ========== 15. 全域立体模组更新提醒体系样式 ========== */
 
-/* 顶部 Tab 胶囊数字气泡徽标 */
+/* 让数字角标与入口文字共用垂直中心。 */
+#overlayTabs.modhub-modloader-tabs > button,
+.modhub-sidebar-entry > button:not(.modhub-assist-entry-badge) {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 市场页签与侧栏的更新数量角标 */
 .modhub-tab-badge {
-    display: inline-block;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 auto;
     background-color: var(--gold, #d4af37);
     color: #111111;
     font-size: 11px;

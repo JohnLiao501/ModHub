@@ -212,6 +212,7 @@ window.modHubIsCloseButton = function(elementOrText) {
 window.modHubInitOverlayTabs = function() {
     window.modHubEnsureStyles?.({ active: true });
     window.modHubBindReloadReminder();
+    window.modHubUpdateMarketTabBadge();
     if (typeof $ === 'undefined') return;
     var tabs = $("#overlayTabs.modhub-modloader-tabs");
     if (!tabs.length) return;
@@ -840,27 +841,33 @@ window.initGeneral = function() {
     window.modHubUpdateGeneralInfo();
 };
 
-// 更新模组市场顶部 Tab 胶囊徽标
-window.modHubUpdateMarketTabBadge = function(count) {
+// 市场页签与侧栏入口共用更新数量。
+window.modHubUpdateMarketTabBadge = function(count = window._modHubUpdatableCount || 0) {
+    window._modHubUpdatableCount = count;
     if (typeof document === 'undefined') return;
-    const tabs = document.querySelectorAll('#overlayTabs button');
-    for (const btn of tabs) {
-        if (btn.textContent.includes('模组市场')) {
-            let badge = btn.querySelector('.modhub-tab-badge');
-            if (count > 0) {
-                if (!badge) {
-                    badge = document.createElement('span');
-                    badge.className = 'modhub-tab-badge';
-                    btn.appendChild(badge);
-                }
-                badge.textContent = count;
-            } else if (badge) {
-                badge.remove();
+    const buttons = [...document.querySelectorAll('#overlayTabs button')]
+        .filter(btn => btn.textContent.includes('模组市场'));
+    buttons.push(...document.querySelectorAll('.modhub-sidebar-entry > button:not(.modhub-assist-entry-badge)'));
+    for (const btn of buttons) {
+        let badge = btn.querySelector('.modhub-tab-badge');
+        if (count > 0) {
+            if (!badge) {
+                badge = document.createElement('span');
+                badge.className = 'modhub-tab-badge';
+                btn.appendChild(badge);
             }
-            break;
+            badge.textContent = count;
+            badge.title = `${count} 个模组有新版本可用`;
+            badge.setAttribute('aria-label', badge.title);
+        } else if (badge) {
+            badge.remove();
         }
     }
 };
+
+window.jQuery?.(document).on?.(':storyready.modHubUpdateBadge :passagedisplay.modHubUpdateBadge', () => {
+    window.modHubUpdateMarketTabBadge();
+});
 
 // 响应市场更新状态同步通知
 window.modHubNotifyUpdateState = function(count, list) {
@@ -894,7 +901,7 @@ window.modHubNotifyUpdateState = function(count, list) {
         }
     }
 
-    // 1. 同步顶部 Tab 徽标
+    // 1. 同步市场页签与侧栏角标
     window.modHubUpdateMarketTabBadge(window._modHubUpdatableCount);
 
     // 2. 如果当前在模组管理页，局部刷新置顶横幅与第 4 张卡片
