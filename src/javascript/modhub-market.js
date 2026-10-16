@@ -5978,6 +5978,8 @@
         const editionGroup = group.variantType === 'edition';
         const typeText = editionGroup ? '版本类型' : '语言';
         const installed = group.variants.filter(mod => mod._matchedLocal);
+        const isUpdatable = group.variants.some(mod => mod._status === 'update_available'
+            && !mod._isDeadRepo && !isDeadRepo(mod.githubUrl, mod));
         const active = resolveDisplayedInstallMod(group, profiles);
         const selected = batchInstallState.selected.has(getMarketModKey(group));
         const selectionHtml = isBatchInstallEligible(group, profiles, true)
@@ -6034,7 +6036,7 @@
                 <div class="modhub-market-card-footer">${source}${ignore}<div class="modhub-market-actions">${action}<div class="modhub-download-progress" hidden role="status" aria-live="polite"><span class="modhub-download-label grey">等待下载</span><button type="button" class="modhub-download-cancel" data-mod-index="${mod._marketIndex}" hidden>取消下载</button></div></div><div class="modhub-install-check-result" hidden></div></div>
             </div>`;
         }).join('');
-        return `<div class="childItem modhub-market-card modhub-market-language-card ${selected ? 'is-batch-selected' : ''}" data-variant-group="${escapeHtml(group.variantGroupId)}" data-mod-name="${escapeHtml(group.name)}" tabindex="0" aria-label="${escapeHtml(group.name)}的模组信息">
+        return `<div class="childItem modhub-market-card modhub-market-language-card ${isUpdatable ? 'modhub-market-card-updatable' : ''} ${selected ? 'is-batch-selected' : ''}" data-variant-group="${escapeHtml(group.variantGroupId)}" data-mod-name="${escapeHtml(group.name)}" tabindex="0" aria-label="${escapeHtml(group.name)}的模组信息">
             <div class="modhub-market-card-header">${selectionHtml}<div class="modhub-market-title-wrap"><span class="modhub-market-title gold">${escapeHtml(group.name)}</span><div class="modhub-market-title-controls"><div class="modhub-market-language-switch" role="group" aria-label="${escapeHtml(group.name)}的安装${typeText}">${choices.join('')}</div><span class="modhub-market-badge ${installed.length ? 'badge-installed' : 'badge-new'}">${installed.length > 1 ? `已安装 ${installed.length} 种${typeText}` : installed.length === 1 ? `已安装${escapeHtml(installed[0].variant.label)}` : '未安装'}</span></div></div></div>
             ${editionGroup ? '<div class="modhub-market-variant-intro grey">各版本分别检查更新。切换时将停用另一版本，保留已安装的包体与存档。</div>' : installed.length > 1 ? '<div class="modhub-market-variant-intro gold">当前同时保留多个语言包。请明确选择要处理的语言；每个包分别检查更新。</div>' : ''}
             <div class="modhub-market-variant-list">${rows}</div>
