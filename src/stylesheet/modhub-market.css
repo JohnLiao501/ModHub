@@ -163,8 +163,17 @@
 }
 
 .modhub-batch-item-state {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     flex: 0 0 auto;
     white-space: nowrap;
+}
+
+.modhub-batch-item-state > .modhub-progress-ring {
+    width: 16px;
+    height: 16px;
+    color: var(--gold, #d4af37);
 }
 
 .modhub-batch-item-detail {
@@ -173,15 +182,10 @@
     font-size: 0.9em;
 }
 
-.modhub-batch-item-progress {
-    display: block;
-    width: 100%;
-    height: 4px;
-    margin-top: 5px;
-    accent-color: var(--gold, #d4af37);
-}
-
-.modhub-batch-item-progress[hidden] { display: none; }
+.modhub-install-check-result { min-width: 0; margin-top: 6px; font-size: 0.85em; overflow-wrap: anywhere; }
+.modhub-install-check-result[hidden] { display: none; }
+.modhub-install-check-result > .grey { display: block; font-size: 0.85em; }
+.modhub-install-check-result .modhub-compat-report { font-size: 1em; }
 
 .modhub-market-select-label {
     display: inline-flex;
@@ -1151,6 +1155,23 @@
     padding: 2px;
 }
 
+.modhub-version-dialog:has(#modHubBatchVersionChoices) .modhub-modal-body {
+    display: flex;
+    flex-direction: column;
+    max-height: 60vh;
+    max-height: 60dvh;
+    overflow: hidden;
+    box-sizing: border-box;
+}
+.modhub-version-dialog:has(#modHubBatchVersionChoices) .modhub-modal-message {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+}
+#modHubBatchVersionChoices { flex: 1 1 auto; min-height: 0; max-height: none; margin: 0; padding: 0; }
+#modHubBatchVersionChoices > p:first-child { margin-top: 0; }
+
 .modhub-version-context {
     display: flex;
     flex-direction: column;
@@ -1481,7 +1502,33 @@
     border-radius: 3px;
 }
 
-.modhub-version-batch-select {
+.modhub-version-batch-row > label:not(.modhub-version-optional) {
+    display: grid;
+    gap: 6px;
+    min-width: 0;
+}
+.modhub-version-batch-row > label > strong { overflow-wrap: anywhere; }
+.modhub-version-batch-row > .modhub-version-optional { display: block; cursor: default; }
+.modhub-version-optional-label { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 32px; cursor: pointer; }
+.modhub-version-optional-label > input { flex: 0 0 16px; width: 16px; min-width: 16px; margin: 0; accent-color: var(--gold, #d4af37); }
+.modhub-version-optional-label > strong { min-width: 0; overflow-wrap: anywhere; font-size: 0.9em; }
+.modhub-version-batch-current { display: flex; flex-wrap: wrap; gap: 4px 8px; font-size: 0.85em; color: var(--400, #aaa); }
+.modhub-version-batch-dependency { margin-left: 12px; border-left: 2px solid var(--700); background: var(--900, #111); }
+.modhub-version-row-links { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 0.85em; }
+.modhub-version-row-links > a { min-height: 32px; display: inline-flex; align-items: center; }
+.modhub-version-default-note { font-size: 0.85em; }
+.modhub-version-unresolved { display: grid; gap: 6px; min-width: 0; }
+.modhub-version-unresolved-choice { padding: 8px 10px; overflow-wrap: anywhere; }
+.modhub-version-package-details { min-width: 0; font-size: 0.85em; color: var(--400, #aaa); }
+.modhub-version-package-details > summary { min-height: 32px; padding: 4px 0; box-sizing: border-box; cursor: pointer; }
+.modhub-version-package-details > summary:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.modhub-version-package-details .modhub-version-asset-name { padding: 3px 8px; }
+#modHubInstallPlanPreview { min-width: 0; font-size: 0.9em; overflow-wrap: anywhere; }
+#modHubInstallPlanPreview > :first-child { margin-top: 0; }
+
+.modhub-version-batch-select,
+.modhub-version-edition-select,
+.modhub-version-unresolved-choice {
     width: 100%;
     min-width: 0;
     min-height: 32px;
@@ -1948,5 +1995,52 @@
 .modhub-market-variant-requirements { margin: 0 0 10px; }
 .modhub-market-ignore-actions > button,
 .modhub-market-variant-row .btn-market-unignore { min-height: 32px; min-width: 0; white-space: normal; overflow-wrap: anywhere; }
+
+/* 安装失败按模组和原因分组，相同原因集中列出线路，保留完整错误。 */
+.modhub-install-error-dialog .modhub-modal-message {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    min-width: 0;
+    overflow-wrap: anywhere;
+}
+.modhub-install-error-intro,
+.modhub-install-error-advice,
+.modhub-install-error-cause,
+.modhub-install-error-dependency { margin: 0; }
+.modhub-install-error-item {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--600, #444);
+    background: var(--800, #222);
+    border-radius: 3px;
+}
+.modhub-install-error-item > h3 {
+    margin: 0 0 8px;
+    font-size: 1em;
+    line-height: 1.5;
+}
+.modhub-install-error-cause { white-space: normal; font-variant-numeric: tabular-nums; }
+.modhub-install-error-dependency { margin-top: 10px; font-size: 0.9em; }
+.modhub-install-error-file {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 10px;
+    margin: 8px 0 12px;
+    font-size: 0.9em;
+}
+.modhub-install-error-file > strong { min-width: 0; font-weight: normal; }
+.modhub-install-error-details { margin: 0; }
+.modhub-install-error-details > summary {
+    border-width: 0 0 1px;
+    padding: 6px 0;
+    font-size: 0.9em;
+    min-height: 32px;
+}
+.modhub-install-error-details > summary > span { margin-left: auto; font-size: 0.9em; }
+.modhub-install-error-group { padding-top: 10px; }
+.modhub-install-error-group + .modhub-install-error-group { margin-top: 10px; border-top: 1px solid var(--600, #444); }
+.modhub-install-error-mirrors { margin: 4px 0 0; font-size: 0.85em; line-height: 1.6; }
+.modhub-install-error-advice { font-size: 0.9em; }
 
 .modhub-install-dialog .modhub-modal-close { min-width: 32px; min-height: 32px; flex-shrink: 0; }

@@ -1821,6 +1821,9 @@ window.modHubLoadModManageState = function(refresh = false, options = {}) {
             builtInMods: [...builtInMods]
         };
 
+        // 先显示已读到的列表；包体资料、自愈和美化同步仍由初始化锁保护。
+        window.modHubRenderModManageUI();
+        await window.modHubYieldToBrowser();
         const pendingInfo = sideEnabled.filter(name => !window.modHubGetModInfo(name));
         await window.modHubLoadDisabledModInfo([...sideDisabled, ...pendingInfo], refresh);
         return window._modHubModState;
@@ -1978,14 +1981,17 @@ window.initModManage = async function(refresh = false) {
             await window.modHubEnsureRecoveryPlacement(true);
             // 自愈：修复「包体已安装、却未登记进启用列表」的历史遗留模组，
             // 这类模组重启后不会被加载，是市场反复显示未安装 / 可更新的根源之一。
-            if (!window._modHubOrphanRepairDone && typeof window.modHubRepairOrphanModZips === 'function') {
-                window._modHubOrphanRepairDone = true;
-                try {
-                    const repair = await window.modHubRepairOrphanModZips();
-                    if (repair?.repaired?.length) await window.modHubLoadModManageState(true);
-                } catch (repairError) {
-                    console.warn('[ModHub] 已安装未登记模组自愈失败', repairError);
+            try {
+                if (!window._modHubOrphanRepairDone && typeof window.modHubRepairOrphanModZips === 'function') {
+                    window._modHubOrphanRepairDone = true;
+                    window._modHubOrphanRepairRequest = (async () => {
+                        const repair = await window.modHubRepairOrphanModZips();
+                        if (repair?.repaired?.length) await window.modHubLoadModManageState(true);
+                    })().finally(() => { window._modHubOrphanRepairRequest = null; });
                 }
+                if (window._modHubOrphanRepairRequest) await window._modHubOrphanRepairRequest;
+            } catch (repairError) {
+                console.warn('[ModHub] 已安装未登记模组自愈失败', repairError);
             }
             // 美化自动启用也可能写入配置，初始化期间同样禁止交错操作。
             window._modHubManagerBusy = true;
@@ -2286,36 +2292,39 @@ window.modHubRenderModManageUI = function() {
     `;
 
     const builtInList = Array.isArray(builtInMods) ? builtInMods : [];
+    const renderCore = () => {
+        let content = '<ul class="modhub-list">';
+        builtInList.forEach(modName => {
+            const modInfo = window.modHubGetModInfo(modName);
+            const version = modInfo?.bootJson?.version || '';
+            const subText = window.modHubGetModSubtext(modName, modInfo, true);
+            const versionText = version ? (window.modHubFormatVersion ? window.modHubFormatVersion(version) : (/^v/i.test(version.trim()) ? version.trim() : 'v' + version.trim())) : '';
+            const descHtml = [versionText, subText ? `<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>` : '']
+                .filter(Boolean)
+                .join(' | ') || '系统核心组件';
+            content += `
+                <li class="modhub-item item-readonly">
+                    <div class="modhub-item-info">
+                        <span class="gold modhub-status-tag">[核心]</span>
+                        <div class="modhub-item-main">
+                            <div class="modhub-item-title">${window.modHubEscapeHtml(modName)}</div>
+                            <div class="grey modhub-item-desc">${descHtml}</div>
+                        </div>
+                    </div>
+                </li>
+            `;
+        });
+        return content + '</ul>';
+    };
+    let coreRendered = isSectionOpen('core'), beautyRendered = isSectionOpen('beauty');
 
     // 分组 3: 内置模组列表（只读展示）
     html += `
-        <details class="modhub-collapsible-section" data-section="core"${isSectionOpen('core') ? ' open' : ''}>
+        <details class="modhub-collapsible-section" data-section="core"${coreRendered ? ' open' : ''}>
             <summary class="modhub-section-summary">内置与核心模组 - 共 ${builtInList.length} 个</summary>
-            <div class="modhub-section-content">
-                <ul class="modhub-list">
+            <div id="modHubCoreContainer" class="modhub-section-content">${coreRendered ? renderCore() : ''}</div>
+        </details>
     `;
-
-    builtInList.forEach(modName => {
-        const modInfo = window.modHubGetModInfo(modName);
-        const version = modInfo?.bootJson?.version || '';
-        const subText = window.modHubGetModSubtext(modName, modInfo, true);
-        const versionText = version ? (window.modHubFormatVersion ? window.modHubFormatVersion(version) : (/^v/i.test(version.trim()) ? version.trim() : 'v' + version.trim())) : '';
-        const descHtml = [versionText, subText ? `<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>` : '']
-            .filter(Boolean)
-            .join(' | ') || '系统核心组件';
-        html += `
-            <li class="modhub-item item-readonly">
-                <div class="modhub-item-info">
-                    <span class="gold modhub-status-tag">[核心]</span>
-                    <div class="modhub-item-main">
-                        <div class="modhub-item-title">${window.modHubEscapeHtml(modName)}</div>
-                        <div class="grey modhub-item-desc">${descHtml}</div>
-                    </div>
-                </div>
-            </li>
-        `;
-    });
-    html += '</ul></div></details>';
 
     container.innerHTML = html + '</fieldset>';
     modHubBindManagerTools(container);
@@ -2355,7 +2364,21 @@ window.modHubRenderModManageUI = function() {
             window.modHubToggleSelectMod(cb.dataset.modName, cb.checked);
         }
     };
-    window.modHubRenderBeautyUI();
+    if (beautyRendered) window.modHubRenderBeautyUI();
+    const beautySection = container.querySelector('details[data-section="beauty"]');
+    if (beautySection) beautySection.ontoggle = () => {
+        if (beautySection.isConnected === false || !beautySection.open || beautyRendered) return;
+        beautyRendered = true;
+        window.modHubRenderBeautyUI();
+        window.modHubUpdateManagerStatus();
+    };
+    const coreSection = container.querySelector('details[data-section="core"]');
+    if (coreSection) coreSection.ontoggle = () => {
+        if (coreSection.isConnected === false || !coreSection.open || coreRendered) return;
+        coreRendered = true;
+        const core = container.querySelector('#modHubCoreContainer');
+        if (core) core.innerHTML = renderCore();
+    };
     window.modHubUpdateManagerStatus();
 
     // 1. 刷新环境统计看板（原通用页面数据）

@@ -8,6 +8,16 @@
     justify-content: center;
 }
 
+.modhub-sidebar-entry > button:not(.modhub-assist-entry-badge) {
+    line-height: normal;
+}
+
+/* 仅校正文字的视觉中心，按钮高度与角标位置沿用原生布局。 */
+.modhub-sidebar-entry > button > .modhub-sidebar-label {
+    display: inline-block;
+    transform: translateY(-0.08em);
+}
+
 /* 市场页签与侧栏的更新数量角标 */
 .modhub-tab-badge {
     display: inline-flex;

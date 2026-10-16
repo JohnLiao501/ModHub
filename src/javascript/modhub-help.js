@@ -480,7 +480,7 @@
         return false;
     }
 
-    function initAi(host, mounted) {
+    function initAi(host, mounted, initialAnalysis) {
         if (!host) return;
         aiAbort?.abort();
         aiConnectionAbort?.abort();
@@ -490,8 +490,8 @@
         let stage = 1, ticket = 0, working = false, analyzing = false, candidate = null, prepared = null, plan = null, last = null;
         let availablePointId = null, restoreReason = '', historyTicket = 0;
         let testing = false, testTicket = 0, testController = null, progressTimer = null, continuationBlocked = false, needsPreparation = false;
-        let analysis = readLogs();
-        let suggestions = [];
+        let analysis = initialAnalysis;
+        let suggestions = null;
         try {
             if (!aiConnectionLoaded) {
                 aiConnectionLoaded = true;
@@ -585,7 +585,8 @@
             el('Error').textContent = '';
         };
         const renderSuggestions = () => {
-            suggestions = suggestQuestions(readLogs());
+            if (suggestions) analysis = readLogs();
+            suggestions = suggestQuestions(analysis);
             el('Suggestions').hidden = !suggestions.length;
             el('SuggestionList').innerHTML = suggestions.map((item, index) => '<button type="button" class="macro-button modhub-btn-secondary" data-ai-suggestion="' + index + '"><span>'
                 + escape(item.question) + '</span><small class="grey">' + (item.level === 'error' ? '来自错误日志' : '来自警告日志') + '</small></button>').join('');
@@ -1356,7 +1357,8 @@
             + '<button id="modHubHelpPreview" type="button" class="macro-button modhub-btn-primary">生成并预览求助信息</button>'
             + '<button id="modHubHelpCopy" type="button" class="macro-button modhub-btn-secondary" disabled>复制求助信息</button></div>'
             + '<textarea id="modHubHelpReport" class="modhub-help-report" aria-label="求助信息预览，可选择文本手动复制" readonly placeholder="生成报告后可在此预览和选择文本。"></textarea></details></div></div><section id="modHubHelpRemoteWorkspace" hidden aria-label="远程协助工作区"></section>';
-        const refreshAiHistory = initAi(container.querySelector('#modHubHelpAi'), mounted);
+        const initial = { analysis: readLogs(), issues: [] };
+        const refreshAiHistory = initAi(container.querySelector('#modHubHelpAi'), mounted, initial.analysis);
         const results = container.querySelector('#modHubHelpResults');
         const preview = container.querySelector('#modHubHelpReport');
         const allLogs = container.querySelector('#modHubHelpAllLogs');
@@ -1378,7 +1380,6 @@
                 + (Number(symptom.value) === 3 ? '<button type="button" class="macro-button modhub-btn-primary" data-help-images>刷新图像缓存</button>' : '')
                 + topic.tabs.map(tab => action(tab)).join('') + (topic.restore ? '<button type="button" class="macro-button modhub-btn-secondary" data-help-restore>时间点还原</button>' : '') + '</div></details>' : '';
         };
-        const initial = { analysis: readLogs(), issues: [] };
         logIssues(initial);
         renderResults(results, initial, false);
         const run = async report => {

@@ -473,6 +473,9 @@ window.modHubGetRawModLoaderLogs = function() {
     return result;
 };
 
+let modHubLogAnalysisCache = null;
+let modHubLogNamePatterns = { stamp: '', patterns: [] };
+
 // 日志分析核心引擎（支持结构化行对象数组或原始文本）
 window.modHubAnalyzeLogs = function(rawContent) {
     if (!rawContent) {
@@ -488,9 +491,16 @@ window.modHubAnalyzeLogs = function(rawContent) {
         };
     }
 
-    const allKnownMods = [...window.modHubGetAllKnownModNames()].filter(name => typeof name === 'string' && name)
-        .sort((a, b) => b.length - a.length)
-        .map(name => [name, new RegExp(`(^|[^\\p{L}\\p{N}_'’-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}_'’-])`, 'gu')]);
+    const knownNames = [...window.modHubGetAllKnownModNames()].filter(name => typeof name === 'string' && name).sort((a, b) => b.length - a.length);
+    const nameStamp = JSON.stringify(knownNames);
+    const contentStamp = JSON.stringify(Array.isArray(rawContent) ? rawContent.map(item => typeof item === 'string'
+        ? ['', 'info', item] : [item?.time || '', item?.level || 'info', String(item?.message || item?.str || '')]) : String(rawContent));
+    if (modHubLogAnalysisCache?.contentStamp === contentStamp && modHubLogAnalysisCache.nameStamp === nameStamp) return modHubLogAnalysisCache.analysis;
+    if (modHubLogNamePatterns.stamp !== nameStamp) {
+        modHubLogNamePatterns = { stamp: nameStamp, patterns: knownNames.map(name => [name,
+            new RegExp(`(^|[^\\p{L}\\p{N}_'’-])${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?=$|[^\\p{L}\\p{N}_'’-])`, 'gu')]) };
+    }
+    const allKnownMods = modHubLogNamePatterns.patterns;
     const parsedLines = [];
     const errorMods = new Set();
     const errorFiles = new Set();
@@ -691,7 +701,7 @@ window.modHubAnalyzeLogs = function(rawContent) {
         });
     });
 
-    return {
+    const analysis = {
         lines: parsedLines,
         errorCount,
         warnCount,
@@ -701,6 +711,8 @@ window.modHubAnalyzeLogs = function(rawContent) {
         matchedIssues: Array.from(matchedIssuesMap.values()),
         firstErrorIndex
     };
+    modHubLogAnalysisCache = { contentStamp, nameStamp, analysis };
+    return analysis;
 };
 
 // 置顶诊断卡片渲染

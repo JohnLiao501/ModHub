@@ -677,8 +677,9 @@ window.modHubLoadReadme = async function(modName) {
 
         const modInfo = window.modHubGetModInfo(modName);
         const boot = modInfo?.bootJson || {};
+        const hasLocalReadme = window.modHubHasReadmeContent(readme);
         let marketInfo = window.modHubMarket?.findMarketModByLocalName?.(modName) || null;
-        if (!marketInfo && window.modHubMarket?.loadMarketData) {
+        if (!marketInfo && !hasLocalReadme && window.modHubMarket?.loadMarketData) {
             try {
                 const marketMods = await window.modHubMarket.loadMarketData();
                 marketInfo = window.modHubMarket.findMarketModByLocalName?.(modName, marketMods) || null;
@@ -692,7 +693,6 @@ window.modHubLoadReadme = async function(modName) {
         const repositoryUrl = [bootRepository, marketInfo?.githubUrl]
             .find(url => /^https?:\/\/github\.com\//i.test(url || '')) || '';
         const category = marketInfo?.primaryCategory || marketInfo?.category || '';
-        const hasLocalReadme = window.modHubHasReadmeContent(readme);
         let githubReadme = null;
         if (!isCurrent()) return;
         if (!hasLocalReadme && repositoryUrl && window.modHubMarket?.fetchGithubReadme) {
