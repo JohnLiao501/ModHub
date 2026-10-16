@@ -3473,8 +3473,10 @@
     }
 
     function getReleaseHistoryContext(mod) {
-        return { signature: getModUpdateSignature(mod, window.modHubMarketVersions?.getGameVersion?.()),
-            refresh: marketHistoryRefresh, useCache: marketHistoryRefresh === 0 };
+        const signature = getModUpdateSignature(mod, window.modHubMarketVersions?.getGameVersion?.());
+        const checked = modUpdateChecks.get(signature);
+        return { signature, refresh: marketHistoryRefresh,
+            useCache: marketHistoryRefresh === 0 || Boolean(checked && !checked.pending && !checked.error) };
     }
 
     /** 只接收已完成分页的历史候选；目录版号和当前游戏更新目标各自保留。 */

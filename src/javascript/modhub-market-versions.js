@@ -5,6 +5,7 @@
     const MODHUB_HISTORY_CACHE_PREFIX = 'modhub_market_history_v1_';
     const MODHUB_HISTORY_CACHE_TTL = 6 * 60 * 60 * 1000;
     const MODHUB_HISTORY_GENERATIONS = new Map();
+    const MODHUB_HISTORY_REQUESTS = new Map();
     const MODHUB_RELEASE_DATE_LABEL_PATTERN = /^(?:[a-z][a-z_-]*)?(?:19|20)\d{2}[-._]?(?:0?[1-9]|1[0-2])[-._]?(?:0?[1-9]|[12]\d|3[01])(?:[-+][a-z0-9][a-z0-9.-]*)?$/i;
     // Worker 的上游查询最多等待 15 秒，为往返与目录核验保留时间。
     const MODHUB_HISTORY_TIMEOUT = 20000;
@@ -400,6 +401,38 @@
         };
     }
 
+    function shareHistoryRequest(key, request, signal) {
+        if (typeof AbortController !== 'function') return request(signal);
+        let pending = MODHUB_HISTORY_REQUESTS.get(key);
+        if (!pending) {
+            pending = { controller: new AbortController(), consumers: new Set() };
+            MODHUB_HISTORY_REQUESTS.set(key, pending);
+            pending.promise = request(pending.controller.signal).finally(() => {
+                if (MODHUB_HISTORY_REQUESTS.get(key) === pending) MODHUB_HISTORY_REQUESTS.delete(key);
+            });
+        }
+        return new Promise((resolve, reject) => {
+            const consumer = {};
+            pending.consumers.add(consumer);
+            const finish = (callback, value) => {
+                signal?.removeEventListener?.('abort', abort);
+                pending.consumers.delete(consumer);
+                callback(value);
+            };
+            const abort = () => {
+                const error = Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+                finish(reject, error);
+                if (!pending.consumers.size) {
+                    if (MODHUB_HISTORY_REQUESTS.get(key) === pending) MODHUB_HISTORY_REQUESTS.delete(key);
+                    pending.controller.abort(error);
+                }
+            };
+            signal?.addEventListener?.('abort', abort, { once: true });
+            if (signal?.aborted) abort();
+            pending.promise.then(value => finish(resolve, value), error => finish(reject, error));
+        });
+    }
+
     async function fetchReleases(mod, { page = 1, signal, useCache = true } = {}) {
         const market = window.modHubMarket;
         if (!mod?.id || !Number.isSafeInteger(page) || page < 1) throw historyError('无法识别模组历史发布请求', 'INVALID_RELEASE_REQUEST');
@@ -450,54 +483,60 @@
         if (verifyEmptyHistory && !cached?.data.releases.length) cached = null;
         if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
         if (useCache && cached && !cached.data.stale && Date.now() - cached.timestamp < MODHUB_HISTORY_CACHE_TTL) return { ...cached.data, fromCache: true };
-        const url = new URL('/mod-releases', base.origin);
-        url.searchParams.set('id', mod.id);
-        url.searchParams.set('page', String(page));
-        let data;
-        try {
-            ({ data } = await requestHistoryJson(url, { signal }));
-            checkCurrent();
-            if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
-        } catch (error) {
-            if (signal?.aborted || error?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
-            checkCurrent();
-            if (unsafeHistoryError(error)) rejectUnsafe(error);
-            if (cached) return { ...cached.data, fromCache: true, stale: true };
-            const fallback = buildDirectoryFallbackReleases(mod, source, page, communityRevision);
+        const requestKey = JSON.stringify([signature, generation, market.getReleaseHistoryContext?.(mod)?.refresh || 0]);
+        return shareHistoryRequest(requestKey, async signal => {
+            const url = new URL('/mod-releases', base.origin);
+            url.searchParams.set('id', mod.id);
+            url.searchParams.set('page', String(page));
+            let data;
             try {
-                data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
+                ({ data } = await requestHistoryJson(url, { signal }));
                 checkCurrent();
                 if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
-            } catch (directError) {
-                if (signal?.aborted || directError?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
-                checkCurrent();
-                if (fallback) return fallback;
-                rejectUnsafe(directError);
-            }
-        }
-        // 旧服务可能按旧文件名规则漏筛；空历史只复核同一来源仓库。
-        if (verifyEmptyHistory && !data.fromGithub && !data.releases.length && !data.hasMore) {
-            checkCurrent();
-            try {
-                const direct = await fetchGithubHistory(mod, source, page, signal, communityRevision);
-                checkCurrent();
-                if (!validResponse(direct)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
-                if (direct.releases.length) data = direct;
             } catch (error) {
                 if (signal?.aborted || error?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
                 checkCurrent();
-                if (['RELEASE_SOURCE_CHANGED', 'MOD_RELEASES_UNAVAILABLE'].includes(error?.code)) rejectUnsafe(error);
+                if (unsafeHistoryError(error)) rejectUnsafe(error);
+                if (cached) return { ...cached.data, fromCache: true, stale: true };
+                const fallback = buildDirectoryFallbackReleases(mod, source, page, communityRevision);
+                try {
+                    data = await fetchGithubHistory(mod, source, page, signal, communityRevision);
+                    checkCurrent();
+                    if (!validResponse(data)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
+                } catch (directError) {
+                    if (signal?.aborted || directError?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+                    checkCurrent();
+                    if (fallback && !unsafeHistoryError(directError)) return fallback;
+                    const describe = failure => [failure.message || String(failure), failure.status && `HTTP ${failure.status}`,
+                        failure.code && `错误代码：${failure.code}`].filter(Boolean).join('，');
+                    directError.message = `版本服务：${describe(error)}；GitHub 直连：${describe(directError)}`;
+                    rejectUnsafe(directError);
+                }
             }
-        }
-        if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
-        checkCurrent();
-        if (market.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
-        const fetchedAt = Math.min(Date.now(), Date.parse(data.fetchedAt));
-        data = { ...data, stale: Boolean(data.stale || Date.now() - fetchedAt >= MODHUB_HISTORY_CACHE_TTL) };
-        if (!verifyEmptyHistory || data.releases.length) {
-            try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
-        }
-        return data;
+            // 旧服务可能按旧文件名规则漏筛；空历史只复核同一来源仓库。
+            if (verifyEmptyHistory && !data.fromGithub && !data.releases.length && !data.hasMore) {
+                checkCurrent();
+                try {
+                    const direct = await fetchGithubHistory(mod, source, page, signal, communityRevision);
+                    checkCurrent();
+                    if (!validResponse(direct)) throw historyError('历史发布来源已变化，请刷新市场后重试', 'RELEASE_SOURCE_CHANGED');
+                    if (direct.releases.length) data = direct;
+                } catch (error) {
+                    if (signal?.aborted || error?.code === 'ABORT_ERR') throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+                    checkCurrent();
+                    if (['RELEASE_SOURCE_CHANGED', 'MOD_RELEASES_UNAVAILABLE'].includes(error?.code)) rejectUnsafe(error);
+                }
+            }
+            if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
+            checkCurrent();
+            if (market.isWithdrawn?.(mod)) rejectUnsafe(historyError('该模组来源已撤回，请刷新市场', 'MOD_RELEASES_UNAVAILABLE'));
+            const fetchedAt = Math.min(Date.now(), Date.parse(data.fetchedAt));
+            data = { ...data, stale: Boolean(data.stale || Date.now() - fetchedAt >= MODHUB_HISTORY_CACHE_TTL) };
+            if (!verifyEmptyHistory || data.releases.length) {
+                try { localStorage.setItem(cacheKey, JSON.stringify({ signature, timestamp: data.stale ? 0 : fetchedAt, data })); } catch (_) {}
+            }
+            return data;
+        }, signal);
     }
 
     function candidateCompatibility(asset, release, gameVersion) {
