@@ -44,6 +44,9 @@
     // 准备结果只在本次安装内复用，不能把换版后的包或外部构造的对象直接导入。
     const preparedMarketPackages = new WeakMap();
     const modUpdateChecks = new Map();
+    const modUpdateQueue = [];
+    let modUpdateActive = 0;
+    const modUpdateRetryRoots = new WeakSet();
     // 已撤回或目录已移除的身份仅用于识别本地旧语言包，不能重新开放安装。
     const languageIdentityMembers = new Map();
     const selectedMarketLanguages = new Map();
@@ -392,13 +395,14 @@
         renderBatchInstallToolbar();
     }
 
-    function setBatchInstallPlan(plan) {
+    function setBatchInstallPlan(plan, { preserveOtherItems = false } = {}) {
         if (!batchInstallState.running) return;
         const previous = batchInstallState.items;
-        batchInstallState.items = new Map();
+        batchInstallState.items = preserveOtherItems ? new Map(previous) : new Map();
         for (const node of plan.nodes.values()) {
             const action = plan.actions.find(item => item.key === node.key);
             const old = previous.get(node.mod.name);
+            if (preserveOtherItems && !action && ['success', 'enabled'].includes(old?.state)) continue;
             const blocked = plan.blocked.get(node.key) || node.issue;
             const ready = !action && node.local && !modHubComponentDisabled(node.local.name)
                 && (node.requirements || []).every(requirement => satisfiesDependency(node.local.bootJson || node.local, requirement));
@@ -408,7 +412,7 @@
                 requiresAction: Boolean(action), handled: old?.handled || Boolean(node.prepared),
                 text: blocked || (node.skipped ? '本次跳过' : !action ? ready ? '已就绪，无需安装' : '目标未安装，本次跳过' : node.prepared ? '安装包已准备好，等待确认' : action.type === 'enable' ? '等待确认启用' : '等待确认下载'), percent: null });
         }
-        for (const item of previous.values()) if (item.role === '目标模组' && !batchInstallState.items.has(item.name)) {
+        for (const item of previous.values()) if (!preserveOtherItems && item.role === '目标模组' && !batchInstallState.items.has(item.name)) {
             batchInstallState.items.set(item.name, { ...item, state: 'skipped', text: '本次未选择安装版本', percent: null });
         }
         renderBatchInstallToolbar();
@@ -621,15 +625,24 @@
                 && isBatchInstallEligible(mod, profiles, Boolean(evaluatedMods))).map(getMarketModKey));
             for (const key of state.selected) if (!eligibleKeys.has(key)) state.selected.delete(key);
         }
-        document.querySelectorAll('#modHubMarketBtnRefresh, #modHubMarketBtnSubmit, #modHubMarketBtnMy, #modHubMarketBtnFeedback, #modHubMirrorSelect, .btn-market-install, .btn-market-update, .btn-market-language-choice, .btn-market-package-edition, .modhub-market-update-all, .modhub-market-select').forEach(control => {
+        document.querySelectorAll('#modHubMarketBtnRefresh, [data-modhub-market-tool], .modhub-market-tool-pin, #modHubMirrorSelect, .btn-market-install, .btn-market-update, .btn-market-language-choice, .btn-market-package-edition, .modhub-market-update-all, .modhub-market-summary-button, .modhub-market-select').forEach(control => {
             const mod = marketModList[Number(control.dataset?.modIndex)];
             control.disabled = state.running || state.preparing || Boolean(mod && activeDownloadControllers.has(mod.name))
                 || state.selecting && ['btn-market-install', 'btn-market-update'].some(name => control.classList.contains(name))
-                || marketInstallBusy && ['btn-market-language-choice', 'btn-market-package-edition', 'btn-market-install', 'btn-market-update'].some(name => control.classList.contains(name));
+                || marketInstallBusy && ['btn-market-language-choice', 'btn-market-package-edition', 'btn-market-install', 'btn-market-update', 'modhub-market-summary-button'].some(name => control.classList.contains(name));
         });
         const toolbar = document.getElementById('modHubMarketBatchToolbar');
         if (!toolbar) return;
         toolbar.hidden = currentMarketSection !== 'packages';
+        const filters = document.querySelector('#modHubModMarketContainer .modhub-market-filter-row');
+        const controls = filters?.closest('.modhub-market-toolbar');
+        // 多选和安装时脱离短筛选容器，使吸顶范围覆盖整个市场列表。
+        if (controls && (state.selecting || state.running || state.preparing)) {
+            if (toolbar.parentNode !== controls.parentNode) controls.after(toolbar);
+        } else {
+            const actions = document.getElementById('modHubMarketMainActions');
+            if (actions && toolbar.parentNode !== actions) actions.insertBefore(toolbar, document.getElementById('modHubMarketMore'));
+        }
         const escapeHtml = window.modHubEscapeHtml || (value => String(value).replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]));
         const focusedId = toolbar.contains?.(document.activeElement) ? document.activeElement?.id : '';
         const previousList = document.getElementById('modHubBatchProgressList');
@@ -643,7 +656,7 @@
                 <button id="modHubBatchStop" type="button" class="macro-button modhub-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>`;
         } else {
             toolbar.innerHTML = `
-                <button id="modHubBatchToggle" type="button" class="macro-button ${state.selecting ? 'modhub-btn-secondary' : 'modhub-btn-primary modhub-batch-entry'}" aria-pressed="${state.selecting}"${state.selecting ? '' : ' aria-describedby="modHubBatchEntryHint"'}>${state.selecting ? '退出多选' : '批量下载'}</button>
+                <button id="modHubBatchToggle" type="button" class="macro-button ${state.selecting ? 'modhub-btn-secondary' : 'modhub-btn-primary modhub-batch-entry'}" aria-pressed="${state.selecting}"${state.selecting ? '' : ' aria-describedby="modHubBatchEntryHint"'}>${state.selecting ? '退出多选' : '多选安装'}</button>
                 ${state.selecting ? '' : '<span id="modHubBatchEntryHint" class="modhub-batch-entry-hint">勾选多个模组，统一下载并安装</span>'}
                 ${state.selecting ? `<span class="modhub-batch-count grey" role="status" aria-live="polite">已选 ${state.selected.size} 项</span>
                 <button id="modHubBatchSelectAll" type="button" class="macro-button modhub-btn-secondary">全选当前筛选</button>
@@ -651,6 +664,7 @@
                 <button id="modHubBatchInstall" type="button" class="macro-button modhub-btn-primary" ${state.selected.size ? '' : 'disabled'}>下载并安装（${state.selected.size}）</button>` : ''}`;
         }
         const visibleProgressItems = [...state.items.values()].filter(isBatchProgressItemVisible);
+        toolbar.classList.toggle('is-expanded', state.selecting || state.running || visibleProgressItems.length > 0);
         if (visibleProgressItems.length) {
             toolbar.innerHTML += `<div id="modHubBatchProgressDetails" class="modhub-batch-progress-details"><button id="modHubBatchProgressToggle" type="button" class="modhub-batch-progress-toggle" aria-expanded="${state.progressExpanded}" aria-controls="modHubBatchProgressContent">${state.running ? '各模组进度' : `查看上次结果（完成 ${counts.success} 项）`}</button><div id="modHubBatchProgressContent"${state.progressExpanded ? '' : ' hidden'}>${state.running ? '' : `<div class="modhub-batch-result-actions"><span class="grey">成功 ${counts.success} 项，未完成 ${counts.failed} 项，跳过或取消 ${counts.skipped} 项</span><button id="modHubBatchResultsClear" type="button" class="macro-button modhub-btn-secondary">清除全部记录</button></div>`}<div id="modHubBatchProgressList" class="modhub-batch-progress-list" role="region" aria-label="各模组安装进度，可上下滚动" tabindex="0">${visibleProgressItems.map(item => `<div class="modhub-batch-item" data-mod-name="${batchEscape(item.name)}">${batchItemHtml(item)}</div>`).join('')}</div></div></div>`;
             const list = document.getElementById('modHubBatchProgressList');
@@ -687,7 +701,6 @@
         const status = document.getElementById('modHubMarketLoadStatus');
         if (status) {
             status.hidden = !marketViewLoading;
-            status.textContent = marketViewLoading ? '正在核对市场和本地模组资料，可先浏览。' : '';
         }
         if (marketViewLoading) document.querySelectorAll('#modHubMarketBtnRefresh, .btn-market-install, .btn-market-update, .modhub-market-select, .modhub-market-update-all, #modHubBatchInstall')
             .forEach(control => { control.disabled = true; });
@@ -3556,6 +3569,43 @@
         return state;
     }
 
+    // 后台与面板共用两个检查槽位，避免已安装模组同时展开全部历史分页。
+    function queueModUpdateCheck(operation) {
+        return new Promise((resolve, reject) => {
+            modUpdateQueue.push({ operation, resolve, reject });
+            drainModUpdateQueue();
+        });
+    }
+
+    function drainModUpdateQueue() {
+        while (modUpdateActive < 2 && modUpdateQueue.length) {
+            const task = modUpdateQueue.shift();
+            modUpdateActive++;
+            Promise.resolve().then(task.operation).then(task.resolve, task.reject).finally(() => {
+                modUpdateActive--;
+                drainModUpdateQueue();
+            });
+        }
+    }
+
+    function modUpdateBlocked() {
+        return document.hidden || window.modHubIsReloadBusy?.()
+            || window.modHubRestore?.isRestoring?.() || window.modHubRestore?.isOperationBlocked?.();
+    }
+
+    async function waitForModUpdateIdle(current) {
+        while (current() && modUpdateBlocked()) await new Promise(resolve => setTimeout(resolve, 1000));
+    }
+
+    // 每次重新进入面板只重试一次失败项，结果通知不能反复重排同一个失败请求。
+    function retryFailedModUpdateChecks(root) {
+        if (!root || modUpdateRetryRoots.has(root)) return;
+        modUpdateRetryRoots.add(root);
+        for (const [signature, state] of modUpdateChecks) {
+            if (!state.pending && state.error) modUpdateChecks.delete(signature);
+        }
+    }
+
     /** 更新状态复用历史包体身份与版号，适配推荐和未知适配新版分别处理。 */
     function getModUpdateInfo(mod, profiles) {
         resolveDisplayedInstallMod(mod, profiles);
@@ -3572,16 +3622,19 @@
         const state = mod._updateCheck = { signature, checkedAt: Date.now(), pending: true, version: '', release: null, error: '' };
         modUpdateChecks.set(signature, state);
         const context = getReleaseHistoryContext(mod), refresh = context.refresh;
-        const current = () => refresh === marketHistoryRefresh && mod._updateCheck === state
+        const current = () => refresh === marketHistoryRefresh && modUpdateChecks.get(signature) === state && mod._updateCheck === state
             && versions.getGameVersion() === gameVersion && getModUpdateSignature(mod, gameVersion) === signature
             && (!mod.packageEditions?.length || mod._packageEditionUpdateOnly
                 || !selectedMarketPackageEditions.has(getMarketModKey(mod))
                 || selectedMarketPackageEditions.get(getMarketModKey(mod)) === mod._selectedPackageEdition);
-        state.promise = Promise.resolve().then(async () => {
+        state.promise = queueModUpdateCheck(async () => {
             const candidates = [];
             let history;
             do {
+                if (modUpdateBlocked()) await waitForModUpdateIdle(current);
+                if (!current() || isWithdrawn(mod)) return;
                 history = await versions.fetchReleases(mod, { page: history ? history.page + 1 : 1, useCache: context.useCache });
+                if (modUpdateBlocked()) await waitForModUpdateIdle(current);
                 if (!current() || isWithdrawn(mod)) return;
                 candidates.push(...versions.buildCandidates(mod, history));
             } while (history.hasMore);
@@ -3591,11 +3644,11 @@
             if (mod._matchedLocal?.packageDigest && asset && !getAssetPackageDigest(asset) && repository && state.release.tagName) {
                 try {
                     const official = await queueOfficialPackageMetadata(signal => {
-                        if (!current()) return null;
+                        if (!current() || signal?.aborted) return null;
                         return fetchModRelease(mod, { signal, useCache: false, releaseTag: state.release.tagName });
-                    });
+                    }, current);
                     const matching = official?.availableAssets?.find(item => item.downloadUrl === asset.downloadUrl);
-                    if (matching?.digest) {
+                    if (current() && matching?.digest) {
                         asset.digest = matching.digest;
                         const digest = getAssetPackageDigest(matching);
                         if (digest) downloadedPackageDigests.set(asset.downloadUrl, digest);
@@ -3608,16 +3661,17 @@
                 if (modUpdateChecks.get(signature) === state) modUpdateChecks.delete(signature);
                 return;
             }
+            state.checkedAt = Date.now();
             const updates = getUpdatableMods();
             window.modHubNotifyUpdateState?.(updates.length, updates);
+            if (!document.getElementById('modHubMarketCardsContainer')) return;
             if (mod.packageEditions?.length || mod.variant) {
                 refreshMarketVariantCard(mod);
                 const products = getDisplayMods();
                 const members = product => product.isLanguageGroup ? product.variants : [product];
                 const updated = new Set(updates.map(item => getMarketModKey(item.marketMod)));
-                renderStatsHeader(products.length, products.filter(product => members(product).some(member => member._matchedLocal)).length,
-                    products.filter(product => members(product).some(member => updated.has(getMarketModKey(member)))).length);
-                renderIgnoredFilterLink(products.filter(product => members(product).some(member => member._isIgnored)).length);
+                renderStatsHeader(products.filter(product => members(product).some(member => member._matchedLocal)).length,
+                    products.filter(product => members(product).some(member => updated.has(getMarketModKey(member)))).length, products.length);
             } else queueMarketUpdateRender();
         });
         return state;
@@ -4786,8 +4840,10 @@
     }
 
     // 缺摘要的已安装条目按顺序补查官方元数据，不下载包体；复用精确标签缓存。
-    function queueOfficialPackageMetadata(operation) {
+    function queueOfficialPackageMetadata(operation, current) {
         const request = officialPackageMetadataQueue.then(async () => {
+            if (modUpdateBlocked()) await waitForModUpdateIdle(current);
+            if (!current()) return null;
             const controller = typeof AbortController === 'function' ? new AbortController() : null;
             const timer = controller ? setTimeout(() => controller.abort(), 8000) : null;
             try { return await operation(controller?.signal); }
@@ -5853,46 +5909,27 @@
     }
 
     function isStatsFilterActive(filter) {
-        if (filter === 'all') return currentCategory === 'all' && currentStatusFilter === 'all' && !currentSearchText;
         return currentStatusFilter === filter;
     }
 
-    function renderStatsHeader(allCount, installedCount, updatableCount) {
+    function renderStatsHeader(installedCount, updatableCount, totalCount) {
         const statsEl = document.getElementById('modHubMarketStats');
         if (!statsEl) return;
-        const selectedMirror = MIRROR_SERVERS.find(mirror => mirror.id === currentMirrorId) || MIRROR_SERVERS[0];
+        const focusedFilter = statsEl.contains?.(document.activeElement) ? document.activeElement?.dataset?.filter : '';
+        const busy = batchInstallState.running || batchInstallState.preparing || marketInstallBusy;
         const updateAllBtnHtml = updatableCount > 0
-            ? `<button type="button" class="macro-button modhub-market-update-all" onclick="window.modHubMarket.updateAllMods()" title="更新全部 ${updatableCount} 个可更新模组">一键更新全部模组</button>`
+            ? `<button type="button" class="macro-button modhub-market-update-all" data-filter="update-all" onclick="window.modHubMarket.updateAllMods()" title="更新全部 ${updatableCount} 个可更新模组"${busy ? ' disabled' : ''}>一键更新全部模组</button>`
             : '';
-
-        statsEl.innerHTML = `
-            <div class="childItem modhub-stat-card modhub-clickable ${isStatsFilterActive('all') ? 'is-selected' : ''}" onclick="window.modHubMarket.resetFilters()" title="点击清除所有筛选，查看全部社区收录模组">
-                <div class="modhub-stat-num gold">${allCount}</div>
-                <div class="grey modhub-stat-label">社区收录</div>
-            </div>
-            <div class="childItem modhub-stat-card modhub-clickable ${isStatsFilterActive('installed') ? 'is-selected' : ''}" onclick="window.modHubMarket.filterInstalledOnly()" title="点击仅查看本地已安装模组">
-                <div class="modhub-stat-num green">${installedCount}</div>
-                <div class="grey modhub-stat-label">本地已装</div>
-            </div>
-            <div class="childItem modhub-stat-card modhub-clickable ${isStatsFilterActive('updatable') ? 'is-selected' : ''}" onclick="window.modHubMarket.filterUpdatableOnly()" title="点击仅查看发现新版的模组">
-                <div class="modhub-stat-num ${updatableCount > 0 ? 'gold modhub-pulse-gold' : ''}">${updatableCount}</div>
-                <div class="grey modhub-stat-label">发现新版</div>
-            </div>
-            <div class="childItem modhub-stat-card" title="当前线路：${selectedMirror.name}">
-                <div class="modhub-stat-num">${selectedMirror.shortName}</div>
-                <div class="grey modhub-stat-label">下载线路</div>
-            </div>
-            ${updateAllBtnHtml}
-        `;
-    }
-
-    function renderIgnoredFilterLink(ignoredCount) {
-        const btn = document.getElementById('modHubMarketBtnIgnored');
-        if (!btn) return;
-        btn.hidden = ignoredCount === 0;
-        btn.textContent = `查看已忽略模组（${ignoredCount}）`;
-        btn.classList.toggle('is-selected', currentStatusFilter === 'ignored');
-        btn.setAttribute('aria-pressed', currentStatusFilter === 'ignored' ? 'true' : 'false');
+        const filters = [
+            ['all', '全部', totalCount, '查看全部安装状态，保留当前分类与搜索'],
+            ['installed', '已装', installedCount, '仅查看本地已安装模组'],
+            ['updatable', '可更新', updatableCount, '仅查看发现新版的模组'],
+            ['installable', '可安装', null, '仅查看可安装或可更新的模组'],
+            ['ignored', '已忽略', null, '仅查看已忽略更新的模组']
+        ];
+        statsEl.innerHTML = filters.map(([filter, label, count, title]) =>
+            `<button type="button" class="modhub-market-summary-button ${isStatsFilterActive(filter) ? 'is-selected' : ''}" data-filter="${filter}" onclick="window.modHubMarket.selectStatusFilter('${filter}')" aria-pressed="${isStatsFilterActive(filter)}" aria-controls="modHubMarketCardsContainer" title="${title}"${busy ? ' disabled' : ''}>${label}${count == null ? '' : ` <strong>${count}</strong>`}</button>`).join('') + updateAllBtnHtml;
+        if (focusedFilter) statsEl.querySelector(`[data-filter="${focusedFilter}"]:not(:disabled)`)?.focus();
     }
 
     /** 目录最新版本与当前游戏的适配候选分开；本地版本仅用于已安装版本。 */
@@ -6274,10 +6311,8 @@
         const displayStats = getDisplayMods(activeMods);
         const statMembers = entry => entry.isLanguageGroup ? entry.variants : [entry];
         const displayedMods = getFilteredDisplayMods(filtered, profiles, evaluatedMods);
-        renderStatsHeader(displayStats.length,
-            displayStats.filter(entry => statMembers(entry).some(mod => mod._matchedLocal)).length,
-            displayStats.filter(entry => statMembers(entry).some(mod => updatableIndexes.has(mod._marketIndex))).length);
-        renderIgnoredFilterLink(displayStats.filter(entry => statMembers(entry).some(mod => mod._isIgnored)).length);
+        renderStatsHeader(displayStats.filter(entry => statMembers(entry).some(mod => mod._matchedLocal)).length,
+            displayStats.filter(entry => statMembers(entry).some(mod => updatableIndexes.has(mod._marketIndex))).length, displayStats.length);
         renderBatchInstallToolbar(profiles, evaluatedMods);
         const filterResult = document.getElementById('modHubMarketFilterResult');
         if (filterResult) {
@@ -6294,10 +6329,8 @@
         renderMarketSections();
         const batchToolbar = document.getElementById('modHubMarketBatchToolbar');
         if (batchToolbar) batchToolbar.hidden = spellView;
-        ['modHubStatusSelect', 'modHubMirrorSelect'].forEach(id => {
-            const control = document.getElementById(id);
-            if (control) control.disabled = spellView || batchInstallState.running;
-        });
+        const mirrorSelect = document.getElementById('modHubMirrorSelect');
+        if (mirrorSelect) mirrorSelect.disabled = spellView || batchInstallState.running || batchInstallState.preparing;
         if (spellView) {
             if (window.modHubMarketSpells) window.modHubMarketSpells.render(container, { search: currentSearchText, sort: currentSortBy });
             else container.innerHTML = '<div class="modhub-empty-state grey">言灵资料模块尚未就绪。请重新载入游戏后重试。</div>';
@@ -6730,7 +6763,7 @@
     }
 
     function shouldShowCategoryFilters(statusFilter) {
-        return !['installed', 'updatable', 'ignored'].includes(statusFilter);
+        return ['all', 'installed', 'updatable', 'installable', 'ignored'].includes(statusFilter);
     }
 
     /** 两个板块保留各自搜索；模组状态和分类不参与言灵筛选。 */
@@ -6749,8 +6782,6 @@
             currentSearchText = restored.search;
             currentSortBy = restored.sort;
             if (searchInput) searchInput.value = currentSearchText;
-            const statusSelect = document.getElementById('modHubStatusSelect');
-            if (statusSelect) statusSelect.value = currentStatusFilter;
             const sortSelect = document.getElementById('modHubSortSelect');
             if (sortSelect) sortSelect.value = currentSortBy;
         }
@@ -6763,6 +6794,10 @@
 
     function renderMarketSections() {
         const spellView = currentMarketSection === 'spells';
+        document.getElementById('modHubMarketStats')?.querySelectorAll('button').forEach(button => {
+            button.disabled = batchInstallState.running || batchInstallState.preparing || marketInstallBusy
+                || marketViewLoading && button.classList.contains('modhub-market-update-all');
+        });
         const sectionButtons = document.getElementById('modHubMarketSections');
         if (sectionButtons) {
             const focusedSection = sectionButtons.contains?.(document.activeElement) ? document.activeElement?.dataset?.section : '';
@@ -6775,14 +6810,23 @@
                 if (focusedSection === button.dataset.section && !button.disabled) button.focus();
             });
         }
-        ['modHubMarketStats', 'modHubMarketFilterFooter', 'modHubStatusSelect', 'modHubMirrorSelect', 'modHubMarketBatchToolbar'].forEach(id => {
+        ['modHubMarketStats', 'modHubMarketMirrorField', 'modHubMarketSource', 'modHubMarketBatchToolbar'].forEach(id => {
             const control = document.getElementById(id);
             if (control) control.hidden = spellView;
         });
+        const footer = document.getElementById('modHubMarketFilterFooter');
+        if (footer) footer.hidden = spellView && !currentSearchText;
+        const result = document.getElementById('modHubMarketFilterResult');
+        if (spellView && result) result.hidden = true;
         const note = document.getElementById('modHubMarketSpellNote');
         if (note) note.hidden = !spellView;
-        const submit = document.getElementById('modHubMarketBtnSubmit');
-        if (submit) submit.textContent = spellView ? '投稿候选言灵' : '申请上架 / 推荐模组';
+        ['modHubMarketBtnSubmit', 'modHubMarketBtnSubmitPinned'].forEach(id => {
+            const submit = document.getElementById(id);
+            const submitLabel = submit?.querySelector('span') || submit;
+            if (submitLabel) submitLabel.textContent = spellView ? '投稿候选言灵' : '申请上架 / 推荐模组';
+        });
+        const submitPin = document.querySelector('[data-modhub-market-pin="modHubMarketBtnSubmit"]');
+        if (submitPin) updateMarketToolPin(submitPin);
         const searchInput = document.getElementById('modHubMarketSearch');
         if (searchInput) {
             searchInput.placeholder = spellView ? '搜索言灵名称、正文或拼音' : '搜索名称、作者、拼音或首字母';
@@ -6796,6 +6840,97 @@
             });
         }
     }
+
+    const MODHUB_MARKET_REFRESH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17"/></svg>';
+    const MODHUB_MARKET_TOOLS = [
+        { id: 'modHubMarketBtnSubmit', label: '申请上架 / 推荐模组', action: () => openCommunitySubmission(currentMarketSection === 'spells' ? 'spell' : 'new') },
+        { id: 'modHubMarketBtnMy', label: '我的投稿', action: () => openCommunitySubmission('my') },
+        { id: 'modHubMarketBtnFeedback', label: '纠错与下架申请', action: () => openCommunityFeedback() }
+    ];
+
+    function readPinnedMarketTools() {
+        try {
+            const stored = JSON.parse(localStorage.getItem('modhub_market_pinned_tools') || '[]');
+            return Array.isArray(stored) ? [...new Set(stored)].filter(id => MODHUB_MARKET_TOOLS.some(tool => tool.id === id)) : [];
+        } catch (_) { return []; }
+    }
+
+    function marketToolLabel(tool) {
+        return tool.id === 'modHubMarketBtnSubmit' && currentMarketSection === 'spells' ? '投稿候选言灵' : tool.label;
+    }
+
+    function marketToolHtml(tool, pinned = false) {
+        return `<button id="${tool.id}${pinned ? 'Pinned' : ''}" data-modhub-market-tool="${tool.id}" type="button" class="macro-button ${tool.id === 'modHubMarketBtnSubmit' ? 'modhub-btn-primary modhub-submit-link' : 'modhub-btn-secondary'}"><span>${marketToolLabel(tool)}</span></button>`;
+    }
+
+    function updateMarketToolPin(button) {
+        const tool = MODHUB_MARKET_TOOLS.find(tool => tool.id === button.dataset.modhubMarketPin);
+        if (!tool) return;
+        const active = readPinnedMarketTools().includes(tool.id);
+        const label = `${active ? '取消固定' : '固定'}${marketToolLabel(tool)}${active ? '' : '到操作栏'}`;
+        button.setAttribute('aria-pressed', String(active));
+        button.setAttribute('aria-label', label);
+        button.setAttribute('title', label);
+    }
+
+    function renderPinnedMarketTools() {
+        const container = document.getElementById('modHubMarketPinnedTools');
+        if (container) container.innerHTML = readPinnedMarketTools().map(id => marketToolHtml(MODHUB_MARKET_TOOLS.find(tool => tool.id === id), true)).join('');
+        document.querySelectorAll('[data-modhub-market-tool]').forEach(button => {
+            button.onclick = () => {
+                if (button.disabled || batchInstallState.running || batchInstallState.preparing) return;
+                const more = document.getElementById('modHubMarketMore');
+                if (more) more.open = false;
+                return MODHUB_MARKET_TOOLS.find(tool => tool.id === button.dataset.modhubMarketTool)?.action();
+            };
+        });
+        document.querySelectorAll('.modhub-market-tool-pin').forEach(button => {
+            updateMarketToolPin(button);
+            button.onclick = () => {
+                if (button.disabled || batchInstallState.running || batchInstallState.preparing) return;
+                const id = button.dataset.modhubMarketPin;
+                if (!MODHUB_MARKET_TOOLS.some(tool => tool.id === id)) return;
+                const pinned = readPinnedMarketTools();
+                const next = pinned.includes(id) ? pinned.filter(value => value !== id) : [...pinned, id];
+                try { localStorage.setItem('modhub_market_pinned_tools', JSON.stringify(next)); }
+                catch (_) { window.modHubShowToast('无法保存固定工具设置，请检查浏览器存储权限。', 'warning'); return; }
+                renderPinnedMarketTools();
+                renderBatchInstallToolbar();
+                const more = document.getElementById('modHubMarketMore');
+                if (more) { more.open = false; more.querySelector('summary')?.focus(); }
+            };
+        });
+    }
+
+    // 根据实际滚动视口预留底部操作空间，较矮窗口只滚动面板内容。
+    function fitMarketMorePanel() {
+        const more = document.getElementById('modHubMarketMore');
+        if (!more?.open) return;
+        const panel = more.querySelector('.modhub-market-more-content');
+        if (!panel) return;
+        const viewport = window.visualViewport;
+        const bottom = viewport ? viewport.offsetTop + viewport.height : window.innerHeight;
+        const overlay = more.closest('#customOverlayContent');
+        const available = Math.min(bottom, overlay?.getBoundingClientRect().bottom ?? bottom)
+            - panel.getBoundingClientRect().top - 60;
+        panel.style.setProperty('--modhub-market-more-space', `${Math.max(80, available)}px`);
+    }
+
+    window.addEventListener('resize', fitMarketMorePanel);
+    window.visualViewport?.addEventListener('resize', fitMarketMorePanel);
+    document.addEventListener('scroll', fitMarketMorePanel, true);
+    document.addEventListener('pointerdown', event => {
+        const more = document.getElementById('modHubMarketMore');
+        if (more?.open && !more.contains(event.target)) more.open = false;
+    }, true);
+    document.addEventListener('keydown', event => {
+        const more = document.getElementById('modHubMarketMore');
+        if (event.key === 'Escape' && more?.open) {
+            event.preventDefault();
+            more.open = false;
+            more.querySelector('summary')?.focus();
+        }
+    });
 
     function renderCategoryFilters() {
         const container = document.getElementById('modHubCategoryCapsules');
@@ -6817,88 +6952,92 @@
         if (currentCategory !== 'all' && !counts.has(currentCategory)) currentCategory = 'all';
         const escapeHtml = window.modHubEscapeHtml || (value => value);
         container.innerHTML = [
-            `<button type="button" class="macro-button capsule-btn ${currentCategory === 'all' ? 'active' : ''}" data-cat="all">全部分类（${visibleMods.length}）</button>`,
-            ...categories.map(category => `<button type="button" class="macro-button capsule-btn ${currentCategory === category ? 'active' : ''}" data-cat="${escapeHtml(category)}">${escapeHtml(category)}（${counts.get(category)}）</button>`)
+            `<option value="all">全部分类（${visibleMods.length}）</option>`,
+            ...categories.map(category => `<option value="${escapeHtml(category)}">${escapeHtml(category)}（${counts.get(category)}）</option>`)
         ].join('');
-        container.querySelectorAll('.capsule-btn').forEach(btn => {
-            btn.onclick = () => {
-                currentCategory = btn.dataset.cat || 'all';
-                renderCategoryFilters();
-                renderMarketCards();
-            };
-        });
+        container.value = currentCategory;
+        container.onchange = () => {
+            currentCategory = container.value || 'all';
+            renderCategoryFilters();
+            renderMarketCards();
+        };
     }
 
     /** 初始化模组市场主入口 */
     window.modHubInitMarket = async function(forceRefresh = false) {
         const root = document.getElementById('modHubModMarketContainer');
         if (!root) return;
+        retryFailedModUpdateChecks(root);
         const revision = ++marketViewRevision;
         const current = () => revision === marketViewRevision && document.getElementById('modHubModMarketContainer') === root;
         marketViewLoading = true;
 
         root.innerHTML = `
-            <div id="modHubMarketSections" class="modhub-market-sections" role="group" aria-label="市场内容板块"></div>
-            <p id="modHubMarketSpellNote" class="modhub-market-section-note grey" hidden>言灵按原文展示和复制。请按使用说明在对应位置使用；市场不执行言灵，也不会将其安装为模组。</p>
-            <!-- ===== 顶部状态信息卡 ===== -->
-            <div id="modHubMarketStats" class="settingsGridSmall modhub-stats-container"></div>
-
-            <div class="modhub-market-source grey" role="note">
-                模组资料来源：<a href="https://degreesoflewditycn.miraheze.org/wiki/%E6%A8%A1%E7%BB%84%E5%88%97%E8%A1%A8" target="_blank" rel="noopener">DOL 中文社区 Wiki「模组列表」</a>及社区维护目录。
+            <div class="modhub-market-heading">
+                <div id="modHubMarketSections" class="modhub-market-sections" role="group" aria-label="市场内容板块"></div>
             </div>
+            <div id="modHubMarketStats" class="modhub-market-summary" role="group" aria-label="按安装状态筛选模组"></div>
+            <p id="modHubMarketSpellNote" class="modhub-market-section-note grey" hidden>言灵按原文展示和复制。请按使用说明在对应位置使用；市场不执行言灵，也不会将其安装为模组。</p>
 
             <!-- ===== 搜索与筛选工具栏 ===== -->
             <div class="modhub-market-toolbar">
-                <div class="modhub-market-search-row">
-                    <input
-                        id="modHubMarketSearch"
-                        class="modhub-search-input"
-                        type="search"
-                        placeholder="搜索名称、作者、拼音或首字母"
-                        value="${window.modHubEscapeHtml(currentSearchText)}"
-                    />
-                    <button id="modHubMarketBtnResetFilter" type="button" class="macro-button modhub-btn-sub" onclick="window.modHubMarket.resetFilters()" title="清除当前所有筛选与搜索，查看全部模组" style="display:none; white-space:nowrap;">返回全部模组</button>
-                    <button id="modHubMarketBtnRefresh" type="button" class="macro-button modhub-btn-primary" title="重新获取最新模组目录">刷新市场</button>
-                    <button id="modHubMarketBtnSubmit" type="button" class="macro-button modhub-btn-primary modhub-submit-link">申请上架 / 推荐模组</button>
-                    <button id="modHubMarketBtnMy" type="button" class="macro-button modhub-btn-primary modhub-submit-link">我的投稿</button>
+                <div class="modhub-market-tools">
+                    <div class="modhub-market-search-row">
+                        <input
+                            id="modHubMarketSearch"
+                            class="modhub-search-input"
+                            type="search"
+                            placeholder="搜索名称、作者、拼音或首字母"
+                            value="${window.modHubEscapeHtml(currentSearchText)}"
+                        />
+                        <button id="modHubMarketBtnRefresh" type="button" class="macro-button modhub-btn-secondary" aria-label="刷新市场" title="刷新市场，重新获取最新模组目录">${MODHUB_MARKET_REFRESH_ICON}</button>
+                    </div>
                 </div>
-                <div class="modhub-market-feedback-row"><button id="modHubMarketBtnFeedback" type="button" class="modhub-market-text-action">纠错与下架申请</button></div>
 
                 <div class="modhub-market-filter-row">
-                    <div class="modhub-market-capsules" id="modHubCategoryCapsules">
-                        <button type="button" class="macro-button capsule-btn active" data-cat="all">全部分类</button>
+                    <select id="modHubCategoryCapsules" class="modhub-select" aria-label="模组分类">
+                        <option value="all">全部分类</option>
+                    </select>
+                    <select id="modHubSortSelect" class="modhub-select" aria-label="排列方式">
+                        <option value="date" ${currentSortBy === 'date' ? 'selected' : ''}>按最新更新</option>
+                        <option value="name" ${currentSortBy === 'name' ? 'selected' : ''}>按模组名称</option>
+                    </select>
+                    <div id="modHubMarketHeaderActions" class="modhub-market-header-actions">
+                    <div id="modHubMarketPinnedTools" class="modhub-market-pinned-tools"></div>
+                    <div id="modHubMarketMainActions" class="modhub-market-main-actions">
+                    <div id="modHubMarketBatchToolbar" class="modhub-market-batch-toolbar" role="group" aria-label="模组多选安装" ${currentMarketSection === 'spells' ? 'hidden' : ''}></div>
+                    <details id="modHubMarketMore" class="modhub-market-more">
+                        <summary>更多</summary>
+                        <div class="modhub-market-more-content">
+                            <label id="modHubMarketMirrorField">下载线路
+                                <select id="modHubMirrorSelect" class="modhub-select" title="下载线路切换">
+                                    ${MIRROR_SERVERS.map(m => `<option value="${m.id}" ${currentMirrorId === m.id ? 'selected' : ''}>${m.name}</option>`).join('')}
+                                </select>
+                            </label>
+                            ${MODHUB_MARKET_TOOLS.map(tool => `<div class="modhub-market-tool-row">${marketToolHtml(tool)}<button type="button" class="modhub-market-tool-pin" data-modhub-market-pin="${tool.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3M12 15v6"/></svg></button></div>`).join('')}
+                            <div id="modHubMarketSource" class="modhub-market-source grey" role="note">
+                                <span class="modhub-market-source-label">模组资料来源：</span>
+                                <span class="modhub-market-source-detail"><a href="https://degreesoflewditycn.miraheze.org/wiki/%E6%A8%A1%E7%BB%84%E5%88%97%E8%A1%A8" target="_blank" rel="noopener">DOL 中文社区 Wiki「模组列表」</a><span>及社区维护目录。</span></span>
+                            </div>
+                        </div>
+                    </details>
                     </div>
-                    <div class="modhub-market-selects">
-                        <select id="modHubStatusSelect" class="modhub-select">
-                            <option value="all" ${currentStatusFilter === 'all' ? 'selected' : ''}>全部状态</option>
-                            <option value="installable" ${currentStatusFilter === 'installable' ? 'selected' : ''}>可安装/可更新</option>
-                            <option value="updatable" ${currentStatusFilter === 'updatable' ? 'selected' : ''}>仅看可更新</option>
-                            <option value="installed" ${currentStatusFilter === 'installed' ? 'selected' : ''}>已安装模组</option>
-                            <option value="ignored" ${currentStatusFilter === 'ignored' ? 'selected' : ''}>已忽略更新</option>
-                        </select>
-                        <select id="modHubSortSelect" class="modhub-select">
-                            <option value="date" ${currentSortBy === 'date' ? 'selected' : ''}>按最新更新</option>
-                            <option value="name" ${currentSortBy === 'name' ? 'selected' : ''}>按模组名称</option>
-                        </select>
-                        <select id="modHubMirrorSelect" class="modhub-select" title="下载线路切换">
-                            ${MIRROR_SERVERS.map(m => `<option value="${m.id}" ${currentMirrorId === m.id ? 'selected' : ''}>${m.name}</option>`).join('')}
-                        </select>
                     </div>
                 </div>
                 <div id="modHubMarketFilterFooter" class="modhub-market-filter-footer">
                     <span id="modHubMarketFilterResult" class="grey" role="status" aria-live="polite" hidden></span>
-                    <button id="modHubMarketBtnIgnored" type="button" class="modhub-market-text-action" onclick="window.modHubMarket.filterIgnoredOnly()" aria-pressed="false" hidden>查看已忽略模组</button>
+                    <button id="modHubMarketBtnResetFilter" type="button" class="modhub-market-text-action" onclick="window.modHubMarket.resetFilters()" title="清除当前所有筛选与搜索，查看全部模组" style="display:none;">返回全部模组</button>
                 </div>
             </div>
 
-            <div id="modHubMarketBatchToolbar" class="modhub-market-batch-toolbar" role="group" aria-label="模组多选安装" ${currentMarketSection === 'spells' ? 'hidden' : ''}></div>
-            <p id="modHubMarketLoadStatus" class="grey" role="status" aria-live="polite" hidden></p>
+            <p id="modHubMarketLoadStatus" class="grey" role="status" aria-live="polite" hidden>${window.modHubProgressRingHtml()}<span>正在加载，请稍后</span></p>
 
             <!-- ===== 模组卡片列表容器 ===== -->
             <div id="modHubMarketCardsContainer" class="modhub-market-grid">
                 ${window.modHubLoadingHtml('正在拉取模组市场数据，请稍候……')}
             </div>
         `;
+        renderPinnedMarketTools();
         renderMarketSections();
         renderBatchInstallToolbar();
         // 上次成功目录仅用于先浏览，本轮联网及本地核验完成前不能安装。
@@ -6976,7 +7115,7 @@
                 if (batchInstallState.running || marketViewLoading) return;
                 refreshBtn.disabled = true;
                 refreshBtn.setAttribute('aria-busy', 'true');
-                refreshBtn.innerHTML = window.modHubProgressRingHtml() + '刷新中...';
+                refreshBtn.innerHTML = window.modHubProgressRingHtml();
                 window.modHubShowToast('正在获取最新模组目录...', 'info');
                 try {
                     if (!await refreshView(true)) return;
@@ -6986,27 +7125,13 @@
                 } finally {
                     refreshBtn.removeAttribute('aria-busy');
                     refreshBtn.disabled = batchInstallState.running;
-                    refreshBtn.textContent = '刷新市场';
+                    refreshBtn.innerHTML = MODHUB_MARKET_REFRESH_ICON;
                 }
             };
         }
 
-        const submitBtn = document.getElementById('modHubMarketBtnSubmit');
-        if (submitBtn) submitBtn.onclick = () => { if (!batchInstallState.running) openCommunitySubmission(currentMarketSection === 'spells' ? 'spell' : 'new'); };
-        const myBtn = document.getElementById('modHubMarketBtnMy');
-        if (myBtn) myBtn.onclick = () => { if (!batchInstallState.running) openCommunitySubmission('my'); };
-        const feedbackBtn = document.getElementById('modHubMarketBtnFeedback');
-        if (feedbackBtn) feedbackBtn.onclick = openCommunityFeedback;
-
-        const statusSelect = document.getElementById('modHubStatusSelect');
-        if (statusSelect) {
-            statusSelect.onchange = () => {
-                currentStatusFilter = statusSelect.value;
-                if (!shouldShowCategoryFilters(currentStatusFilter)) currentCategory = 'all';
-                renderCategoryFilters();
-                renderMarketCards();
-            };
-        }
+        const more = document.getElementById('modHubMarketMore');
+        if (more) more.ontoggle = fitMarketMorePanel;
 
         const sortSelect = document.getElementById('modHubSortSelect');
         if (sortSelect) {
@@ -7047,6 +7172,7 @@
 
     /** 获取所有有新版本可更新的模组列表（优先读内存，次选读 localStorage 缓存） */
     function getUpdatableMods() {
+        retryFailedModUpdateChecks(document.getElementById('modHubModManageContainer'));
         let list = marketModList;
         if (!marketDataLoaded && (!list || !list.length)) {
             const cached = readLocalCache(WIKI_CACHE_KEY, WIKI_CACHE_TTL);
@@ -7094,8 +7220,6 @@
         currentSearchText = '';
         const searchInput = document.getElementById('modHubMarketSearch');
         if (searchInput) searchInput.value = '';
-        const statusSelect = document.getElementById('modHubStatusSelect');
-        if (statusSelect) statusSelect.value = 'all';
         renderCategoryFilters();
         renderMarketCards();
         updateToolbarResetBtn();
@@ -7104,41 +7228,21 @@
         }
     }
 
-    /** 快捷将市场卡片过滤为“已安装模组” */
-    function filterInstalledOnly() {
-        if (!selectMarketSection('packages', false)) return;
-        currentStatusFilter = 'installed';
-        currentCategory = 'all';
-        const sel = document.getElementById('modHubStatusSelect');
-        if (sel) sel.value = 'installed';
+    /** 安装状态与分类、搜索组合筛选，不清除玩家已设置的条件。 */
+    function selectStatusFilter(status) {
+        if (!shouldShowCategoryFilters(status) || batchInstallState.preparing || !selectMarketSection('packages', false)) return false;
+        currentStatusFilter = status;
         renderCategoryFilters();
         renderMarketCards();
         updateToolbarResetBtn();
+        return true;
     }
 
-    /** 快捷将市场卡片过滤为“仅看可更新” */
-    function filterUpdatableOnly() {
-        if (!selectMarketSection('packages', false)) return;
-        currentStatusFilter = 'updatable';
-        currentCategory = 'all';
-        const sel = document.getElementById('modHubStatusSelect');
-        if (sel) sel.value = 'updatable';
-        renderCategoryFilters();
-        renderMarketCards();
-        updateToolbarResetBtn();
-    }
+    function filterInstalledOnly() { return selectStatusFilter('installed'); }
 
-    /** 进入独立的已忽略更新列表 */
-    function filterIgnoredOnly() {
-        if (!selectMarketSection('packages', false)) return;
-        currentStatusFilter = 'ignored';
-        currentCategory = 'all';
-        const sel = document.getElementById('modHubStatusSelect');
-        if (sel) sel.value = 'ignored';
-        renderCategoryFilters();
-        renderMarketCards();
-        updateToolbarResetBtn();
-    }
+    function filterUpdatableOnly() { return selectStatusFilter('updatable'); }
+
+    function filterIgnoredOnly() { return selectStatusFilter('ignored'); }
 
     /** 一键全部批量更新 */
     async function updateAllMods() {
@@ -7317,6 +7421,7 @@
         setBatchModSelected,
         isStatsFilterActive,
         shouldShowCategoryFilters,
+        selectStatusFilter,
         filterUpdatableOnly,
         filterInstalledOnly,
         filterIgnoredOnly,
@@ -7349,5 +7454,90 @@
         getStaticMarketModSubtext,
         formatDependencyListHtml,
     };
+
+    let startupUpdateTimer = null;
+    let startupUpdateIdle = null;
+    let startupUpdateStarted = false;
+
+    function startupUpdateReady() {
+        if (!window.SugarCube?.State?.passage || !window.modHubMarketVersions?.getLatestGameCandidate) return false;
+        return !['init-screen', 'LoadingProgressLog'].some(id => {
+            for (let node = document.getElementById(id); node && node !== document; node = node.parentElement || node.parentNode) {
+                if (node.hidden) return false;
+                const style = window.getComputedStyle?.(node);
+                if (style?.display === 'none' || style?.visibility === 'hidden') return false;
+            }
+            return Boolean(document.getElementById(id));
+        });
+    }
+
+    function startupUpdateBusy() {
+        return document.hidden || !startupUpdateReady() || marketViewLoading || window.modHubIsReloadBusy?.()
+            || window.modHubRestore?.isRestoring?.() || window.modHubRestore?.isOperationBlocked?.();
+    }
+
+    function scheduleStartupUpdateCheck() {
+        if (startupUpdateStarted || startupUpdateTimer !== null || startupUpdateIdle !== null || document.hidden) return;
+        if (startupUpdateBusy()) {
+            startupUpdateTimer = setTimeout(() => {
+                startupUpdateTimer = null;
+                scheduleStartupUpdateCheck();
+            }, 1000);
+            return;
+        }
+        startupUpdateTimer = setTimeout(() => {
+            startupUpdateTimer = null;
+            if (startupUpdateBusy()) { scheduleStartupUpdateCheck(); return; }
+            if (typeof window.requestIdleCallback === 'function') {
+                startupUpdateIdle = window.requestIdleCallback(() => {
+                    startupUpdateIdle = null;
+                    runStartupUpdateCheck();
+                }, { timeout: 3000 });
+            } else {
+                startupUpdateIdle = setTimeout(() => {
+                    startupUpdateIdle = null;
+                    runStartupUpdateCheck();
+                }, 0);
+            }
+        }, 2000);
+    }
+
+    async function runStartupUpdateCheck() {
+        if (startupUpdateBusy()) { scheduleStartupUpdateCheck(); return; }
+        startupUpdateStarted = true;
+        try {
+            await Promise.all([loadMarketData(), window.modHubLoadModManageState?.()]);
+            // 面板核验或还原可能在目录请求期间开始，待其结束后再共用检查结果。
+            if (startupUpdateBusy()) {
+                startupUpdateStarted = false;
+                scheduleStartupUpdateCheck();
+                return;
+            }
+            const updates = getUpdatableMods();
+            window.modHubNotifyUpdateState?.(updates.length, updates);
+        } catch (error) {
+            console.warn('[ModHub] 启动后的模组更新检测未完成，可在市场中重新检查', error);
+        } finally {
+            if (startupUpdateStarted) {
+                document.removeEventListener('visibilitychange', onStartupUpdateVisibility);
+                window.jQuery?.(document).off?.('.modHubMarketStartup');
+            }
+        }
+    }
+
+    function onStartupUpdateVisibility() {
+        if (startupUpdateTimer !== null) clearTimeout(startupUpdateTimer);
+        startupUpdateTimer = null;
+        if (startupUpdateIdle !== null) {
+            if (typeof window.requestIdleCallback === 'function') window.cancelIdleCallback?.(startupUpdateIdle);
+            else clearTimeout(startupUpdateIdle);
+        }
+        startupUpdateIdle = null;
+        scheduleStartupUpdateCheck();
+    }
+
+    document.addEventListener('visibilitychange', onStartupUpdateVisibility);
+    window.jQuery?.(document).on?.(':storyready.modHubMarketStartup :passagedisplay.modHubMarketStartup', scheduleStartupUpdateCheck);
+    scheduleStartupUpdateCheck();
 
 })();

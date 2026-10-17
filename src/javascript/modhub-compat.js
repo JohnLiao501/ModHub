@@ -406,5 +406,11 @@
         return snapshot;
     }
 
-    Object.assign(api, { check, enrich, signature, assertCurrent, hashPackage });
+    function releaseCandidateData(snapshot) {
+        const record = records.get(snapshot);
+        if (record) record.candidates = [];
+        for (const item of snapshot?.packages || []) delete item.data;
+    }
+
+    Object.assign(api, { check, enrich, signature, assertCurrent, hashPackage, releaseCandidateData });
 })();

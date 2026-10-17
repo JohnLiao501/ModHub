@@ -3496,8 +3496,6 @@ button.modhub-btn-primary:active,
     }
 
     #modHubModManageContainer .modhub-sticky-toolbar {
-        position: static;
-        box-shadow: none;
         padding: 0 0 6px;
     }
 

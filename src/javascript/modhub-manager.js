@@ -326,6 +326,7 @@ window.modHubLoadDisabledModInfo = async function(modNames, refresh = false) {
         const key = name.trim().toLowerCase();
         const cached = window._modHubDisabledModInfo.get(key);
         if (!refresh && String(cached?.bootJson?.name || '').trim().toLowerCase() === key) continue;
+        await window.modHubYieldToBrowser();
         const { bootJson, error } = await window.modHubReadInstalledModBoot(name);
         if (bootJson) {
             window._modHubDisabledModInfo.set(key, {
@@ -2165,10 +2166,9 @@ window.modHubRenderModManageUI = function() {
     html += '<div id="modHubEnvInfo" class="settingsGridSmall modhub-stats-container"></div>';
     html += '<div id="modHubUpdateBanner" style="display:none;"></div>';
 
-    // 2. 操作工具栏：窄屏说明默认收起，随列表滚动以留出阅读空间。
+    // 2. 说明与安全模式随页面滚动，仅保留状态提示和核心操作吸顶。
     html += `
-        <div class="modhub-sticky-toolbar">
-            <div class="modhub-manager-helpbar">
+        <div class="modhub-manager-helpbar">
                 <details class="modhub-manager-help grey" data-section="manager-help"${isSectionOpen('manager-help', !isNarrowScreen) ? ' open' : ''}>
                     <summary>排序操作说明</summary>
                     <p>智能整理会按依赖调整模组与美化顺序；也可拖拽手动排序，长按上下按钮可置顶或置底。</p>
@@ -2177,7 +2177,8 @@ window.modHubRenderModManageUI = function() {
                     <input type="checkbox" id="toggleSafeMode" class="macro-checkbox" />
                     <span class="gold">安全模式</span>
                 </label>
-            </div>
+        </div>
+        <div class="modhub-sticky-toolbar">
             <div id="modHubManagerStatus" class="grey" role="status" aria-live="polite"></div>
             <div class="modhub-group-header">
                 <span class="gold">模组与美化顺序管理</span>
@@ -2193,30 +2194,29 @@ window.modHubRenderModManageUI = function() {
                     </div>
                 </div>
             </div>
+            ${totalSideCount > 0 && window._modHubBatchMode ? `
+                <div id="modHubBatchToolbar" class="modhub-batch-toolbar">
+                    <div class="modhub-batch-info">
+                        已选择 <span id="modHubBatchCount" class="gold">${window._modHubSelectedMods ? window._modHubSelectedMods.size : 0}</span> 个模组
+                    </div>
+                    <div class="modhub-batch-actions">
+                        <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchSelectAll()">全选</button>
+                        <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchInvertSelect()">反选</button>
+                        <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="enable" data-modhub-busy-key="batch:enable" type="button" onclick="window.modHubBatchEnable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量启用</button>
+                        <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="disable" data-modhub-busy-key="batch:disable" type="button" onclick="window.modHubBatchDisable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量禁用</button>
+                        <button class="macro-button modhub-btn-delete modhub-batch-btn" data-batch-action="delete" data-modhub-busy-key="batch:delete" type="button" onclick="window.modHubBatchDelete()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}><span class="red">批量删除</span></button>
+                        <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-cancel modhub-batch-btn" type="button" onclick="window.modHubToggleBatchMode(false)">退出多选</button>
+                    </div>
+                </div>
+            ` : ''}
         </div>
         <input type="file" id="modHubImportFileInput" accept="${MODHUB_IMPORT_ACCEPT}" multiple style="display:none;" />
         <details class="modhub-collapsible-section" data-section="side"${isSectionOpen('side', true) ? ' open' : ''}>
             <summary class="modhub-section-summary">已安装模组 - 共 ${totalSideCount} 个</summary>
             <div class="modhub-section-content">
-                ${totalSideCount > 0 ? `
+                ${totalSideCount > 0 && !window._modHubBatchMode ? `
                     <div class="modhub-list-toolbar">
-                        ${window._modHubBatchMode ? `
-                            <div id="modHubBatchToolbar" class="modhub-batch-toolbar">
-                                <div class="modhub-batch-info">
-                                    已选择 <span id="modHubBatchCount" class="gold">${window._modHubSelectedMods ? window._modHubSelectedMods.size : 0}</span> 个模组
-                                </div>
-                                <div class="modhub-batch-actions">
-                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchSelectAll()">全选</button>
-                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchInvertSelect()">反选</button>
-                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="enable" data-modhub-busy-key="batch:enable" type="button" onclick="window.modHubBatchEnable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量启用</button>
-                                    <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="disable" data-modhub-busy-key="batch:disable" type="button" onclick="window.modHubBatchDisable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量禁用</button>
-                                    <button class="macro-button modhub-btn-delete modhub-batch-btn" data-batch-action="delete" data-modhub-busy-key="batch:delete" type="button" onclick="window.modHubBatchDelete()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}><span class="red">批量删除</span></button>
-                                    <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-cancel modhub-batch-btn" type="button" onclick="window.modHubToggleBatchMode(false)">退出多选</button>
-                                </div>
-                            </div>
-                        ` : `
-                            <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-primary" type="button" title="进入批量多选模式，支持批量启用、禁用与删除" onclick="window.modHubToggleBatchMode(true)">多选操作</button>
-                        `}
+                        <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-primary" type="button" title="进入批量多选模式，支持批量启用、禁用与删除" onclick="window.modHubToggleBatchMode(true)">多选操作</button>
                     </div>
                 ` : ''}
     `;

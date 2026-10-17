@@ -754,14 +754,16 @@
         return null;
     }
 
-    async function preparePlan(selections, updateOnly, { download = true, initialPlan = null, initialImpact = '', acknowledged = new Set(), resolveSelection, resolveUnresolved, isCurrent } = {}) {
+    async function preparePlan(selections, updateOnly, { download = true, initialPlan = null, initialImpact = '', acknowledged = new Set(), resolveSelection, resolveUnresolved, isCurrent,
+        preparedCache = new Map(), preserveProgress = false, mergeOnNewDependencies = false, protectedNames = new Map(), downloads } = {}) {
         const api = market(), catalog = api.getMarketMods();
         checkExclusiveSelections(selections);
         const nodes = new Map(), roots = new Set(), queue = [];
         const downloadApprovals = new Map(initialPlan?.downloadApprovals || []);
         const approvedImpacts = new Map((initialImpact ? JSON.parse(initialImpact) : []).map(impact => [impact[0], impact]));
         const approvedSkippedNodes = new Set();
-        let bytes = 0;
+        let mergePending = false;
+        let bytes = [...preparedCache.values()].reduce((sum, node) => sum + (Number(node.prepared.bytes) || 0), 0);
         const budget = api.MAX_DOWNLOAD_BYTES || 256 * 1024 * 1024;
         const addNode = (mod, selection = null) => {
             const key = keyOf(mod);
@@ -817,6 +819,7 @@
                 const resolved = resolveDependency(requirement, catalog, api.getLocalInstalledProfiles());
                 if (!resolved) { node.unresolved.push(requirement); continue; }
                 const dependency = addNode(resolved.mod);
+                if (mergeOnNewDependencies && !initialPlan?.nodes.has(dependency.key)) mergePending = true;
                 dependency.local = resolved.local;
                 dependency.requirements.push({ ...requirement, parent: node.key }); node.dependencies.add(dependency.key);
                 if (requirement.required && dependency.skipped) { dependency.skipped = false; dependency.forceReselect = true; }
@@ -862,7 +865,7 @@
 
         };
         try {
-            while (queue.length) {
+            while (queue.length && !mergePending) {
                 if (stopped() || isCurrent && !isCurrent()) throw Object.assign(new Error('已停止安装准备'), { code: 'INSTALL_CANCELLED' });
                 const node = queue.shift();
                 if (nodes.get(node.key) !== node || (node.issue && !node.forceReselect)) continue;
@@ -928,11 +931,14 @@
                     if (node.attempts.has(signature)) throw new Error(`前置【${node.mod.name}】选版无法稳定满足全部要求，请重新选择目标版本或拆分批次。`);
                     node.attempts.add(signature);
                     if (!download) { node.planned = true; node.plannedVersion = node.release.version; expandDependencies(node); await chooseUnresolved(node); continue; }
+                    const protectedName = [...(node.mod.bootNames || []), ...getDependencyBootNames(localBoot(node.local))]
+                        .find(name => protectedNames.has(`boot:${normalize(name)}`));
+                    if (protectedName) throw new Error(`此前已完成项目正在使用【${protectedNames.get(`boot:${normalize(protectedName)}`)}】，本次不能替换此前置。请核对前置版本后重试。`);
                     if (downloadApprovals.get(node.key) !== downloadSignature(node.release)) {
                         const action = { ...node, type: node.local ? 'update' : 'install' };
                         const changedPlan = { nodes, roots, actions: [action] };
                         const newRisks = collectPlanRisks(changedPlan, runtimeChecks(changedPlan)).risks.filter(risk => !acknowledged.has(risk.key));
-                        const message = `核对安装包后，需要新增下载或更换【${node.mod.name}】${node.release.version || node.release.tagName || '版本未知'}。\n${node.requirements.map(item => `【${nodes.get(item.parent)?.mod.name || item.declaredBy}】要求 ${item.bootName || node.mod.name}：${rangeText(item.version)}`).join('\n')}\n\n确认后将下载并安装此版本${node.local && isDisabled(node.local.name) ? '，并启用该模组' : ''}${node.switchGroup?.disabledNames.length ? `，并停用【${node.switchGroup.disabledNames.join('、')}】；旧安装包会保留` : ''}。取消不会导入任何模组。`;
+                        const message = `核对安装包后，需要新增下载或更换【${node.mod.name}】${node.release.version || node.release.tagName || '版本未知'}。\n${node.requirements.map(item => `【${nodes.get(item.parent)?.mod.name || item.declaredBy}】要求 ${item.bootName || node.mod.name}：${rangeText(item.version)}`).join('\n')}\n\n确认后将下载并安装此版本${node.local && isDisabled(node.local.name) ? '，并启用该模组' : ''}${node.switchGroup?.disabledNames.length ? `，并停用【${node.switchGroup.disabledNames.join('、')}】；旧安装包会保留` : ''}。${preserveProgress ? '取消将停止后续处理，已完成的项目会保留。' : '取消不会导入任何模组。'}`;
                         const ok = await window.modHubConfirm({ title: '安装计划有变更',
                             message, trustedMessageHtml: renderPlanRisks(changedPlan, newRisks) + `<p>${escape(message).replace(/\n/g, '<br>')}</p>`,
                             confirmText: newRisks.length ? '仍然下载并安装' : '下载并安装此版本', cancelText: '取消', confirmType: newRisks.length ? 'danger' : 'primary', dialogClass: 'modhub-install-dialog'
@@ -944,15 +950,21 @@
                     }
                     const assets = api.getReleaseInstallAssets(node.release);
                     const expected = assets.reduce((total, asset) => total + (Number(asset.size) || 0), 0);
-                    if (bytes + expected > budget) throw Object.assign(new Error('本批安装包超过 256 MB 的准备缓存上限，请拆分批次安装。'), { code: 'PREPARE_BUDGET' });
-                    const prepared = await api.downloadAndInstallMod(node.mod, api.getCurrentMirrorId(), {
-                        releaseInfo: node.release, prepareOnly: true, batchMode: true, maxPreparedBytes: budget - bytes,
-                        onFailure: (reason, code, error) => { node.issue = reason; node.downloadFailureDetails = error?.downloadFailureDetails; if (code === 'FILE_TOO_LARGE') node.budgetExceeded = true; }
-                    });
-                    if (node.budgetExceeded) throw Object.assign(new Error('本批安装包超过 256 MB 的准备缓存上限，请拆分批次安装。'), { code: 'PREPARE_BUDGET' });
+                    let cached = preparedCache.get(node.key);
+                    preparedCache.delete(node.key);
+                    if (cached) bytes -= Number(cached.prepared.bytes) || 0;
+                    const reusable = cached && downloadSignature(cached.release) === downloadSignature(node.release) ? cached.prepared : null;
+                    cached = null;
+                    if (bytes + (reusable ? Number(reusable.bytes) || 0 : expected) > budget) throw Object.assign(new Error('本组安装包超过 256 MB 的准备缓存上限，请拆分批次安装。'), { code: 'PREPARE_BUDGET' });
+                    const onFailure = (reason, code, error) => { node.issue = reason; node.downloadFailureDetails = error?.downloadFailureDetails; if (code === 'FILE_TOO_LARGE') node.budgetExceeded = true; };
+                    const prepared = reusable || (downloads ? await downloads.take(node, budget - bytes, onFailure)
+                        : await api.downloadAndInstallMod(node.mod, api.getCurrentMirrorId(), {
+                            releaseInfo: node.release, prepareOnly: true, batchMode: true, maxPreparedBytes: budget - bytes, onFailure
+                        }));
+                    if (node.budgetExceeded) throw Object.assign(new Error('本组安装包超过 256 MB 的准备缓存上限，请拆分批次安装。'), { code: 'PREPARE_BUDGET' });
                     if (!prepared || !Array.isArray(prepared.boots)) throw new Error(node.issue || '安装包预检失败');
                     node.prepared = prepared; node.wasReleased = false; bytes += Number(prepared.bytes) || 0;
-                    if (bytes > budget) throw Object.assign(new Error('本批安装包超过 256 MB 的准备缓存上限，请拆分批次安装。'), { code: 'PREPARE_BUDGET' });
+                    if (bytes > budget) throw Object.assign(new Error('本组安装包超过 256 MB 的准备缓存上限，请拆分批次安装。'), { code: 'PREPARE_BUDGET' });
                     const profiles = api.getLocalInstalledProfiles();
                     node.effectiveBoots = prepared.boots.map(boot => {
                         const profile = profiles.find(item => normalize(item.name) === normalize(boot.name));
@@ -1024,14 +1036,17 @@
             const plan = { nodes, roots, reachable, blocked, actions, bytes, downloaded: download, downloadApprovals,
                 approvedImpact: JSON.stringify([...approvedImpacts.values()].sort((a, b) => a[0].localeCompare(b[0]))) };
             if (isCurrent && !isCurrent()) throw Object.assign(new Error('安装预览已更新'), { code: 'INSTALL_CANCELLED' });
-            api.setBatchInstallPlan?.(plan);
+            api.setBatchInstallPlan?.(plan, { preserveOtherItems: preserveProgress });
             return plan;
         } catch (error) { nodes.forEach(releaseNode); throw error; }
+        finally { preparedCache.clear(); }
     }
 
     function releasePrepared(plan) {
         plan?.nodes.forEach(node => { window.modHubClearMarketPreparationProgress?.(node.mod.name); node.prepared = null; });
         for (const action of plan?.actions || []) action.prepared = null;
+        plan?.compatibilityChanges?.clear();
+        window.modHubCompatibility?.releaseCandidateData?.(plan?.compatibilityResult);
     }
 
     const actionBoots = action => action.effectiveBoots || action.prepared?.boots || (action.type === 'enable' && action.local ? [localBoot(action.local)] : []);
@@ -1491,15 +1506,178 @@
         });
     }
 
-    async function run(reviewed, updateOnly, restoreContext, languageAcknowledged = new Set()) {
+    function slicePlan(plan, roots) {
+        const keys = new Set([...roots].flatMap(key => [...(plan.reachable.get(key) || [key])]));
+        return { ...plan, roots, nodes: new Map([...plan.nodes].filter(([key]) => keys.has(key))),
+            reachable: new Map([...plan.reachable].filter(([key]) => roots.has(key))),
+            blocked: new Map([...plan.blocked].filter(([key]) => roots.has(key))),
+            actions: plan.actions.filter(action => keys.has(action.key)) };
+    }
+
+    function planFootprint(plan) {
+        const read = new Set(), write = new Set(), actions = new Set(plan.actions.map(action => action.key));
+        for (const node of plan.nodes.values()) {
+            const names = [`key:${node.key}`, ...(node.mod.bootNames || []).map(name => `boot:${normalize(name)}`),
+                ...[localBoot(node.local), ...(node.effectiveBoots || node.prepared?.boots || [])].filter(Boolean)
+                    .flatMap(boot => getDependencyBootNames(boot).map(name => `boot:${normalize(name)}`)),
+                ...(node.release?.assets || []).filter(asset => asset.bootName).map(asset => `boot:${normalize(asset.bootName)}`),
+                ...[node.switchGroup?.targetName, ...(node.switchGroup?.disabledNames || [])].filter(Boolean).map(name => `boot:${normalize(name)}`)];
+            names.forEach(name => { read.add(name); if (actions.has(node.key)) write.add(name); });
+        }
+        return { read, write };
+    }
+
+    const footprintsOverlap = (left, right) => [...left.write].some(name => right.read.has(name))
+        || [...right.write].some(name => left.read.has(name));
+
+    function reportInstallOutcome(outcome, deferred, restoreContext) {
+        const count = status => [...outcome.results.values()].filter(result => result.status === status).length;
+        window.modHubShowToast(`安装处理完成：成功 ${count('success')} 项，失败 ${count('failed')} 项，跳过 ${count('skipped')} 项${deferred ? `；暂未处理前置 ${deferred} 项` : ''}`, count('failed') || deferred ? 'warning' : 'info');
+        if (outcome.changed.size) window.modHubRegisterOperationReload(restoreContext, '所选模组及前置已处理，重新载入后生效。', { isFramework: [...outcome.changed].some(name => window.modHubIsFrameworkMod?.(name)) });
+    }
+
+    function createBatchDownloads(plan, restoreContext) {
+        const api = market(), entries = new Map(), failures = new Map(), consumed = new Set();
+        const actions = plan.actions.filter(action => action.release && action.type !== 'enable'
+            && plan.downloadApprovals.get(action.key) === downloadSignature(action.release));
+        const size = node => {
+            const assets = api.getReleaseInstallAssets(node.release);
+            return assets.length && assets.every(asset => Number(asset.size) > 0)
+                ? assets.reduce((sum, asset) => sum + Number(asset.size), 0) : 0;
+        };
+        let closed = false;
+        const cancelled = () => closed || stopped() || restoreContext?.cancelled;
+        const start = (node, limit) => {
+            const entry = { node, limit, signature: downloadSignature(node.release), prepared: null, failure: null };
+            entries.set(node.key, entry);
+            entry.promise = (async () => {
+                try {
+                    entry.prepared = await api.downloadAndInstallMod(node.mod, api.getCurrentMirrorId(), {
+                        releaseInfo: node.release, prepareOnly: true, batchMode: true, maxPreparedBytes: limit,
+                        onFailure: (reason, code, error) => { entry.failure = [reason, code, error]; }
+                    });
+                    if (entry.prepared) entry.limit = Number(entry.prepared.bytes) || 0;
+                } catch (error) { entry.failure = [error.message || '安装包下载失败', error.code, error]; }
+                if (!entry.prepared && !entry.failure) entry.failure = ['安装包预检失败'];
+                return entry;
+            })();
+            return entry;
+        };
+        const discard = async entry => {
+            await entry.promise;
+            if (entry.failure) failures.set(entry.node.key, entry);
+            entry.prepared = null; entries.delete(entry.node.key);
+            window.modHubClearMarketPreparationProgress?.(entry.node.mod.name);
+        };
+        return {
+            async take(node, available, onFailure) {
+                if (cancelled()) throw Object.assign(new Error('已停止后续下载'), { code: 'INSTALL_CANCELLED' });
+                const failure = failures.get(node.key);
+                failures.delete(node.key);
+                if (failure?.signature === downloadSignature(node.release)) {
+                    consumed.add(node.key); onFailure(...failure.failure); return false;
+                }
+                let entry = entries.get(node.key);
+                if (entry && entry.signature !== downloadSignature(node.release)) { await discard(entry); entry = null; }
+                let other = [...entries.values()].find(item => item !== entry);
+                // 大小未知时独占剩余预算；需要更多空间时先释放尚未使用的预取包。
+                if (other && (!size(node) || size(node) + other.limit > available)) { await discard(other); other = null; }
+                if (cancelled()) throw Object.assign(new Error('已停止后续下载'), { code: 'INSTALL_CANCELLED' });
+                const next = !other && size(node) ? actions.find(action => action.key !== node.key && !consumed.has(action.key)
+                    && !entries.has(action.key) && !failures.has(action.key) && size(action) > 0 && size(node) + size(action) <= available) : null;
+                if (!entry) entry = start(node, available - (other?.limit || (next ? size(next) : 0)));
+                if (next && !cancelled() && entry.limit + size(next) <= available) start(next, size(next));
+                await entry.promise;
+                entries.delete(node.key); consumed.add(node.key);
+                const prepared = entry.prepared; entry.prepared = null;
+                if (!prepared) onFailure(...(entry.failure || ['安装包预检失败']));
+                return prepared;
+            },
+            async close() {
+                closed = true;
+                await Promise.all([...entries.values()].map(discard));
+                failures.clear();
+            }
+        };
+    }
+
+    async function runIncrementally(reviewed, updateOnly, restoreContext, languageAcknowledged) {
+        const initialPlan = reviewed.initialPlan, pending = reviewed.selections.slice();
+        const results = new Map(), changed = new Set(), protectedNames = new Map();
+        const downloads = createBatchDownloads(initialPlan, restoreContext);
+        let handled = false, deferred = 0, previousPlan;
+        try {
+            while (pending.length && !stopped() && !restoreContext?.cancelled) {
+                const group = [pending.shift()];
+                let initial, footprint, expanded;
+                do {
+                    initial = slicePlan(initialPlan, new Set(group.map(selection => keyOf(selection.mod))));
+                    footprint = planFootprint(initial); expanded = false;
+                    for (let index = 0; index < pending.length; index++) {
+                        const candidate = slicePlan(initialPlan, new Set([keyOf(pending[index].mod)]));
+                        if (!footprintsOverlap(footprint, planFootprint(candidate))) continue;
+                        group.push(...pending.splice(index--, 1)); expanded = true;
+                    }
+                } while (expanded);
+                const execution = { group: true, protectedNames, previousPlan, downloads, shouldMerge: plan => pending.length && (
+                    [...plan.nodes.keys()].some(key => !initial.nodes.has(key))
+                    || footprintsOverlap(planFootprint(plan), planFootprint(slicePlan(initialPlan, new Set(pending.map(selection => keyOf(selection.mod))))))) };
+                if (!pending.length) execution.shouldMerge = null;
+                let outcome = await run({ ...reviewed, selections: group, initialPlan: initial, initialImpact: planImpact(initial) }, updateOnly, restoreContext, languageAcknowledged, execution);
+                if (outcome?.pendingPlan) {
+                    // 包体揭示了额外依赖时，先合并尚未处理的目标，避免提前写入旧前置。
+                    const prepared = outcome.pendingPlan;
+                    group.push(...pending.splice(0));
+                    initial = slicePlan(initialPlan, new Set(group.map(selection => keyOf(selection.mod))));
+                    const initialImpact = JSON.stringify([...new Map([...JSON.parse(planImpact(initial)), ...JSON.parse(prepared.approvedImpact)].map(impact => [impact[0], impact])).values()]);
+                    initial.nodes = new Map([...initial.nodes, ...[...prepared.nodes].filter(([key, node]) => node.release || !initial.nodes.has(key))]);
+                    initial.downloadApprovals = new Map([...initial.downloadApprovals, ...prepared.downloadApprovals]);
+                    const preparedCache = new Map([...prepared.nodes].filter(([, node]) => node.prepared)
+                        .map(([key, node]) => [key, { release: node.release, prepared: node.prepared }]));
+                    releasePrepared(prepared);
+                    execution.shouldMerge = null; execution.preparedCache = preparedCache;
+                    try {
+                        outcome = await run({ ...reviewed, acknowledged: outcome.acknowledged, selections: group, initialPlan: initial, initialImpact }, updateOnly, restoreContext, languageAcknowledged, execution);
+                    } finally { preparedCache.clear(); releasePrepared(prepared); }
+                }
+                if (outcome?.results) {
+                    previousPlan = outcome.plan;
+                    handled = true; deferred += outcome.deferred || 0;
+                    outcome.results.forEach((value, key) => results.set(key, value));
+                    outcome.changed.forEach(name => changed.add(name));
+                    for (const [key, result] of outcome.results) if (result.status === 'success' && outcome.plan.roots.has(key)) {
+                        for (const id of outcome.plan.reachable.get(key) || [key]) {
+                            const node = outcome.plan.nodes.get(id);
+                            if (node.skipped) continue;
+                            for (const boot of [localBoot(getLocal(node.mod)), ...(node.effectiveBoots || [])].filter(Boolean)) {
+                                for (const name of getDependencyBootNames(boot)) protectedNames.set(`boot:${normalize(name)}`, node.mod.name);
+                            }
+                        }
+                    }
+                } else for (const selection of group) results.set(keyOf(selection.mod), { status: execution.failureReason ? 'failed' : 'skipped', reason: execution.failureReason || '本次未完成安装' });
+                if (execution.cancelled) break;
+            }
+            await downloads.close();
+            for (const selection of pending) results.set(keyOf(selection.mod), { status: 'skipped', reason: '已停止，尚未安装' });
+            if (!handled) return false;
+            const outcome = { results, changed, changedMods: changed };
+            reportInstallOutcome(outcome, deferred, restoreContext);
+            return outcome;
+        } finally { await downloads.close(); }
+    }
+
+    async function run(reviewed, updateOnly, restoreContext, languageAcknowledged = new Set(), execution = {}) {
         const selections = reviewed?.selections || [];
+        if (!execution.group && selections.length > 1 && reviewed.initialPlan) return runIncrementally(reviewed, updateOnly, restoreContext, languageAcknowledged);
         let plan, initialPlan = reviewed?.initialPlan;
+        let keepPrepared = false;
         const initialImpact = reviewed?.initialImpact || initialPlan && planImpact(initialPlan);
         const acknowledged = new Set(reviewed?.acknowledged || []);
         try {
             if (!selections.length || !initialPlan || stopped()) return false;
             for (const selection of selections) if (!await confirmLanguageCoexistence(selection.mod, languageAcknowledged) || stopped()) return false;
             plan = initialPlan;
+            if (execution.previousPlan) await assertPlanCompatibility(execution.previousPlan);
             if (!plan.actions.length) { await showBlockedPlan(plan); return false; }
             await window.modHubLoadModManageState?.(true);
             for (const node of plan.nodes.values()) {
@@ -1507,9 +1685,15 @@
                     || Boolean(getLocal(node.mod) && isDisabled(getLocal(node.mod).name)) !== node.localDisabledSnapshot) throw new Error('本地模组或前置已改变，请重新生成安装计划。');
             }
             selections.forEach(({ mod }) => market().updateDownloadProgress?.(mod.name, null, '正在准备下载与包体核验，请稍候。', 'preparing'));
-            plan = await preparePlan(selections, updateOnly, { initialPlan, initialImpact, acknowledged });
+            plan = await preparePlan(selections, updateOnly, { initialPlan, initialImpact, acknowledged,
+                preparedCache: execution.preparedCache, preserveProgress: Boolean(execution.group), mergeOnNewDependencies: Boolean(execution.shouldMerge),
+                protectedNames: execution.protectedNames, downloads: execution.downloads });
+            if (execution.shouldMerge?.(plan)) { keepPrepared = true; return { pendingPlan: plan, acknowledged: [...acknowledged] }; }
             if (!plan.actions.length) { await showBlockedPlan(plan); return false; }
+            const protectedName = [...planFootprint(plan).write].find(name => execution.protectedNames?.has(name));
+            if (protectedName) throw new Error(`本次变更会替换或停用此前已完成项目使用的【${execution.protectedNames.get(protectedName)}】。为保留已完成项目，已停止处理当前组。请核对前置版本后重试。`);
             const actualRuntimes = runtimeChecks(plan);
+            if (execution.previousPlan) await assertPlanCompatibility(execution.previousPlan);
             await checkPlanCompatibility(plan);
             const checkDetailsHtml = `<details class="modhub-install-result-details"><summary>查看安装详情</summary>${planHtml(plan, actualRuntimes, { recorded: true })}</details>`;
             for (const key of plan.roots) market().setBatchInstallCompatibility?.(plan.nodes.get(key).mod.name, checkDetailsHtml);
@@ -1521,28 +1705,30 @@
                     trustedMessageHtml: renderPlanRisks(plan, newRisks) + planHtml(plan, actualRuntimes),
                     confirmText: newRisks.length ? '仍然安装' : '确认并安装', cancelText: '取消',
                     confirmType: newRisks.length ? 'danger' : 'primary', dialogClass: 'modhub-install-dialog modhub-version-dialog' });
-                if (!changed || stopped()) return false;
+                if (!changed || stopped()) { execution.cancelled = true; return false; }
                 newRisks.forEach(risk => acknowledged.add(risk.key));
             }
             await assertPlanCompatibility(plan);
             const outcome = await executePlan(plan, collected.approved, restoreContext, languageAcknowledged);
-            const success = [...outcome.results.values()].filter(result => result.status === 'success').length;
-            const failed = [...outcome.results.values()].filter(result => result.status === 'failed').length;
-            const skipped = [...outcome.results.values()].filter(result => result.status === 'skipped').length;
             for (const key of plan.roots) if (outcome.results.get(key)?.status === 'success') market().batchInstallState?.selected?.delete(key);
             market().renderMarketCards?.();
             const deferred = [...plan.nodes.values()].reduce((count, node) => count + (node.skipped ? 1 : 0) + (!node.issue ? node.unresolved.length : 0), 0);
-            window.modHubShowToast(`安装处理完成：成功 ${success} 项，失败 ${failed} 项，跳过 ${skipped} 项${deferred ? `；暂未处理前置 ${deferred} 项` : ''}`, failed || deferred ? 'warning' : 'info');
-            if (outcome.changed.size) window.modHubRegisterOperationReload(restoreContext, '所选模组及前置已处理，重新载入后生效。', { isFramework: [...outcome.changed].some(name => window.modHubIsFrameworkMod?.(name)) });
-            return { ...outcome, changedMods: outcome.changed };
+            if (!execution.group) reportInstallOutcome(outcome, deferred, restoreContext);
+            return { ...outcome, changedMods: outcome.changed, ...(execution.group ? { plan, deferred } : {}) };
         } catch (error) {
+            if (error.code === 'INSTALL_CANCELLED') execution.cancelled = true;
             if (error.code !== 'INSTALL_CANCELLED') {
-                market().failBatchInstallProgress?.(error.message || '安装准备失败');
+                execution.failureReason = error.message || '安装准备失败';
+                if (execution.group) {
+                    for (const node of (plan || initialPlan).nodes.values()) if ((plan || initialPlan).actions.some(action => action.key === node.key)) {
+                        market().setBatchInstallStatus?.(node.mod.name, 'error', error.message || '安装准备失败');
+                    }
+                } else market().failBatchInstallProgress?.(error.message || '安装准备失败');
                 await window.modHubAlert(error.message || '安装准备失败', '安装未完成');
             }
             return false;
         } finally {
-            releasePrepared(plan); if (initialPlan !== plan) releasePrepared(initialPlan);
+            if (!keepPrepared) { releasePrepared(plan); if (initialPlan !== plan) releasePrepared(initialPlan); }
             selections.forEach(({ mod }) => window.modHubClearMarketPreparationProgress?.(mod.name));
         }
     }
