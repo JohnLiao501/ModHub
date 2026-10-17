@@ -6841,7 +6841,7 @@
         }
     }
 
-    const MODHUB_MARKET_REFRESH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M20 7v5h-5M4 17v-5h5M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17"/></svg>';
+    const MODHUB_MARKET_REFRESH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.8L21 8M21 3v5h-5"/></svg>';
     const MODHUB_MARKET_TOOLS = [
         { id: 'modHubMarketBtnSubmit', label: '申请上架 / 推荐模组', action: () => openCommunitySubmission(currentMarketSection === 'spells' ? 'spell' : 'new') },
         { id: 'modHubMarketBtnMy', label: '我的投稿', action: () => openCommunitySubmission('my') },
@@ -6850,7 +6850,7 @@
 
     function readPinnedMarketTools() {
         try {
-            const stored = JSON.parse(localStorage.getItem('modhub_market_pinned_tools') || '[]');
+            const stored = JSON.parse(localStorage.getItem('modhub_market_pinned_tools') ?? '["modHubMarketBtnSubmit"]');
             return Array.isArray(stored) ? [...new Set(stored)].filter(id => MODHUB_MARKET_TOOLS.some(tool => tool.id === id)) : [];
         } catch (_) { return []; }
     }
@@ -7009,12 +7009,15 @@
                     <details id="modHubMarketMore" class="modhub-market-more">
                         <summary>更多</summary>
                         <div class="modhub-market-more-content">
+                            <div class="modhub-market-community-tools" role="group" aria-labelledby="modHubMarketCommunityTitle">
+                                <div id="modHubMarketCommunityTitle" class="modhub-market-group-title">投稿与反馈</div>
+                                ${MODHUB_MARKET_TOOLS.map(tool => `<div class="modhub-market-tool-row">${marketToolHtml(tool)}<button type="button" class="modhub-market-tool-pin" data-modhub-market-pin="${tool.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3M12 15v6"/></svg></button></div>`).join('')}
+                            </div>
                             <label id="modHubMarketMirrorField">下载线路
                                 <select id="modHubMirrorSelect" class="modhub-select" title="下载线路切换">
                                     ${MIRROR_SERVERS.map(m => `<option value="${m.id}" ${currentMirrorId === m.id ? 'selected' : ''}>${m.name}</option>`).join('')}
                                 </select>
                             </label>
-                            ${MODHUB_MARKET_TOOLS.map(tool => `<div class="modhub-market-tool-row">${marketToolHtml(tool)}<button type="button" class="modhub-market-tool-pin" data-modhub-market-pin="${tool.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3M12 15v6"/></svg></button></div>`).join('')}
                             <div id="modHubMarketSource" class="modhub-market-source grey" role="note">
                                 <span class="modhub-market-source-label">模组资料来源：</span>
                                 <span class="modhub-market-source-detail"><a href="https://degreesoflewditycn.miraheze.org/wiki/%E6%A8%A1%E7%BB%84%E5%88%97%E8%A1%A8" target="_blank" rel="noopener">DOL 中文社区 Wiki「模组列表」</a><span>及社区维护目录。</span></span>

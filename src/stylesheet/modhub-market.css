@@ -216,6 +216,18 @@
     min-width: 0;
 }
 
+.modhub-market-community-tools {
+    display: grid;
+    grid-column: 1 / -1;
+    gap: 8px;
+    min-width: 0;
+}
+
+.modhub-market-group-title {
+    color: var(--300, #aaa);
+    font-size: 0.85em;
+}
+
 .modhub-market-tool-row > [data-modhub-market-tool] {
     flex: 1 1 auto;
 }
@@ -302,6 +314,9 @@
     grid-column: 1 / -1;
     gap: 8px;
     margin: 0;
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid var(--700, #444);
     color: var(--300, #aaa);
     font-size: 0.85em;
 }
