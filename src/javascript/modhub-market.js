@@ -1814,6 +1814,9 @@
 
     // 已核对作者包内技术名；用于旧索引及身份服务不可用时的精确识别。
     const MODHUB_VERIFIED_MARKET_IDENTITIES = [
+        { id: 'character-romance-qol', name: '人物附加与生活质量提升', bootNames: ['人物附加与生活质量提升'],
+            aliases: ['人物恋爱扩展与生活质量提升'], repositories: ['DolMod-'],
+            repositoryKeys: ['doctor55555-55555/DolMod-'], category: '剧情与角色', tags: ['剧情', 'NPC', '恋爱'] },
         { id: 'midsummer-night-dream', name: '多恋人淫啪', bootNames: ['MidsummerNightDream'],
             aliases: ['仲夏夜之梦', 'Midsummer Night Dream'], repositories: ['MND-Hotel'],
             repositoryKeys: ['youmu1818/MND-Hotel'], category: '玩法与内容', tags: ['恋爱'], dependencies: [{ id: 'maplebirch' }] },
@@ -1832,7 +1835,7 @@
             && [item.name, ...item.bootNames, ...item.aliases, ...item.repositories].some(name => normalizeKey(name) === nameKey));
         if (!identity || (mod.identityId && mod.identityId !== identity.id)) return mod;
         // 保留索引条目 ID，历史查询仍须使用服务端实际存在的目录标识。
-        return { ...mod, identityId: identity.id, bootNames: [...identity.bootNames], aliases: [...identity.aliases],
+        return { ...mod, name: identity.name, identityId: identity.id, bootNames: [...identity.bootNames], aliases: [...identity.aliases],
             repositories: [...identity.repositories], repositoryKeys: [...identity.repositoryKeys],
             category: identity.category, tags: [...identity.tags],
             dependencies: normalizeDependencyList([...(identity.dependencies || []), ...(mod.dependencies || [])]) };

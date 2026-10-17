@@ -300,6 +300,28 @@
       ]
     },
     {
+      "id": "character-romance-qol",
+      "name": "人物附加与生活质量提升",
+      "bootNames": [
+        "人物附加与生活质量提升"
+      ],
+      "aliases": [
+        "人物恋爱扩展与生活质量提升"
+      ],
+      "repositories": [
+        "DolMod-"
+      ],
+      "repositoryKeys": [
+        "doctor55555-55555/DolMod-"
+      ],
+      "category": "剧情与角色",
+      "tags": [
+        "剧情",
+        "NPC",
+        "恋爱"
+      ]
+    },
+    {
       "id": "midsummer-night-dream",
       "name": "多恋人淫啪",
       "bootNames": [

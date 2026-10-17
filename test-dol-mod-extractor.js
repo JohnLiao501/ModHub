@@ -87,12 +87,21 @@ async function main() {
     { name: 'deadwood-reblooms-audio', githubUrl: 'https://github.com/MaplebirchLeaf/Deadwood-Reblooms' },
     { name: '多恋人淫啪', githubUrl: 'https://github.com/Another/MND-Hotel' },
     { name: '枯木逢春', githubUrl: 'https://github.com/Another/Deadwood-Reblooms' },
+    { name: '人物恋爱扩展与生活质量提升', githubUrl: 'https://github.com/doctor55555-55555/DolMod-' },
+    { name: '人物附加与生活质量提升', githubUrl: 'https://github.com/doctor55555-55555/DolMod-' },
+    { name: '人物恋爱扩展与生活质量提升', githubUrl: 'https://github.com/Another/DolMod-' },
+    { name: '人物恋爱扩展与生活质量提升扩展包', githubUrl: 'https://github.com/doctor55555-55555/DolMod-' },
   ], catalog);
   assert.deepEqual(knownPackages.map(mod => mod.identityId),
-    ['midsummer-night-dream', 'midsummer-night-dream', 'deadwood-reblooms', null, null, null, null],
+    ['midsummer-night-dream', 'midsummer-night-dream', 'deadwood-reblooms', null, null, null, null,
+      'character-romance-qol', 'character-romance-qol', null, null],
     '作者昵称须关联真实主包，音频扩展与其他作者仓库不能继承主包身份');
   assert.deepEqual(knownPackages[0].bootNames, ['MidsummerNightDream']);
   assert.deepEqual(knownPackages[2].bootNames, ['deadwood-reblooms'], '主包技术名必须排除音频扩展');
+  assert.deepEqual(knownPackages[7].bootNames, ['人物附加与生活质量提升'], '人物扩展的市场名须映射真实安装包技术名');
+  assert.deepEqual(knownPackages[8].bootNames, ['人物附加与生活质量提升'], '人物扩展的两种完整名称须保持同一身份');
+  assert.deepEqual(knownPackages.slice(7, 9).map(mod => mod.canonicalName), ['人物附加与生活质量提升', '人物附加与生活质量提升'],
+    '旧 Wiki 名称与作者名称须统一到作者的正式中文名称');
   assert.deepEqual(knownPackages[0].dependencies, [{ id: 'maplebirch', version: '' }]);
   assert.deepEqual(knownPackages[2].dependencies, [{ id: 'maplebirch', version: '' }]);
   const registeredIds = ['dol-mod-center', 'whitney-extra-mod', 'lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en',
