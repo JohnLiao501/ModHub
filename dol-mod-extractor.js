@@ -402,7 +402,7 @@ function parseDateCell(text) {
 
 // ==================== 解析模组列表（不请求 GitHub） ====================
 
-export function extractModsFromHtml(html) {
+export function extractModsFromHtml(html, catalog) {
   const doc = new DOMParser().parseFromString(html, 'text/html');
 
   const publicTables = getTablesInRange(doc, '公开模组', '私有模组');
@@ -425,7 +425,7 @@ export function extractModsFromHtml(html) {
       if (!tds.length) continue;
 
       const nameCell = tds[idx.name];
-      const title = globalThis.modHubWikiTitle.fromDom(nameCell);
+      const title = globalThis.modHubWikiTitle.fromDom(nameCell, { identities: catalog });
       const projects = title.status === 'resolved' && title.projects.length > 1 ? title.projects : [null];
       for (const project of projects) {
         const name = title.status === 'resolved' ? (project ? project.name : title.name) : '';
@@ -505,7 +505,7 @@ export async function fetchModListFromWiki() {
   const data = await res.json();
   if (!data.parse || !data.parse.text) throw new Error('Wiki API 返回数据格式异常');
 
-  return mergeModIdentities(extractModsFromHtml(data.parse.text['*']), identities);
+  return mergeModIdentities(extractModsFromHtml(data.parse.text['*'], identities), identities);
 }
 
 // ==================== 缓存 ====================

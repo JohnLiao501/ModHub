@@ -207,6 +207,26 @@
     return projects.map(({ candidate }) => ({ name: candidate.name, href: candidate.href, legacyName: clean(candidate.rawName) }));
   }
 
+  function registeredSplitTitle(candidates, urls, catalog) {
+    if (candidates.length < 2 || candidates.some(candidate => !candidate.plainText)) return '';
+    const identities = Array.isArray(catalog) ? catalog : catalog?.mods;
+    if (!Array.isArray(identities)) return '';
+    const repos = [...new Set(urls.map(githubSource).filter(Boolean).map(source => source.repoKey))];
+    if (!repos.length) return '';
+    const names = identity => [identity.name, ...(Array.isArray(identity.aliases) ? identity.aliases : []),
+      ...(Array.isArray(identity.bootNames) ? identity.bootNames : [])].filter(value => typeof value === 'string');
+    const titleKey = value => nameKey(value).replace(/\s+/g, '');
+    const sameSource = identities.filter(identity => identity && Array.isArray(identity.repositoryKeys)
+      && repos.every(repo => identity.repositoryKeys.some(key => typeof key === 'string' && key.toLowerCase() === repo)));
+    const joined = candidates.map(candidate => candidate.name).join('');
+    const matches = sameSource.filter(identity => names(identity).some(name => titleKey(name) === titleKey(joined)));
+    if (matches.length !== 1) return '';
+    // 登记的其他产品片段仍是独立候选，不能借同仓库和合并别名消除歧义。
+    if (candidates.some(candidate => sameSource.some(identity => identity !== matches[0]
+      && names(identity).some(name => titleKey(name) === titleKey(candidate.name))))) return '';
+    return clean(names(matches[0]).find(name => titleKey(name) === titleKey(joined)));
+  }
+
   function extract(input, options) {
     const tokens = Array.isArray(input) ? input : [];
     const result = { name: '', status: 'missing', projects: [], legacyName: legacyName(tokens), contacts: [] };
@@ -258,7 +278,8 @@
         }
       } else {
         const wholeLink = links.length === 1 && !plain && name === clean(links[0].text);
-        candidates.push({ name, rawName: wholeLink ? links[0].text : name, href: wholeLink ? links[0].href : '' });
+        candidates.push({ name, rawName: wholeLink ? links[0].text : name, href: wholeLink ? links[0].href : '',
+          plainText: links.length === 0 });
       }
     }
     const names = new Set(candidates.map(candidate => nameKey(candidate.name)));
@@ -267,6 +288,10 @@
       if (!uncertain) result.projects = independentProjects(candidates);
       // 已明确拆成独立项目时整体解析成功，但不虚构一个合并名称。
       if (result.projects.length > 1) result.status = 'resolved';
+      else if (!uncertain && !tokens.some(token => token?.type === 'break' && token.tag === 'hr')) {
+        result.name = registeredSplitTitle(candidates, githubUrls, options?.identities);
+        if (result.name) result.status = 'resolved';
+      }
     } else if (names.size === 1) {
       result.name = candidates[0].name;
       result.status = 'resolved';
@@ -275,7 +300,7 @@
     return result;
   }
 
-  function fromDom(cell) {
+  function fromDom(cell, options) {
     const tokens = [];
     function walk(node) {
       if (node?.nodeType === 3) {
@@ -286,7 +311,7 @@
       const tag = String(node.tagName || node.nodeName || '').toLowerCase();
       if (ignoredTags.includes(tag)) return;
       if (tag === 'br' || tag === 'hr') {
-        tokens.push({ type: 'break' });
+        tokens.push({ type: 'break', tag });
       } else if (tag === 'a') {
         tokens.push({ type: 'link', text: node.textContent || '', href: node.getAttribute?.('href') || '' });
       } else {
@@ -296,7 +321,7 @@
       }
     }
     for (const child of Array.from(cell?.childNodes || [])) walk(child);
-    return extract(tokens);
+    return extract(tokens, options);
   }
 
   const api = Object.freeze({ extract, fromDom, isUtilityName, isStatusName, normalizeStatusTitle, boundaryTags, ignoredTags });

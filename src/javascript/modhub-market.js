@@ -286,6 +286,8 @@
         '电视': ['Lethivia/DoL-mod-tv'],
         '自由对话态度': ['zbf0/Free-Speech-Attitudes']
     };
+    const MODHUB_OFFLINE_WIKI_IDENTITIES = [{ id: 'modhub', name: 'ModHub模组管理中心', bootNames: ['ModHub'],
+        aliases: [...MODHUB_KNOWN_MOD_MARKET_ALIASES.modhub], repositoryKeys: MODHUB_OFFLINE_REPOSITORIES.modhub }];
     for (const [name, repositoryKeys] of Object.entries(MODHUB_OFFLINE_REPOSITORIES)) {
         const normalizedKeys = repositoryKeys.map(key => key.toLowerCase());
         [name, ...(MODHUB_KNOWN_MOD_MARKET_ALIASES[name] || [])].forEach(alias => {
@@ -730,7 +732,8 @@
             if (!raw) return null;
             const parsed = JSON.parse(raw);
             if (Date.now() - parsed.timestamp > ttl && !allowExpired) return null;
-            return key === WIKI_CACHE_KEY && Array.isArray(parsed.data) ? normalizeWikiTitles(parsed.data) : parsed.data;
+            return key === WIKI_CACHE_KEY && Array.isArray(parsed.data)
+                ? normalizeWikiTitles(parsed.data, readLocalCache(IDENTITY_CACHE_KEY, ttl, true)) : parsed.data;
         } catch {
             return null;
         }
@@ -2111,7 +2114,7 @@
         return result;
     }
 
-    function parseModsFromHtml(html) {
+    function parseModsFromHtml(html, catalog = readLocalCache(IDENTITY_CACHE_KEY, WIKI_CACHE_TTL, true)) {
         if (!globalThis.modHubWikiTitle?.fromDom) throw new Error('Wiki 标题解析模块未加载');
         const doc = new DOMParser().parseFromString(html, 'text/html');
         const publicTables = getTablesInRange(doc, '公开模组', '私有模组');
@@ -2132,7 +2135,7 @@
                 if (!tds.length) continue;
 
                 const nameCell = tds[idx.name];
-                const title = globalThis.modHubWikiTitle.fromDom(nameCell);
+                const title = globalThis.modHubWikiTitle.fromDom(nameCell, { identities: getWikiTitleIdentities(catalog) });
                 if (title.status !== 'resolved') {
                     console.warn(`[ModHub] 跳过无法确定标题的 Wiki 条目（${title.status}）`, title.legacyName);
                     continue;
@@ -3260,7 +3263,16 @@
         return applied;
     }
 
-    function normalizeWikiTitles(mods) {
+    function getWikiTitleIdentities(catalog) {
+        const entries = Array.isArray(catalog) ? catalog : catalog?.mods;
+        const identities = (Array.isArray(entries) ? entries : [])
+            .filter(identity => identity && typeof identity === 'object' && identity.identityId !== null);
+        return [...identities, ...[...MODHUB_OFFLINE_WIKI_IDENTITIES, ...AU_MARKET_IDENTITIES, ...MODHUB_VERIFIED_MARKET_IDENTITIES]
+            .filter(identity => !identities.some(registered => registered.id === identity.id))];
+    }
+
+    function normalizeWikiTitles(mods, catalog = readLocalCache(IDENTITY_CACHE_KEY, WIKI_CACHE_TTL, true)) {
+        const identities = getWikiTitleIdentities(catalog);
         return mods.flatMap(mod => {
             if (!mod || typeof mod !== 'object') return [];
             if (mod.catalogSource === 'community' || mod.contentType === 'spell') return [mod];
@@ -3270,8 +3282,17 @@
                 const candidate = globalThis.modHubWikiTitle.normalizeStatusTitle(mod.wikiCandidateName, titleSources);
                 if (candidate) return [{ ...mod, name: candidate }];
             }
-            if (name && !globalThis.modHubWikiTitle.isUtilityName(name)
-                && mod.titleStatus !== 'ambiguous' && mod.titleStatus !== 'missing') return [mod];
+            if (name && !globalThis.modHubWikiTitle.isUtilityName(name)) {
+                if (mod.titleStatus !== 'ambiguous' && mod.titleStatus !== 'missing') return [mod];
+                const repoKey = extractRepoKey(mod.githubUrl);
+                const registeredName = mod.name && repoKey && identities.some(identity => (Array.isArray(identity.repositoryKeys) ? identity.repositoryKeys : [])
+                    .some(key => typeof key === 'string' && key.toLowerCase() === repoKey)
+                    && [identity.name, ...(Array.isArray(identity.aliases) ? identity.aliases : []),
+                        ...(Array.isArray(identity.bootNames) ? identity.bootNames : [])]
+                        .some(value => typeof value === 'string' && normalizeKey(value) === normalizeKey(name)));
+                // 只保留已有且同源登记的名称，不按仓库或条目 ID 生成标题或安装身份。
+                if (registeredName) return [mod];
+            }
             // 旧快照只允许采用已经保留的 Wiki 标题，不从仓库或旧链接标签猜名称。
             const wikiName = cleanText(mod.wikiName);
             return wikiName && !globalThis.modHubWikiTitle.isUtilityName(wikiName)
@@ -3285,7 +3306,7 @@
             throw new Error('自动版本索引格式异常');
         }
         rememberWithdrawals(index);
-        const titleMods = normalizeWikiTitles(index.mods);
+        const titleMods = normalizeWikiTitles(index.mods, index.identities);
         const activeMods = titleMods.filter(mod => mod.contentType !== 'spell' && mod.status !== 'withdrawn');
 
         // 客户端容错修正：若远程 release-index 仍包含未更新的旧身份映射，即时纠偏并拆分
@@ -5747,13 +5768,13 @@
         });
 
         try {
-            const [data] = await Promise.all([
+            const [data, catalog] = await Promise.all([
                 fetchMarketJson(`${WIKI_API}?${params.toString()}`, 'Wiki API'),
                 identityPromise
             ]);
             if (!data.parse || !data.parse.text) throw new Error('Wiki 数据格式解析异常');
 
-            marketModList = parseModsFromHtml(data.parse.text['*']).filter(mod => !isWithdrawn(mod));
+            marketModList = parseModsFromHtml(data.parse.text['*'], catalog).filter(mod => !isWithdrawn(mod));
             writeLocalCache(WIKI_CACHE_KEY, marketModList);
             renderBatchInstallToolbar();
             return marketModList;
