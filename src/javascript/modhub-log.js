@@ -459,7 +459,7 @@ window.modHubGetRawModLoaderLogs = function() {
 
         if (!isDuplicate) {
             result.push({
-                time: typeof err?.time === 'number' ? new Date(err.time).toLocaleTimeString('zh-CN', { hour12: false }) : err?.time || '',
+                time: typeof err?.time === 'number' ? new Date(err.time).toLocaleTimeString(window.modHubGetLanguage?.() || 'zh-CN', { hour12: false }) : err?.time || '',
                 level,
                 message: rawMsg,
                 isConsoleError: true
@@ -737,6 +737,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
                 </div>
             </div>
         `;
+        window.modHubLocalizeOwned?.(container);
         return;
     }
 
@@ -839,6 +840,7 @@ window.modHubRenderLogDiagnosis = function(analysis) {
     `;
 
     container.innerHTML = html;
+    window.modHubLocalizeOwned?.(container);
     container.onclick = event => {
         const helpButton = event.target?.closest?.('[data-log-help-first], [data-log-help-mod]');
         if (helpButton) {
@@ -865,6 +867,7 @@ window.modHubRenderStructuredLogs = function(container, lines) {
     if (!container) return;
     if (!lines || lines.length === 0) {
         container.innerHTML = '<div class="mod-empty grey">暂无加载日志内容</div>';
+        window.modHubLocalizeOwned?.(container);
         return;
     }
 
@@ -880,13 +883,14 @@ window.modHubRenderStructuredLogs = function(container, lines) {
             <div class="modhub-log-row ${levelClass}" ${rowId} data-level="${item.level}" data-line-index="${index}">
                 <span class="modhub-log-time grey">${window.modHubEscapeHtml(item.time || '')}</span>
                 <span class="modhub-log-badge ${badgeClass}">${badgeLabel}</span>
-                <span class="modhub-log-msg">${window.modHubEscapeHtml(item.message)}</span>
+                <span class="modhub-log-msg" data-modhub-no-translate>${window.modHubEscapeHtml(item.message)}</span>
             </div>
         `;
     });
     html += '</div>';
 
     container.innerHTML = html;
+    window.modHubLocalizeOwned?.(container);
 };
 
 // 按级别（警告/错误）快速跳转并高亮定位（支持多处循环跳转）
@@ -1050,6 +1054,7 @@ window.modHubSearchLoadLog = function(query) {
     if (!log) return;
     if (window._modHubLogOriginalHtml === undefined) window._modHubLogOriginalHtml = log.innerHTML;
     log.innerHTML = window._modHubLogOriginalHtml;
+    window.modHubApplyLanguage?.(log);
 
     const needle = String(query || '').trim();
     if (!needle) {
@@ -1185,6 +1190,7 @@ window.modHubInitLogTools = function() {
     if (filterWarnBtn) {
         filterWarnBtn.textContent = warningCount > 0 ? `仅警告 (${warningCount})` : '仅警告 (0)';
     }
+    [log, errorButton, warningButton, filterErrorBtn, filterWarnBtn].forEach(node => { if (node) window.modHubLocalizeOwned?.(node); });
 
     // 默认保持当前的筛选状态（若未设置则为全部）
     window.modHubSetLogLevelFilter(window._modHubCurrentLogLevelFilter || 'all');
@@ -1239,6 +1245,7 @@ window.modHubToggleLogFullscreen = function(forceState = null) {
         btn.classList.toggle('active', shouldBeFull);
         btn.classList.toggle('modhub-btn-primary', shouldBeFull);
         btn.classList.toggle('modhub-btn-secondary', !shouldBeFull);
+        window.modHubLocalizeOwned?.(btn);
     }
     if (typeof forceState !== 'boolean') {
         const isTouch = typeof window !== 'undefined' && ('ontouchstart' in window || (typeof navigator !== 'undefined' && navigator.maxTouchPoints > 0));
@@ -1388,7 +1395,9 @@ window.modHubCaptureLogScreenshot = async function() {
     const preparedRows = [];
     let totalBodyHeight = 0;
     const contentWidth = width - padding * 2;
-    const msgWidth = contentWidth - 145;
+    const badgeWidth = window.modHubGetLanguage?.() === 'en' ? 72 : 42;
+    const messageOffset = 126 + badgeWidth - 42;
+    const msgWidth = contentWidth - 145 - (badgeWidth - 42);
 
     for (const row of rows) {
         const level = row.dataset.level || (row.classList.contains('log-row-error') ? 'error' : (row.classList.contains('log-row-warn') ? 'warn' : 'info'));
@@ -1425,22 +1434,24 @@ window.modHubCaptureLogScreenshot = async function() {
 
     ctx.fillStyle = '#ffd700';
     ctx.font = 'bold 18px sans-serif';
-    ctx.fillText('Degrees of Lewdity 模组加载报错诊断报告', padding + 16, padding + 30);
+    ctx.fillText(window.modHubT?.('Degrees of Lewdity 模组加载报错诊断报告') || 'Degrees of Lewdity 模组加载报错诊断报告', padding + 16, padding + 30);
 
     ctx.fillStyle = '#aaa';
     ctx.font = '12px sans-serif';
-    const nowStr = new Date().toLocaleString();
-    const dolVer = window.StartConfig?.version || '未识别';
-    const mlVer = window.modHubGetGui?.()?.gModUtils?.version || '未识别';
-    ctx.fillText(`游戏版本: DoL ${dolVer}  |  ModLoader: ${mlVer}  |  生成时间: ${nowStr}`, padding + 16, padding + 54);
+    const nowStr = new Date().toLocaleString(window.modHubGetLanguage?.() || 'zh-CN');
+    const dolVer = window.StartConfig?.version || window.modHubT?.('未识别') || '未识别';
+    const mlVer = window.modHubGetGui?.()?.gModUtils?.version || window.modHubT?.('未识别') || '未识别';
+    ctx.fillText(window.modHubT?.(`游戏版本: DoL ${dolVer}  |  ModLoader: ${mlVer}  |  生成时间: ${nowStr}`) || `游戏版本: DoL ${dolVer}  |  ModLoader: ${mlVer}  |  生成时间: ${nowStr}`, padding + 16, padding + 54);
 
     ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = errCount > 0 ? '#ff5555' : '#888';
-    ctx.fillText(`错误总数: ${errCount}`, padding + 16, padding + 80);
+    ctx.fillText(window.modHubT?.(`错误总数: ${errCount}`) || `错误总数: ${errCount}`, padding + 16, padding + 80);
     ctx.fillStyle = warnCount > 0 ? '#ffd700' : '#888';
-    ctx.fillText(`警告总数: ${warnCount}`, padding + 150, padding + 80);
+    ctx.fillText(window.modHubT?.(`警告总数: ${warnCount}`) || `警告总数: ${warnCount}`, padding + 150, padding + 80);
     ctx.fillStyle = '#66bb6a';
-    ctx.fillText(`当前截取: ${preparedRows.length} / ${filteredRowCount} 条 (筛选：${activeFilter === 'error' ? '仅错误' : (activeFilter === 'warn' ? '仅警告' : (activeFilter === 'issues' ? '错误与警告' : '全部日志'))})`, padding + 280, padding + 80);
+    const filterLabel = activeFilter === 'error' ? '仅错误' : activeFilter === 'warn' ? '仅警告' : activeFilter === 'issues' ? '错误与警告' : '全部日志';
+    const displayFilter = window.modHubT?.(filterLabel) || filterLabel;
+    ctx.fillText(window.modHubT?.('当前截取: {shown} / {total} 条 (筛选：{filter})', { shown: preparedRows.length, total: filteredRowCount, filter: displayFilter }) || `当前截取: ${preparedRows.length} / ${filteredRowCount} 条 (筛选：${filterLabel})`, padding + 280, padding + 80);
 
     // 逐条绘制日志行
     let currentY = padding + headerHeight;
@@ -1482,16 +1493,16 @@ window.modHubCaptureLogScreenshot = async function() {
         ctx.fillText(item.time || '', rowX + 8, rowY + 18);
 
         ctx.fillStyle = badgeBg;
-        ctx.fillRect(rowX + 72, rowY + 5, 42, 18);
+        ctx.fillRect(rowX + 72, rowY + 5, badgeWidth, 18);
         ctx.fillStyle = badgeColor;
         ctx.font = 'bold 11px sans-serif';
-        ctx.fillText(badgeText, rowX + 76, rowY + 18);
+        ctx.fillText(window.modHubT?.(badgeText) || badgeText, rowX + 76, rowY + 18);
 
         ctx.font = '12px "Consolas", "Courier New", monospace';
         ctx.fillStyle = item.level === 'error' ? '#ffcccc' : (item.level === 'warn' ? '#fff3cd' : '#dddddd');
         let textY = rowY + 18;
         for (const line of item.msgLines) {
-            ctx.fillText(line, rowX + 126, textY);
+            ctx.fillText(line, rowX + messageOffset, textY);
             textY += lineHeight;
         }
 
@@ -1501,13 +1512,13 @@ window.modHubCaptureLogScreenshot = async function() {
     if (isTruncated) {
         ctx.fillStyle = '#888';
         ctx.font = 'italic 12px sans-serif';
-        ctx.fillText(`(仅截取前 ${maxRows} 条，已省略 ${filteredRowCount - maxRows} 条；请筛选「仅错误」或复制日志查看其余项)`, padding + 16, currentY + 18);
+        ctx.fillText((window.modHubT?.(`(仅截取前 ${maxRows} 条，已省略 ${filteredRowCount - maxRows} 条；请筛选「仅错误」或复制日志查看其余项)`) || `(仅截取前 ${maxRows} 条，已省略 ${filteredRowCount - maxRows} 条；请筛选「仅错误」或复制日志查看其余项)`), padding + 16, currentY + 18);
         currentY += 32;
     }
 
     ctx.fillStyle = '#555';
     ctx.font = '11px sans-serif';
-    ctx.fillText('由 ModHub 模组自动生成 · 支持直接在贴吧 / 交流群 Ctrl+V 粘贴', padding + 16, totalHeight - 14);
+    ctx.fillText((window.modHubT?.('由 ModHub 模组自动生成 · 支持直接在贴吧 / 交流群 Ctrl+V 粘贴') || '由 ModHub 模组自动生成 · 支持直接在贴吧 / 交流群 Ctrl+V 粘贴'), padding + 16, totalHeight - 14);
 
     if (typeof canvas.toBlob !== 'function') {
         window.modHubShowToast('当前浏览器不支持导出图片 Blob', 'warning');

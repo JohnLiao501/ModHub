@@ -1,7 +1,7 @@
 (function (root) {
   'use strict';
 
-  // Worker、目录提取器和浏览器回退只共享标题规则，不修改来源或安装身份。
+  // 共享 Wiki 标题解析及已核来源更正，不授予安装身份。
   const boundaryTags = Object.freeze(['br', 'hr', 'p', 'div', 'pre', 'li', 'ul', 'ol', 'dl', 'dt', 'dd',
     'section', 'article', 'header', 'footer', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']);
   const ignoredTags = Object.freeze(['script', 'style', 'noscript']);
@@ -290,6 +290,14 @@
       if (result.projects.length > 1) result.status = 'resolved';
       else if (!uncertain && !tokens.some(token => token?.type === 'break' && token.tag === 'hr')) {
         result.name = registeredSplitTitle(candidates, githubUrls, options?.identities);
+        // 仅恢复作者正式发布已确认的一条分行副标题，不拼接普通多候选。
+        if (!result.name && githubUrls.length === 1
+            && githubUrls[0] === 'https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-Traceability-ModSourceDisplay'
+            && result.legacyName === '可追溯性 -模组来源显示' && candidates.length === 2
+            && candidates.every(candidate => candidate.plainText)
+            && candidates[0].name === '可追溯性' && candidates[1].name === '-模组来源显示') {
+          result.name = '可追溯性-模组来源显示';
+        }
         if (result.name) result.status = 'resolved';
       }
     } else if (names.size === 1) {
@@ -324,7 +332,20 @@
     return extract(tokens, options);
   }
 
-  const api = Object.freeze({ extract, fromDom, isUtilityName, isStatusName, normalizeStatusTitle, boundaryTags, ignoredTags });
+  function normalizeSources(mod) {
+    const originalUrl = 'https://github.com/KonoLLo/DoL-Clothesicon';
+    const correctedUrl = 'https://github.com/KonoLLo/Litter-PC-Fix-Enhance';
+    // 只修正作者已证实的单条 Wiki 错链，不从共用仓库推断其他产品。
+    if (mod?.titleStatus !== 'resolved' || mod.name !== '小小PC修复增强'
+        || !/^KonoLLo(?: 原模组作者(?: .+)?)?$/.test(cleanLegacy(mod.author))
+        || mod.githubUrl !== originalUrl || !Array.isArray(mod.githubUrls)
+        || mod.githubUrls.length !== 1 || mod.githubUrls[0] !== originalUrl) return mod;
+    return { ...mod, githubUrl: correctedUrl, githubUrls: [correctedUrl],
+      wikiSourceCorrections: [...(Array.isArray(mod.wikiSourceCorrections) ? mod.wikiSourceCorrections : []),
+        { ruleId: 'little-pc-fix-enhance-wiki-source-v1', originalUrl, correctedUrl, evidenceUrl: correctedUrl }] };
+  }
+
+  const api = Object.freeze({ extract, fromDom, isUtilityName, isStatusName, normalizeStatusTitle, normalizeSources, boundaryTags, ignoredTags });
   root.modHubWikiTitle = api;
   if (typeof module === 'object' && module.exports) module.exports = api;
 })(typeof globalThis === 'object' ? globalThis : this);

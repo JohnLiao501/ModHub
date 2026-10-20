@@ -1,7 +1,11 @@
 {
   "name": "ModHub",
-  "version": "1.7.6",
-  "nickName": "模组管理器与市场套件",
+  "version": "1.8.0",
+  "nickName": {
+    "zh-CN": "模组管理器与市场套件",
+    "zh-TW": "模組管理器與市場套件",
+    "en": "Mod Manager and Market Suite"
+  },
   "description": "DoL 原生暗黑风格模组管理与市场套件",
   "styleFileList": [
     "stylesheet/modhub.css",
@@ -10,6 +14,11 @@
   ],
   "scriptFileList_inject_early": [
     "javascript/modhub-style.js",
+    "javascript/modhub-i18n.js",
+    "javascript/modhub-i18n-manager.js",
+    "javascript/modhub-i18n-market.js",
+    "javascript/modhub-i18n-help.js",
+    "javascript/modhub-i18n-tools.js",
     "javascript/modhub-dialog.js",
     "javascript/modhub-restore-panel.js",
     "javascript/modhub-restore.js"

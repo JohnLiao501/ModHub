@@ -21,6 +21,7 @@ const IDENTITY_FILE = './mod-identities.json';
 const CACHE_PREFIX = 'dol_mod_release_v2_';
 const CACHE_TTL = 6 * 60 * 60 * 1000; // 6 小时
 const MODHUB_RELEASE_API_BASE = 'https://dol.alseece.top';
+let modHubReleaseApiOrigin = MODHUB_RELEASE_API_BASE;
 
 // ==================== 通用工具 ====================
 
@@ -56,6 +57,22 @@ export function modHubNormalizeVariant(value) {
   if (!/^[a-z0-9][a-z0-9._-]*$/i.test(groupId) || !groupName || !label
       || !(value.type === 'language' ? /^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i : /^[a-z0-9][a-z0-9._-]*$/i).test(id)) return null;
   return { groupId, groupName, type: value.type, id, label };
+}
+
+/** 只接受显式声明的包语言，不从目录或显示译文推断。 */
+export function modHubNormalizePackageLanguages(value) {
+  if (!Array.isArray(value)) return [];
+  const result = [];
+  for (const item of value) {
+    if (typeof item !== 'string' || item.trim().length > 48) continue;
+    const locale = item.trim();
+    if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(locale)) continue;
+    try {
+      const normalized = Intl.getCanonicalLocales(locale)[0];
+      if (normalized && !result.includes(normalized)) result.push(normalized);
+    } catch (_) {}
+  }
+  return result;
 }
 
 /** 作者说明中的必需前置独立于包内元数据，使用加载器真实技术名。 */
@@ -142,10 +159,11 @@ export function modHubNormalizeReleaseTrackingSource(identity) {
 }
 
 export function modHubNormalizeReleaseProductMetadata(identity) {
+  const packageLanguages = modHubNormalizePackageLanguages(identity?.packageLanguages);
   const optionalResources = modHubNormalizeOptionalResources(identity?.optionalResources);
   const packageEditions = modHubNormalizePackageEditions(identity?.packageEditions);
   const releaseTrackingSourceUrl = modHubNormalizeReleaseTrackingSource(identity);
-  return { ...(optionalResources.length ? { optionalResources } : {}), ...(packageEditions.length ? { packageEditions } : {}),
+  return { ...(packageLanguages.length ? { packageLanguages } : {}), ...(optionalResources.length ? { optionalResources } : {}), ...(packageEditions.length ? { packageEditions } : {}),
     ...(releaseTrackingSourceUrl ? { releaseTrackingSourceUrl } : {}) };
 }
 
@@ -460,7 +478,7 @@ export function extractModsFromHtml(html, catalog) {
 
         const missing = [...coreMissing, ...secondaryMissing];
 
-        mods.push({
+        mods.push(globalThis.modHubWikiTitle.normalizeSources({
           name: name || null,
           wikiLegacyName: project ? (project.legacyName || project.name) : title.legacyName,
           titleStatus: title.status,
@@ -478,7 +496,7 @@ export function extractModsFromHtml(html, catalog) {
           tableDateRaw: dateText || null,
           status,
           missing,
-        });
+        }));
       }
     }
   }
@@ -548,8 +566,17 @@ export async function modHubFetchModReleases(mod, { page = 1, signal, identity }
   const id = mod?.id || mod?.identityId;
   if (!id || !Number.isSafeInteger(page) || page < 1) throw new Error('模组缺少目录身份或页码无效，请核对原始发布页');
   const params = new URLSearchParams({ id, page: String(page) });
-  const response = await fetch(`${MODHUB_RELEASE_API_BASE}/mod-releases?${params}`, { cache: 'no-cache', signal });
-  const payload = await response.json();
+  let response, payload;
+  for (const base of [MODHUB_RELEASE_API_BASE, 'https://dolmod-release-index.johnliao381658675.workers.dev']) {
+    try {
+      response = await fetch(`${base}/mod-releases?${params}`, { cache: 'no-cache', signal });
+      payload = await response.json();
+      modHubReleaseApiOrigin = base;
+      break;
+    } catch (error) {
+      if (signal?.aborted || error?.name === 'AbortError' || base !== MODHUB_RELEASE_API_BASE) throw error;
+    }
+  }
   if (!response.ok) {
     const messages = {
       RELEASE_UPSTREAM_TIMEOUT: 'GitHub 历史发布服务响应超时，请稍后重试',
@@ -654,7 +681,7 @@ export function modHubGetDownloadUrl(value) {
         && /^(www\.)?github\.com$/i.test(url.hostname)
         && /^\/[^/]+\/[^/]+\/releases\/download\/[^/]+\/[^/]+$/i.test(url.pathname)
         && modHubIsModPackageName(decodeURIComponent(url.pathname.split('/').pop()))) {
-      return `${MODHUB_RELEASE_API_BASE}/download?url=${encodeURIComponent(url.href)}`;
+      return `${modHubReleaseApiOrigin}/download?url=${encodeURIComponent(url.href)}`;
     }
   } catch { /* 不支持的入口仍由原来源提供 */ }
   return value;

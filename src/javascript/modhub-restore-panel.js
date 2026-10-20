@@ -10,10 +10,24 @@
         ['本轮首次操作前状态待启动验证', ['系统保护', '此还原点保留了本次模组调整前的状态。重新载入并成功进入游戏后，系统将自动解除此保护。']],
         ['未完成还原引用的状态', ['还原未完成', '此还原点正用于完成尚未结束的还原。还原完成后，系统将自动解除此保护。']],
     ]);
+    const localizedAttributes = new WeakMap();
+    function aria(node, text) {
+        localizedAttributes.set(node, text);
+        node.setAttribute('aria-label', window.modHubT?.(text) || text);
+    }
+    function dated(at) {
+        const node = element('span', window.modHubFormatDate?.(at, { hour12: false }) || new Date(at).toLocaleString('zh-CN', { hour12: false }), 'grey', undefined, true);
+        node.dataset.modhubDate = String(at);
+        return node;
+    }
 
-    function element(tag, text, className, id) {
+    function element(tag, text, className, id, raw = false) {
         const node = document.createElement(tag);
-        if (text !== undefined) node.textContent = text;
+        if (text !== undefined) {
+            if (!raw && window.modHubBindText) window.modHubBindText(node, text);
+            else node.textContent = text;
+        }
+        if (raw) node.setAttribute('data-modhub-no-translate', '');
         if (className) node.className = className;
         if (id) node.id = id;
         return node;
@@ -53,7 +67,7 @@
 .modhub-restore-point-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
 .modhub-restore-point-actions>button:only-child{grid-column:1/-1}
 .modhub-restore-history-actions{display:flex;justify-content:flex-end;border-top:1px solid var(--600,#666);padding-top:10px;margin-bottom:12px}
-.modhub-restore-panel .modhub-restore-point-actions button,.modhub-restore-panel .modhub-restore-history-actions button{white-space:nowrap!important;overflow-wrap:normal;min-height:36px}
+.modhub-restore-panel .modhub-restore-point-actions button,.modhub-restore-panel .modhub-restore-history-actions button{white-space:normal!important;overflow-wrap:anywhere;min-height:36px}
 .modhub-restore-panel .modhub-restore-point-actions button{padding-left:6px;padding-right:6px}
 .modhub-restore-panel .modhub-restore-history-actions button{background:transparent;color:var(--400,#aaa)}
 .modhub-restore-point-actions button:focus-visible,.modhub-restore-history-actions button:focus-visible{outline:2px solid var(--gold,#d6b365);outline-offset:2px}
@@ -74,16 +88,18 @@
 .modhub-restore-panel-status{display:flex;align-items:center;gap:8px;margin:8px 0 0;min-height:1.6em}
 .modhub-restore-panel-status>span:last-child{min-width:0}
 .modhub-restore-panel-status:empty{display:none}
-.modhub-restore-panel .modhub-progress-ring{display:inline-block;flex-shrink:0;width:18px;height:18px;vertical-align:middle;animation:modhub-restore-progress-spin 1s linear infinite!important}
-.modhub-restore-panel .modhub-progress-ring circle{fill:none;stroke:currentColor;stroke-width:3;stroke-linecap:round;animation:none!important}
-.modhub-restore-panel .modhub-progress-ring .modhub-progress-indeterminate{display:block!important;stroke-dasharray:64 18}
-.modhub-restore-panel .modhub-progress-ring .modhub-progress-track,.modhub-restore-panel .modhub-progress-ring .modhub-progress-value,.modhub-restore-panel .modhub-progress-ring .modhub-progress-frames{display:none!important}
+/* 公共样式不可用时保留同节奏 SVG 回退，字体就绪样式仍可接管。 */
+.modhub-restore-panel .modhub-progress-ring{display:inline-block;overflow:hidden;flex-shrink:0;width:18px;height:18px;vertical-align:middle;transform-origin:center;animation:modhub-restore-progress-rotate 2s linear infinite}
+.modhub-restore-panel .modhub-progress-ring circle{fill:none;stroke:currentColor;stroke-width:2.5;stroke-linecap:round}
+.modhub-restore-panel .modhub-progress-indeterminate{stroke-dasharray:1 82;animation:modhub-restore-progress-arc 2s ease-in-out infinite}
+.modhub-restore-panel .modhub-progress-track,.modhub-restore-panel .modhub-progress-value{display:none}
 .modhub-restore-panel .modhub-button-busy{display:inline-flex;align-items:center;justify-content:center;gap:6px}
 .modhub-restore-panel .modhub-button-busy-label{min-width:0;white-space:nowrap;overflow-wrap:normal}
 .modhub-restore-panel .modhub-button-busy-ring{display:inline-flex;flex-shrink:0}
 .modhub-restore-panel .modhub-button-busy-ring .modhub-progress-ring{width:14px;height:14px}
-@keyframes modhub-restore-progress-spin{to{transform:rotate(360deg)}}
-@media(prefers-reduced-motion:reduce){.modhub-restore-panel .modhub-progress-ring{animation:none!important}}
+@keyframes modhub-restore-progress-rotate{from{transform:rotate(-90deg)}to{transform:rotate(270deg)}}
+@keyframes modhub-restore-progress-arc{0%{stroke-dasharray:1 82;stroke-dashoffset:0}50%{stroke-dasharray:60 82;stroke-dashoffset:-8}100%{stroke-dasharray:1 82;stroke-dashoffset:-82}}
+@media(prefers-reduced-motion:reduce){.modhub-restore-panel .modhub-progress-ring,.modhub-restore-panel .modhub-progress-indeterminate{animation:none}.modhub-restore-panel .modhub-progress-indeterminate{stroke-dasharray:60 82;stroke-dashoffset:-8}}
 .modhub-restore-panel details{margin-bottom:14px}
 .modhub-restore-panel summary{cursor:pointer;min-height:32px}
 .modhub-restore-panel-points details{margin:0}
@@ -114,11 +130,14 @@
     }
 
     function appendDescription(container) {
-        description.split('\n').forEach((text, index) => {
+        const translate = value => window.modHubT?.(value) || value;
+        const highlights = new Map([...accents].map(([text, color]) => [translate(text), color]));
+        const pattern = new RegExp('(' + [...highlights.keys()].map(text => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|') + ')');
+        translate(description).split('\n').forEach((text, index) => {
             if (index) container.appendChild(document.createTextNode('\n'));
             const paragraph = element('p');
-            const parts = text.split(/(模组安装、启用状态、加载顺序与美化配置|游戏将重启|还原前会保存当前模组状态|任何更改都将丢失|还原不会影响ModHub和游戏存档)/);
-            for (const part of parts) paragraph.appendChild(element(accents.has(part) ? 'strong' : 'span', part, accents.get(part)));
+            const parts = text.split(pattern);
+            for (const part of parts) paragraph.appendChild(element(highlights.has(part) ? 'strong' : 'span', part, highlights.get(part), undefined, true));
             container.appendChild(paragraph);
         });
     }
@@ -127,6 +146,7 @@
         if (active) return active.promise;
         const api = window.modHubRestore;
         if (!api?.getPanelState) return Promise.resolve(window.modHubAlert?.('时间点还原引擎尚未就绪')).then(() => false);
+        window.modHubEnsureStyles?.({ active: true });
         styles();
         const previousFocus = document.activeElement;
         let resolve;
@@ -134,6 +154,9 @@
         active = { promise };
         const rescue = options.startup === true;
         let data = null, step = rescue ? 'points' : 'intro', selected = '', preview = null, dirty = false, working = false, scanReturn = 'points';
+        let languageBindings = [];
+        const translate = value => window.modHubT?.(value) || value;
+        const displayBinding = update => { languageBindings.push(update); update(); };
         const openDates = new Map();
         let renderedDates = new Map(), pointList = null, pointScroll = 0;
         const overlay = element('div', undefined, 'modhub-restore-panel-overlay', 'modHubRestorePanelOverlay');
@@ -145,13 +168,16 @@
         const header = element('header', undefined, 'modhub-restore-panel-header');
         const title = element('strong', '时间点还原', 'gold', 'modHubRestorePanelTitle');
         const close = element('button', '×', 'modhub-modal-close', 'modHubRestorePanelClose');
-        close.type = 'button'; close.setAttribute('aria-label', '关闭');
+        close.type = 'button'; aria(close, '关闭');
         const body = element('div', undefined, 'modhub-restore-panel-body', 'modHubRestorePanelBody');
         const footer = element('footer', undefined, 'modhub-restore-panel-footer');
         const back = element('button', '上一步', undefined, 'modHubRestorePanelBack');
         const next = element('button', '下一步', 'modhub-restore-primary', 'modHubRestorePanelNext');
         const cancel = element('button', rescue ? '继续等待或启动' : '取消', undefined, 'modHubRestorePanelCancel');
-        header.appendChild(title); header.appendChild(close);
+        header.appendChild(title);
+        const languageSelector = window.modHubCreateLanguageSelector?.();
+        if (languageSelector) header.appendChild(languageSelector);
+        header.appendChild(close);
         footer.appendChild(back); footer.appendChild(next); footer.appendChild(cancel);
         dialog.appendChild(header); dialog.appendChild(body); dialog.appendChild(footer); overlay.appendChild(dialog);
         mount(overlay, rescue);
@@ -160,12 +186,15 @@
         function message(text, error = false, busy = false) {
             if (!status) return;
             status.dataset.message = text;
-            status.textContent = text;
+            const recoverySuffix = '。恢复记录已保留，游戏加载保持暂停；重新打开游戏将继续恢复。';
+            const translateLines = value => value.split('\n').map(translate).join('\n');
+            const displayText = text.endsWith(recoverySuffix) ? translateLines(text.slice(0, -recoverySuffix.length)) + translate(recoverySuffix) : translateLines(text);
+            status.textContent = displayText;
             status.className = `modhub-restore-panel-status ${error ? 'red' : 'grey'}`;
             if (busy && window.modHubProgressRingHtml) {
                 status.textContent = '';
                 const ring = element('span'); ring.innerHTML = window.modHubProgressRingHtml();
-                status.appendChild(ring); status.appendChild(element('span', text));
+                status.appendChild(ring); status.appendChild(element('span', displayText, undefined, undefined, true));
             }
         }
 
@@ -180,14 +209,19 @@
 
         function sync() {
             body.inert = working;
+            dialog.setAttribute('aria-busy', String(working));
             close.disabled = cancel.disabled = working;
             back.disabled = working || step === 'intro' || rescue && step === 'points';
+            back.hidden = rescue && step === 'points';
             next.disabled = working || dirty || !data || step === 'changes' || (step !== 'intro' && !selectedPoint()) || (step === 'preview' && !preview?.canRestore);
             if (!working || busyButton !== next) next.textContent = step === 'preview' ? '开始还原' : '下一步';
             next.hidden = step === 'changes';
             back.textContent = step === 'changes' ? '返回' : '上一步';
             cancel.hidden = step === 'changes';
             cancel.textContent = rescue ? '继续等待或启动' : '取消';
+            [next, back, cancel].forEach(node => window.modHubBindText?.(node, node.textContent));
+            if (languageSelector) languageSelector.querySelectorAll('select').forEach(node => { node.disabled = working; });
+            window.modHubRefreshLanguageSelectors?.();
         }
 
         async function task(action, button = null, pending = '') {
@@ -214,6 +248,7 @@
         }
 
         function finish(result) {
+            window.removeEventListener?.('modhub:languagechange', languageChanged);
             document.removeEventListener('keydown', keyboard);
             document.removeEventListener('focusin', keepFocus);
             overlay.remove(); active = null;
@@ -232,6 +267,7 @@
         }
 
         function render() {
+            languageBindings = [];
             renderedDates.forEach((details, date) => openDates.set(date, details.open));
             renderedDates = new Map();
             if (pointList) pointScroll = pointList.scrollTop || 0;
@@ -240,6 +276,7 @@
             body.className = `modhub-restore-panel-body${step === 'intro' ? '' : ' modhub-restore-panel-body-list'}`;
             dialog.className = `modhub-restore-panel${step === 'intro' ? '' : ' modhub-restore-panel-list-step'}`;
             title.textContent = step === 'preview' ? '确认还原点与变更' : step === 'changes' ? '受影响的模组' : step === 'points' ? '选择还原点' : '时间点还原';
+            window.modHubBindText?.(title, title.textContent);
             if (options.reason) body.appendChild(element('p', options.reason, 'grey'));
             if (step === 'intro') {
                 const explanation = element('div', undefined, undefined, 'modHubRestoreDescription');
@@ -255,6 +292,8 @@
             status.setAttribute('aria-live', 'polite'); body.appendChild(status);
             if (working && pendingMessage) message(pendingMessage, false, !busyButton?.isConnected);
             sync(); (next.disabled ? close : next).focus();
+            window.modHubApplyLanguage?.(dialog);
+            window.modHubLocalizeOwned?.(dialog);
         }
 
         function renderSettings() {
@@ -279,9 +318,9 @@
             save.onclick = () => task(async () => { if (await api.saveConfig({ autoCreate: auto.checked, maxPoints: Number(limit.value) })) { await refresh(); message('还原设置已保存'); } }, save, '正在保存还原设置，请稍候。');
             actions.appendChild(save); actions.appendChild(undo); body.appendChild(actions);
             const manual = element('div', undefined, 'modhub-restore-panel-manual');
-            const name = element('input', undefined, undefined, 'modHubRestorePointName'); name.type = 'text'; name.maxLength = 80; name.value = '手动还原点'; name.setAttribute('aria-label', '手动还原点名称，最多 80 字');
+            const name = element('input', undefined, undefined, 'modHubRestorePointName'); name.type = 'text'; name.maxLength = 80; name.value = window.modHubT?.('手动还原点') || '手动还原点'; aria(name, '手动还原点名称，最多 80 字');
             const create = element('button', '创建还原点', undefined, 'modHubRestoreCreatePoint');
-            create.onclick = () => { if (dirty) { message('请先保存或撤销设置修改。', true); return; } return task(async () => { await api.createPoint(name.value.trim().slice(0, 80) || '手动还原点'); await refresh(); message('手动还原点已创建'); }, create, '正在创建还原点，请稍候。'); };
+            create.onclick = () => { if (dirty) { message('请先保存或撤销设置修改。', true); return; } return task(async () => { await api.createPoint(name.value.trim().slice(0, 80) || translate('手动还原点')); await refresh(); message('手动还原点已创建'); }, create, '正在创建还原点，请稍候。'); };
             manual.appendChild(name); manual.appendChild(create); body.appendChild(manual);
         }
 
@@ -292,7 +331,7 @@
             const list = element('div', undefined, 'modhub-restore-panel-points modhub-restore-panel-scroll', 'modHubRestorePointList');
             list.tabIndex = 0;
             list.setAttribute('role', 'region');
-            list.setAttribute('aria-label', '按日期分组的还原点列表，使用方向键滚动');
+            aria(list, '按日期分组的还原点列表，使用方向键滚动');
             const groups = new Map();
             const dateOf = point => { const date = new Date(point.at); return Number.isFinite(date.getTime()) ? `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()}` : '日期未知'; };
             data.points.forEach(point => { const date = dateOf(point); const group = groups.get(date) || []; group.push(point); groups.set(date, group); });
@@ -301,9 +340,14 @@
                 const details = element('details'); details.open = openDates.has(date) ? openDates.get(date) : index === 0 || points.some(point => point.id === (selected || data.recommendedId));
                 details.dataset.date = date;
                 const summary = element('summary', undefined, 'modhub-restore-panel-group-summary');
-                const label = `${date} · ${points.length}个还原点`;
-                summary.appendChild(element('span', label));
-                summary.setAttribute('aria-label', label);
+                const dateLabel = element('span', undefined, undefined, undefined, true);
+                summary.appendChild(dateLabel);
+                displayBinding(() => {
+                    const at = new Date(points[0].at);
+                    const displayDate = Number.isFinite(at.getTime()) ? at.toLocaleDateString(window.modHubGetLanguage?.() || 'zh-CN') : translate('日期未知');
+                    const label = window.modHubT?.('{date} · {count}个还原点', { date: displayDate, count: points.length }) || `${date} · ${points.length}个还原点`;
+                    dateLabel.textContent = label; summary.setAttribute('aria-label', label);
+                });
                 const update = () => summary.setAttribute('aria-expanded', String(details.open));
                 update(); details.ontoggle = () => {
                     update();
@@ -320,19 +364,25 @@
                 const label = element('label', undefined, `modhub-restore-panel-point${point.id === selected ? ' modhub-restore-panel-point-selected' : ''}`);
                 const radio = element('input', undefined, undefined, `modHubRestorePoint_${point.id}`); radio.type = 'radio'; radio.name = 'modHubRestoreSelectedPoint'; radio.value = point.id; radio.checked = point.id === selected;
                 const info = element('span', undefined, 'modhub-restore-panel-point-info');
-                info.appendChild(element('strong', point.label, point.id === selected ? 'gold' : undefined));
+                info.appendChild(element('strong', point.label, point.id === selected ? 'gold' : undefined, undefined, true));
                 const fields = element('span', undefined, 'modhub-restore-panel-point-fields');
-                [['创建时间', new Date(point.at).toLocaleString('zh-CN', { hour12: false })], ['类型', point.kind === 'manual' ? '手动创建' : point.kind === 'preRestore' ? '还原前状态' : '自动创建'], ['包含模组', `${point.modCount} 个`]].forEach(([name, value]) => {
+                [['创建时间', point.at], ['类型', point.kind === 'manual' ? '手动创建' : point.kind === 'preRestore' ? '还原前状态' : '自动创建'], ['包含模组', `${point.modCount} 个`]].forEach(([name, value]) => {
                     const field = element('span');
                     field.appendChild(element('small', name, 'modhub-restore-panel-field-name'));
-                    field.appendChild(element('span', value)); fields.appendChild(field);
+                    field.appendChild(name === '创建时间' ? dated(value) : element('span', value)); fields.appendChild(field);
                 });
                 info.appendChild(fields);
-                const summary = [['installed', '安装'], ['updated', '更新'], ['removed', '删除'], ['enabled', '启用'], ['disabled', '禁用']]
-                    .filter(([key]) => point.summary?.[key]?.length).map(([key, text]) => `${text}：${point.summary[key].join('、')}`);
-                if (point.summary?.beautyChanged) summary.push('美化配置调整');
-                if (point.summary?.orderChanged) summary.push('加载顺序调整');
-                if (summary.length) info.appendChild(element('small', `相关操作：${summary.join('；')}`, 'grey'));
+                if (point.summary) {
+                    const summary = element('small', undefined, 'grey', undefined, true);
+                    displayBinding(() => {
+                        const operations = [['installed', '安装'], ['updated', '更新'], ['removed', '删除'], ['enabled', '启用'], ['disabled', '禁用']]
+                            .filter(([key]) => point.summary[key]?.length).map(([key, text]) => `${translate(text)}：${point.summary[key].join('、')}`);
+                        if (point.summary.beautyChanged) operations.push(translate('美化配置调整'));
+                        if (point.summary.orderChanged) operations.push(translate('加载顺序调整'));
+                        summary.textContent = operations.length ? window.modHubT?.('相关操作：{operations}', { operations: operations.join('；') }) || `相关操作：${operations.join('；')}` : '';
+                    });
+                    info.appendChild(summary);
+                }
                 if (point.protected) (point.protectionReasons?.length ? point.protectionReasons : ['此还原点正在被系统使用，暂时无法删除。']).forEach(reason => {
                     const [heading, detail] = reason === '手动保护' && point.operation === 'remoteRepair'
                         ? ['远程协助保护', '此还原点保留了远程协助执行前的模组状态，不包含游戏存档。重新载入不会自动解除此保护。验证修改后，可使用“取消手动保护”解除此项保护。']
@@ -381,9 +431,9 @@
         function renderPreview() {
             const selection = element('p', undefined, 'modhub-restore-panel-selection', 'modHubRestorePreviewSelection');
             selection.appendChild(element('span', '所选还原点：', 'grey'));
-            selection.appendChild(element('strong', preview.label, 'gold'));
+            selection.appendChild(element('strong', preview.label, 'gold', undefined, true));
             const at = preview.at ?? data.points.find(point => point.id === selected)?.at;
-            if (at !== undefined) selection.appendChild(element('span', new Date(at).toLocaleString('zh-CN', { hour12: false }), 'grey'));
+            if (at !== undefined) selection.appendChild(dated(at));
             body.appendChild(selection);
             if (step === 'preview') {
                 const actions = element('div', undefined, 'modhub-restore-panel-actions');
@@ -391,8 +441,12 @@
             }
             const changes = preview.changes || {};
             const list = element('div', undefined, 'modhub-restore-panel-changes modhub-restore-panel-scroll', step === 'changes' ? 'modHubRestoreChangeList' : 'modHubRestoreSummaryList');
-            list.tabIndex = 0; list.setAttribute('role', 'region'); list.setAttribute('aria-label', step === 'changes' ? '还原变更与风险列表，使用方向键滚动' : '还原影响摘要与风险列表，使用方向键滚动');
-            if (!preview.canRestore) list.appendChild(element('p', preview.reason || '该还原点无法恢复，请选择其他还原点。', 'red'));
+            list.tabIndex = 0; list.setAttribute('role', 'region'); aria(list, step === 'changes' ? '还原变更与风险列表，使用方向键滚动' : '还原影响摘要与风险列表，使用方向键滚动');
+            if (!preview.canRestore) {
+                const reason = element('p', undefined, 'red', undefined, true);
+                displayBinding(() => { reason.textContent = (preview.reason || '该还原点无法恢复，请选择其他还原点。').split('\n').map(translate).join('\n'); });
+                list.appendChild(reason);
+            }
             let count = 0;
             [['installed', '恢复已删除模组', 'green'], ['updated', '回退包体', 'gold'], ['removed', '将移除的模组', 'red'], ['enabled', '恢复启用', 'green'], ['disabled', '恢复禁用', 'red']].forEach(([key, label, color]) => {
                 if (!changes[key]?.length) return;
@@ -401,12 +455,17 @@
                 group.appendChild(element('strong', `${label}：`, color));
                 const names = element('ul');
                 changes[key].forEach(name => {
-                    const item = element('li', name);
+                    const item = element('li');
+                    item.appendChild(element('span', name, undefined, undefined, true));
                     if (['installed', 'updated', 'removed'].includes(key)) {
                         const versions = preview.packageVersions?.[name];
-                        const current = versions?.current === null ? '未安装' : versions?.current || '未识别';
-                        const target = versions?.target === null ? '未安装' : versions?.target || '未识别';
-                        item.appendChild(element('small', `当前版本：${current}；还原后版本：${target}`, 'grey'));
+                        const versionText = element('small', undefined, 'grey', undefined, true);
+                        displayBinding(() => {
+                            const current = versions?.current === null ? translate('未安装') : versions?.current || translate('未识别');
+                            const target = versions?.target === null ? translate('未安装') : versions?.target || translate('未识别');
+                            versionText.textContent = window.modHubT?.('当前版本：{current}；还原后版本：{target}', { current, target }) || `当前版本：${current}；还原后版本：${target}`;
+                        });
+                        item.appendChild(versionText);
                     }
                     names.appendChild(item);
                 });
@@ -456,6 +515,21 @@
         }
         document.addEventListener('keydown', keyboard);
         document.addEventListener('focusin', keepFocus);
+        function languageChanged() {
+            window.modHubApplyLanguage?.(dialog);
+            const explanation = document.getElementById('modHubRestoreDescription');
+            if (explanation) { explanation.textContent = ''; appendDescription(explanation); }
+            dialog.querySelectorAll('[data-modhub-date]').forEach(node => {
+                node.textContent = window.modHubFormatDate?.(Number(node.dataset.modhubDate), { hour12: false }) || new Date(Number(node.dataset.modhubDate)).toLocaleString('zh-CN', { hour12: false });
+            });
+            [dialog, ...dialog.querySelectorAll('*')].forEach(node => {
+                const text = localizedAttributes.get(node);
+                if (text) node.setAttribute('aria-label', window.modHubT?.(text) || text);
+            });
+            languageBindings.forEach(update => update());
+            if (status?.dataset.message) message(status.dataset.message, status.className.includes('red'));
+        }
+        window.addEventListener?.('modhub:languagechange', languageChanged);
         status = element('p', '', 'modhub-restore-panel-status grey', 'modHubRestorePanelStatus'); status.setAttribute('aria-live', 'polite'); body.appendChild(status); sync();
         task(refresh, null, '正在读取还原点，请稍候。');
         return promise;

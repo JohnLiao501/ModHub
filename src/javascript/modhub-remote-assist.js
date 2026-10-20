@@ -1,6 +1,11 @@
 /** ModHub 匿名远程协助：后台收信，前台逐项预览确认。 */
 (function() {
     'use strict';
+    const ui = html => window.modHubTranslateHtml ? window.modHubTranslateHtml(html) : html;
+    const setText = (node, value) => {
+        if (window.modHubBindText) window.modHubBindText(node, String(value ?? ''));
+        else node.textContent = value;
+    };
     const MODHUB_ASSIST_ORIGIN = 'https://dol.alseece.top';
     const MODHUB_ASSIST_LIMIT = 1024 * 1024;
     const labels = { runJavaScript: '快速 JS 指令', collectDiagnostics: '收集诊断', readSources: '查看源码', applyConfiguration: '配置建议', applyPatch: '源码补丁（高级修复）' };
@@ -16,6 +21,8 @@
     const bytes = value => new TextEncoder().encode(value);
     const fail = value => { throw new Error(value); };
     const escape = value => window.modHubEscapeHtml(String(value ?? ''));
+    const displayName = (value, fallback = '未填写名称') => '<span' + (value ? ' data-modhub-i18n-ignore' : '') + '>' + escape(value || fallback) + '</span>';
+    const dateHtml = value => '<time data-modhub-assist-date="' + escape(new Date(value).getTime()) + '">' + escape(new Date(value).toLocaleString(window.modHubGetLanguage?.())) + '</time>';
     const engine = () => window.modHubRemoteProtocol;
     let state = null, storageKey = '', host = null, role = 'player', onBack = null;
     let timer = null, polling = false, working = false, revision = 0, failures = 0;
@@ -155,10 +162,10 @@
     async function act(action, destination = '.modhub-assist-notice') {
         if (working) return;
         const previousPreview = preview, previousOperation = operationPreview, previousDetail = detailMessage, actionHost = host;
-        working = true; noticeError = false;
+        working = true; noticeError = false; window.modHubRefreshLanguageSelectors?.();
         try { await action(); } catch (error) { report(error); }
         finally {
-            working = false; render(true);
+            working = false; window.modHubRefreshLanguageSelectors?.(); render(true);
             if (host === actionHost && visible()) {
                 if (destination === '.modhub-assist-tools') host.querySelector('.modhub-assist-tools details')?.setAttribute('open', '');
                 const target = noticeError ? '.modhub-assist-notice' : preview && preview !== previousPreview ? '#modHubAssistPlayerPreview'
@@ -494,7 +501,7 @@
     function previousGameBackups() {
         const entries = state?.history.filter(item => item.role === 'player').flatMap(item => item.entries || []).filter(entry => entry.backupId) || [];
         if (role !== 'player' || !entries.length) return '';
-        return '<details class="modhub-assist-secondary"><summary>以前协助的游戏备份</summary><p class="grey">保留最近十次会话的入口。备份仅在本机，下载后可从原生存档页导入。</p>' + entries.map(entry => '<p>' + escape(new Date(entry.at).toLocaleString()) + '</p>' + button('download-backup', '下载游戏备份', false, false, ' data-id="' + escape(entry.backupId) + '"')).join('') + '</details>';
+        return '<details class="modhub-assist-secondary"><summary>以前协助的游戏备份</summary><p class="grey">保留最近十次会话的入口。备份仅在本机，下载后可从原生存档页导入。</p>' + entries.map(entry => '<p>' + dateHtml(entry.at) + '</p>' + button('download-backup', '下载游戏备份', false, false, ' data-id="' + escape(entry.backupId) + '"')).join('') + '</details>';
     }
     function render(force = false) {
         if (!host || host.isConnected === false) return;
@@ -505,14 +512,14 @@
         if (blockedRole()) body = '<section class="modhub-assist-card"><h3>本机已有' + ((record?.role || pending.role) === 'helper' ? '提供协助' : '获取协助') + '记录</h3><p>请返回当前协助。结束连接或取消待连接记录后，才能更换角色。</p>' + button('current-role', '返回当前协助', true) + '</section>';
         else if (!record && role === 'helper') {
             const invite = pending?.invite, expired = invite && invite.expiresAt <= Date.now();
-            body = '<section class="modhub-assist-card"><h3>提供协助</h3>' + (invite ? '<p>名称：' + escape(invite.helper.displayName || '未填写名称') + '</p><p class="modhub-assist-invite">协助码 <strong id="modHubAssistInviteCode">' + escape(invite.code) + '</strong></p><p>' + (expired ? '协助码已过期，请重新生成。' : '等待对方核对名称并确认连接。剩余约 ' + Math.max(1, Math.ceil((invite.expiresAt - Date.now()) / 60000)) + ' 分钟，此码仅可建立一次连接。') + '</p><div class="modhub-help-actions">' + button('copy-code', '复制协助码', !expired, expired) + button('regenerate', '重新生成', expired) + button('cancel-invite', '取消待连接协助') + '</div>' : field('您的名称，可不填写', 'modHubAssistName', pending?.displayName || '', false, ' maxlength="80"') + '<p class="grey">名称供对方核对，由您自行填写，无需登录。</p>' + button(pending ? 'retry-create' : 'create-code', pending ? '重试生成协助码' : '生成协助码', true)) + '</section>';
+            body = '<section class="modhub-assist-card"><h3>提供协助</h3>' + (invite ? '<p>名称：' + displayName(invite.helper.displayName) + '</p><p class="modhub-assist-invite">协助码 <strong id="modHubAssistInviteCode">' + escape(invite.code) + '</strong></p><p>' + (expired ? '协助码已过期，请重新生成。' : '等待对方核对名称并确认连接。剩余约 ' + Math.max(1, Math.ceil((invite.expiresAt - Date.now()) / 60000)) + ' 分钟，此码仅可建立一次连接。') + '</p><div class="modhub-help-actions">' + button('copy-code', '复制协助码', !expired, expired) + button('regenerate', '重新生成', expired) + button('cancel-invite', '取消待连接协助') + '</div>' : field('您的名称，可不填写', 'modHubAssistName', pending?.displayName || '', false, ' maxlength="80"') + '<p class="grey">名称供对方核对，由您自行填写，无需登录。</p>' + button(pending ? 'retry-create' : 'create-code', pending ? '重试生成协助码' : '生成协助码', true)) + '</section>';
         } else if (!record) {
-            body = '<section class="modhub-assist-card"><h3>获取协助</h3>' + (pending ? '<p>上次连接结果尚未确认。可重试同一连接，不会重复建立记录。</p>' + button('retry-join', '重试连接', true) : lookup ? '<h4>核对协助者</h4><p>名称：<strong>' + escape(lookup.invite.helper.displayName || '未填写名称') + '</strong></p><p class="grey">名称不代表身份认证。确认连接不会自动分享诊断、源码或保存修改。</p>' + field('问题说明，可不填写', 'modHubAssistProblem', '', true, ' maxlength="4000"') + '<div class="modhub-help-actions">' + button('join', '确认连接', true) + button('change-code', '更换协助码') + '</div>' : '<p>请向协助者获取十位协助码，再核对名称并确认连接。</p>' + field('十位协助码', 'modHubAssistCode', '', false, ' inputmode="numeric" autocomplete="off" maxlength="10"') + button('lookup', '核对协助者', true)) + '</section>';
+            body = '<section class="modhub-assist-card"><h3>获取协助</h3>' + (pending ? '<p>上次连接结果尚未确认。可重试同一连接，不会重复建立记录。</p>' + button('retry-join', '重试连接', true) : lookup ? '<h4>核对协助者</h4><p>名称：<strong>' + displayName(lookup.invite.helper.displayName) + '</strong></p><p class="grey">名称不代表身份认证。确认连接不会自动分享诊断、源码或保存修改。</p>' + field('问题说明，可不填写', 'modHubAssistProblem', '', true, ' maxlength="4000"') + '<div class="modhub-help-actions">' + button('join', '确认连接', true) + button('change-code', '更换协助码') + '</div>' : '<p>请向协助者获取十位协助码，再核对名称并确认连接。</p>' + field('十位协助码', 'modHubAssistCode', '', false, ' inputmode="numeric" autocomplete="off" maxlength="10"') + button('lookup', '核对协助者', true)) + '</section>';
         } else {
             const summary = getSummary(), open = record.session.status !== 'closed', paused = record.session.status === 'paused';
-            const name = role === 'player' ? (record.session.helper.displayName || '未填写名称') : record.session.player?.displayName || '当前玩家';
+            const name = role === 'player' ? displayName(record.session.helper.displayName) : displayName(record.session.player?.displayName, '当前玩家');
             const command = pendingCommand();
-            body = '<div id="modHubAssistSessionHeader" class="modhub-assist-session-header"><div><strong>' + escape(name) + '</strong><p class="grey">' + (open ? paused ? '本机操作已暂停，消息仍可往返。' : '连接已建立。后台仅接收消息。' : '协助已结束，已保存的修改仍保留。') + '</p></div><div class="modhub-help-actions">' + (role === 'player' && open ? button(paused ? 'resume' : 'pause', paused ? '继续处理请求' : '暂停本机操作') : '') + (canPrepareSpell(record) && role === 'helper' ? button('prepare-spell', '整理候选言灵') : '') + (open ? button('close', '结束协助') : button('new-session', '开始新的协助', true)) + '</div></div>';
+            body = '<div id="modHubAssistSessionHeader" class="modhub-assist-session-header"><div><strong>' + name + '</strong><p class="grey">' + (open ? paused ? '本机操作已暂停，消息仍可往返。' : '连接已建立。后台仅接收消息。' : '协助已结束，已保存的修改仍保留。') + '</p></div><div class="modhub-help-actions">' + (role === 'player' && open ? button(paused ? 'resume' : 'pause', paused ? '继续处理请求' : '暂停本机操作') : '') + (canPrepareSpell(record) && role === 'helper' ? button('prepare-spell', '整理候选言灵') : '') + (open ? button('close', '结束协助') : button('new-session', '开始新的协助', true)) + '</div></div>';
             body += '<div id="modHubAssistPlayerTasks">';
             if (role === 'player') {
                 if (open) {
@@ -522,12 +529,12 @@
                 else if (command) body += '<section class="modhub-assist-task"><h3>待您确认：' + escape(labels[command.kind]) + '</h3><p>先在本机预览，确认后才分享资料、运行指令或保存修改。</p><div class="modhub-help-actions">' + button('preview', '在本机整理并预览', true, paused) + button('cancel-command', '拒绝此次操作') + '</div></section>';
                 }
                 const gameEntries = Object.values(record.entries).filter(entry => entry.kind === 'runJavaScript' && (entry.backupId || entry.localError));
-                if (gameEntries.length) body += '<section class="modhub-assist-verification"><h3>本机 JS 记录与备份</h3><p>游戏备份仅保存在本机，采用原生存档范围。需要恢复游戏时，下载后从游戏原生存档页导入；受保护时间点用于恢复旁加载模组和管理配置。两份备份均不能撤销脚本或网络副作用。</p>' + gameEntries.map(entry => '<p' + (entry.localError ? ' class="red"' : '') + '>' + escape(new Date(entry.at).toLocaleString()) + (entry.localError ? ' · ' + escape(entry.localError) + (entry.backupId ? '' : ' · 备份未完成核验，指令未运行。') : '') + '</p>' + (entry.pointId ? '<p class="grey">受保护时间点：' + escape(entry.pointId) + '</p>' : '') + (entry.backupId ? button('download-backup', '下载运行前备份', false, false, ' data-id="' + escape(entry.backupId) + '"') : '')).join('') + (gameEntries.some(entry => entry.pointId) ? button('restore', '查看受保护时间点') : '') + (open ? button('verify', '已验证，问题已解决') : '') + '</section>';
+                if (gameEntries.length) body += '<section class="modhub-assist-verification"><h3>本机 JS 记录与备份</h3><p>游戏备份仅保存在本机，采用原生存档范围。需要恢复游戏时，下载后从游戏原生存档页导入；受保护时间点用于恢复旁加载模组和管理配置。两份备份均不能撤销脚本或网络副作用。</p>' + gameEntries.map(entry => '<p' + (entry.localError ? ' class="red"' : '') + '>' + dateHtml(entry.at) + (entry.localError ? ' · ' + escape(entry.localError) + (entry.backupId ? '' : ' · 备份未完成核验，指令未运行。') : '') + '</p>' + (entry.pointId ? '<p class="grey">受保护时间点：' + escape(entry.pointId) + '</p>' : '') + (entry.backupId ? button('download-backup', '下载运行前备份', false, false, ' data-id="' + escape(entry.backupId) + '"') : '')).join('') + (gameEntries.some(entry => entry.pointId) ? button('restore', '查看受保护时间点') : '') + (open ? button('verify', '已验证，问题已解决') : '') + '</section>';
                 const localFailures = Object.values(record.entries).filter(entry => entry.kind !== 'runJavaScript' && entry.localError);
                 if (localFailures.length) body += '<section class="modhub-assist-verification" role="alert"><h3>本机操作未完成</h3>' + localFailures.map(entry => '<p class="red">' + escape(entry.localError) + '</p>' + (entry.pointId ? '<p class="grey">受保护时间点：' + escape(entry.pointId) + '</p>' : '')).join('') + (localFailures.some(entry => entry.pointId) ? button('restore', '查看受保护时间点') : '') + '</section>';
                 if (Object.values(record.entries).some(entry => entry.saved)) body += '<div class="modhub-assist-verification"><p>修改已保存。请保存游戏进度，重新载入并复现原问题。时间点还原不包含游戏存档。</p><div class="modhub-help-actions">' + button('reload', '重新载入验证') + button('restore', '查看时间点还原') + button('verify', '已验证，问题已解决') + '</div></div>';
             }
-            body += '</div><div class="modhub-assist-connected' + (role === 'player' ? ' modhub-assist-player' : '') + '"><section class="modhub-assist-chat"><h3>沟通记录</h3><p id="modHubAssistUnread" class="modhub-assist-hint">' + (summary.unread ? '新消息 ' + summary.unread + ' 条。' : '') + (summary.pending ? '待处理操作 ' + summary.pending + ' 项。' : '') + '</p>' + '<div id="modHubAssistReadLatest">' + (summary.unread && !atBottom ? button('read-latest', '查看新消息') : '') + '</div><div id="modHubAssistConversation" class="modhub-assist-conversation" tabindex="0" aria-label="沟通记录">' + (record.session.description ? '<article class="modhub-assist-system">问题说明：' + escape(record.session.description) + '</article>' : '') + (record.messages.length ? record.messages.map(item => '<article class="modhub-assist-message' + (item.sender === role ? ' modhub-assist-message-own' : '') + '"><small>' + (item.sender === role ? '您' : role === 'player' ? '协助者' : '对方') + '</small>' + (item.type === 'text' ? '<p>' + escape(item.text ?? '正在载入此前消息') + '</p>' : '<p>' + escape(labels[item.kind] || '操作') + ' · ' + escape(item.type === 'result' ? ({ sent: '资料已分享', saved: item.kind === 'runJavaScript' ? 'JS 同步运行结束，仍须验证' : '修改已保存，仍须重载验证', cancelled: '已拒绝', failed: '未完成', uncertain: '待核验' }[item.status] || item.status) : item.status === 'completed' ? '已有回传结果' : item.status === 'claimed' ? '执行中或待核验' : '等待对方确认') + '</p>' + button('view-message', '查看详情', false, false, ' data-id="' + escape(item.id) + '"')) + '</article>').join('') : '<p class="grey">连接后可先描述问题，再逐项处理请求。</p>') + '</div>' + (open ? field('发送文字消息', 'modHubAssistChat', record.chatDraft, true, ' maxlength="4000" rows="2"') + '<div class="modhub-help-actions">' + button('chat-send', '发送消息', false, !record.chatDraft?.trim()) + '</div>' : '') + (partial ? '' : resultView()) + '</section>' + (!partial && role === 'helper' && open ? editor() : '') + '</div>';
+            body += '</div><div class="modhub-assist-connected' + (role === 'player' ? ' modhub-assist-player' : '') + '"><section class="modhub-assist-chat"><h3>沟通记录</h3><p id="modHubAssistUnread" class="modhub-assist-hint">' + (summary.unread ? '新消息 ' + summary.unread + ' 条。' : '') + (summary.pending ? '待处理操作 ' + summary.pending + ' 项。' : '') + '</p>' + '<div id="modHubAssistReadLatest">' + (summary.unread && !atBottom ? button('read-latest', '查看新消息') : '') + '</div><div id="modHubAssistConversation" class="modhub-assist-conversation" tabindex="0" aria-label="沟通记录">' + (record.session.description ? '<article class="modhub-assist-system">问题说明：<span data-modhub-i18n-ignore>' + escape(record.session.description) + '</span>' + '</article>' : '') + (record.messages.length ? record.messages.map(item => '<article class="modhub-assist-message' + (item.sender === role ? ' modhub-assist-message-own' : '') + '"><small>' + (item.sender === role ? '您' : role === 'player' ? '协助者' : '对方') + '</small>' + (item.type === 'text' ? '<p data-modhub-i18n-ignore>' + escape(item.text ?? '正在载入此前消息') + '</p>' : '<p>' + escape(labels[item.kind] || '操作') + ' · ' + escape(item.type === 'result' ? ({ sent: '资料已分享', saved: item.kind === 'runJavaScript' ? 'JS 同步运行结束，仍须验证' : '修改已保存，仍须重载验证', cancelled: '已拒绝', failed: '未完成', uncertain: '待核验' }[item.status] || item.status) : item.status === 'completed' ? '已有回传结果' : item.status === 'claimed' ? '执行中或待核验' : '等待对方确认') + '</p>' + button('view-message', '查看详情', false, false, ' data-id="' + escape(item.id) + '"')) + '</article>').join('') : '<p class="grey">连接后可先描述问题，再逐项处理请求。</p>') + '</div>' + (open ? field('发送文字消息', 'modHubAssistChat', record.chatDraft, true, ' maxlength="4000" rows="2"') + '<div class="modhub-help-actions">' + button('chat-send', '发送消息', false, !record.chatDraft?.trim()) + '</div>' : '') + (partial ? '' : resultView()) + '</section>' + (!partial && role === 'helper' && open ? editor() : '') + '</div>';
         }
         const html = '<div class="modhub-assist"><header class="modhub-assist-header" tabindex="-1"><div><h2>远程协助</h2><p class="grey">' + (role === 'helper' ? '提供协助' : '获取协助') + ' · 文字沟通与逐项确认</p></div>' + button('back', '返回帮助中心') + '</header><p class="modhub-assist-notice' + (noticeError ? ' red' : '') + '" role="' + (noticeError ? 'alert' : 'status') + '" aria-live="' + (noticeError ? 'assertive' : 'polite') + '" tabindex="-1">' + escape(notice) + '</p>' + body + previousGameBackups() + '<details class="modhub-assist-secondary"><summary>使用范围与资料保留</summary><p>支持文字沟通、纯 JS 指令、诊断、所选源码及模组配置或补丁。JS 仅由玩家在前台确认后运行，备份不能撤销整页副作用；不支持屏幕共享或整机控制。每次分享资料、运行指令或保存修改均需本机预览确认。离开或重载后自动恢复收信，不自动处理操作。服务记录闲置七天到期，轮询不会延长保留时间。</p></details></div>';
         const ancestors = [];
@@ -536,7 +543,7 @@
         const chatTop = previousConversation?.scrollTop || 0;
         if (partial) {
             // 收信只更新消息与状态，保留输入法、草稿和完整资料的实际节点。
-            const next = document.createElement('div'); next.innerHTML = html;
+            const next = document.createElement('div'); next.innerHTML = ui(html);
             for (const selector of ['.modhub-assist-notice', '#modHubAssistSessionHeader', '#modHubAssistPlayerTasks', '#modHubAssistUnread', '#modHubAssistReadLatest', '#modHubAssistConversation']) {
                 const previous = host.querySelector(selector), updated = next.querySelector(selector);
                 if (previous && updated) {
@@ -553,7 +560,7 @@
             const scrolls = [...host.querySelectorAll('[id]')].map(element => [element.id, element.scrollTop, element.scrollLeft]);
             const expanded = [...host.querySelectorAll('details')].filter(element => !element.closest?.('#modHubAssistDetail')).map(element => [element.querySelector('summary')?.textContent, element.open]);
             const detail = renderedDetail === detailMessage?.id ? host.querySelector('#modHubAssistDetail') : null;
-            host.innerHTML = html;
+            host.innerHTML = ui(html);
             if (detail) host.querySelector('#modHubAssistDetail')?.replaceWith?.(detail);
             for (const [id, top, left] of scrolls) { const element = host.querySelector('#' + id); if (element) { element.scrollTop = top; element.scrollLeft = left; } }
             for (const element of host.querySelectorAll('details')) { const item = expanded.find(([title]) => title === element.querySelector('summary')?.textContent); if (item) element.open = item[1]; }
@@ -580,7 +587,7 @@
         else if (target.id === 'modHubAssistPaths') p.paths = target.value.split(/\r?\n/).map(value => value.trim()).filter(Boolean);
         else { const key = { modHubAssistModName: 'name', modHubAssistVersion: 'version', modHubAssistBaseline: 'baselineHash', modHubAssistSummary: 'summary', modHubAssistScript: 'script', modHubAssistEvidence: 'evidence', modHubAssistVerification: 'verification', modHubAssistIssueId: 'issueId' }[target.id]; if (key) { if (key === 'baselineHash' && !target.value.trim()) delete p[key]; else p[key] = target.value; } }
         operationPreview = ''; save(); const send = host.querySelector('[data-assist-action="send-operation"]'); if (send) send.disabled = true;
-        const previous = host.querySelector('#modHubAssistOperationPreview'); if (previous) previous.textContent = '内容已变更，请重新预览。';
+        const previous = host.querySelector('#modHubAssistOperationPreview'); if (previous) setText(previous, '内容已变更，请重新预览。');
     }
     function mount(nextHost, nextRole, back) {
         unmount(); role = nextRole === 'helper' ? 'helper' : 'player'; host = nextHost; onBack = back; notice = ''; noticeError = false; atBottom = true;
@@ -638,6 +645,12 @@
     }
     document.addEventListener('visibilitychange', () => { if (document.hidden) { preview = null; revision++; } else { markRead(); render(); } schedule(); });
     window.addEventListener('pagehide', () => { preview = null; revision++; clearTimeout(timer); timer = null; });
-    window.modHubRemoteAssist = { mount, unmount, start, getSummary };
+    window.addEventListener('modhub:languagechange', () => {
+        window.modHubLocalizeOwned?.(host);
+        host?.querySelectorAll('[data-modhub-assist-date]').forEach(node => {
+            node.textContent = new Date(Number(node.getAttribute('data-modhub-assist-date'))).toLocaleString(window.modHubGetLanguage?.());
+        });
+    });
+    window.modHubRemoteAssist = { mount, unmount, start, getSummary, isBusy: () => working };
     start();
 })();

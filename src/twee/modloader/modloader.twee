@@ -1,6 +1,7 @@
 :: modhub-manager [widget]
 <<widget "titleModloader">>
 	<<setupTabs _args[0]>>
+	<div class="modhub-overlay-nav">
 	<div id="overlayTabs" class="tab modhub-modloader-tabs">
 		<<closeButtonMobile>>
 		<<button "模组管理">>
@@ -25,7 +26,8 @@
 		<</button>>
 		<<run setTimeout(window.modHubInitOverlayTabs, 0)>>
 	</div>
-	<<closeButton>>
+		<button type="button" class="customOverlayClose" aria-label="关闭" data-modhub-i18n-aria-label="关闭" onclick="closeOverlay()"></button>
+	</div>
 <</widget>>
 
 <<widget "modloadergeneral">>

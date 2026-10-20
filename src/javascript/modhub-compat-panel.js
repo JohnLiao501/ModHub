@@ -1,6 +1,11 @@
 /** ModHub 兼容性检查面板：只展示本地检查结果，不修改模组配置。 */
 (function () {
     'use strict';
+    const ui = html => window.modHubTranslateHtml ? window.modHubTranslateHtml(html) : html;
+    const setText = (node, value) => {
+        if (window.modHubBindText) window.modHubBindText(node, String(value ?? ''));
+        else node.textContent = value;
+    };
     const api = window.modHubCompatibility || (window.modHubCompatibility = {});
     const escape = value => window.modHubEscapeHtml(String(value ?? ''));
     const detail = error => String(error?.message || error || '未提供具体原因');
@@ -111,7 +116,7 @@
             : snapshot?.different ? '模组配置已更改。以下日志来自更改前，请重新载入游戏后再检查。'
             : '以下内容来自本次运行日志。请结合异常出现的场景和作者说明排查。';
         const headlineColor = snapshot?.stale ? 'gold' : confirmed.length || related.length || runtimeProblem ? 'red' : '';
-        return '<div class="modhub-compat-report' + (compact ? ' modhub-compat-compact' : '') + '">'
+        return ui('<div class="modhub-compat-report' + (compact ? ' modhub-compat-compact' : '') + '">'
             + '<details class="modhub-compat-details"><summary class="modhub-compat-summary' + (headlineColor ? ' ' + headlineColor : '') + '"><strong class="modhub-conflict-heading ' + headlineColor + '">' + text(headline) + '</strong></summary>'
             + '<div class="modhub-compat-report-body">' + (summary ? '<p class="grey">' + text(summary) + '</p>' : '')
             + (confirmed.length ? '<section class="modhub-compat-section" data-compat-group="configuration"><div class="modhub-compat-group-heading"><strong>需要处理的问题</strong><span class="modhub-compat-count red">' + confirmed.length + ' 项</span></div>'
@@ -122,7 +127,7 @@
                 + '<div class="modhub-conflict-list"><p class="modhub-compat-context grey">' + text(runtimeSource) + '</p>' + rows(runtime, false) + '</div></details>' : '')
             + '<details class="modhub-compat-section" data-compat-group="coverage"><summary><span>检查说明</span><span class="modhub-compat-count grey">' + (coverage.length ? '有未确认内容' : '') + '</span></summary>'
             + '<div class="modhub-compat-coverage">' + (coverageHtml || '<p class="grey">已完成可读取内容的检查。</p>')
-            + '<p class="grey">已检查模组的前置要求和可读取的补丁内容。' + (projected ? '安装后请重新载入游戏。' : '如需帮助，可复制求助报告。') + '</p></div></details></div></details></div>';
+            + '<p class="grey">已检查模组的前置要求和可读取的补丁内容。' + (projected ? '安装后请重新载入游戏。' : '如需帮助，可复制求助报告。') + '</p></div></details></div></details></div>');
     }
 
     function show(snapshot) {
@@ -159,23 +164,23 @@
                     results.innerHTML = render(result);
                     previewButton.disabled = copyButton.disabled = Boolean(result.stale);
                     status.className = result.stale ? 'gold' : 'grey';
-                    status.textContent = result.stale ? '请重新检查。' : '';
+                    setText(status, result.stale ? '请重新检查。' : '');
                 };
                 const run = async () => {
                     if (state.controller) return;
                     const controller = new AbortController();
-                    state.controller = controller;
+                    state.controller = controller; window.modHubRefreshLanguageSelectors?.();
                     state.snapshot = null;
                     results.innerHTML = '';
                     report.hidden = true; reportText.value = '';
                     checkButton.disabled = previewButton.disabled = copyButton.disabled = true;
                     cancelButton.hidden = false;
                     status.className = 'grey';
-                    status.innerHTML = window.modHubLoadingHtml('正在检查已安装的模组组合，请稍候。');
+                    status.innerHTML = ui(window.modHubLoadingHtml('正在检查已安装的模组组合，请稍候。'));
                     try {
                         const result = await api.check({ signal: controller.signal, onProgress(progress) {
                             if (!open() || controller.signal.aborted) return;
-                            status.textContent = typeof progress === 'string' ? progress : progress?.message || '正在核对模组声明与本次日志，请稍候。';
+                            setText(status, typeof progress === 'string' ? progress : progress?.message || '正在核对模组声明与本次日志，请稍候。');
                         } });
                         if (!open() || controller.signal.aborted) return;
                         present(result);
@@ -183,10 +188,11 @@
                     } catch (error) {
                         if (!open()) return;
                         status.className = controller.signal.aborted || error?.name === 'AbortError' ? 'gold' : 'red';
-                        status.textContent = controller.signal.aborted || error?.name === 'AbortError'
-                            ? '已取消检查。模组配置未更改。' : '检查未完成。具体原因：' + detail(error);
+                        setText(status, controller.signal.aborted || error?.name === 'AbortError'
+                            ? '已取消检查。模组配置未更改。' : '检查未完成。具体原因：' + detail(error));
                     } finally {
                         if (state.controller === controller) state.controller = null;
+                        window.modHubRefreshLanguageSelectors?.();
                         if (open()) { checkButton.disabled = false; cancelButton.hidden = true; }
                     }
                 };
@@ -202,7 +208,7 @@
                         present(currentSnapshot);
                         report.hidden = true; reportText.value = '';
                         status.className = 'gold';
-                        status.textContent = '检查结果已过期。具体原因：' + detail(error) + ' 请重新检查后生成报告。';
+                        setText(status, '检查结果已过期。具体原因：' + detail(error) + ' 请重新检查后生成报告。');
                         return '';
                     }
                     if (typeof window.modHubHelp?.buildReport !== 'function') {
@@ -217,13 +223,13 @@
                 checkButton.onclick = run;
                 cancelButton.onclick = () => {
                     state.controller?.abort();
-                    status.className = 'gold'; status.textContent = '已取消检查。模组配置未更改。';
+                    status.className = 'gold'; setText(status, '已取消检查。模组配置未更改。');
                 };
                 previewButton.onclick = async () => { if (await buildReport()) reportText.focus?.(); };
                 copyButton.onclick = async () => {
                     const value = await buildReport();
                     if (value && typeof window.modHubHelp?.copyReport === 'function') await window.modHubHelp.copyReport(value);
-                    else if (value) { reportText.focus?.(); reportText.select?.(); status.textContent = '请在预览框中选择文本并手动复制。'; }
+                    else if (value) { reportText.focus?.(); reportText.select?.(); setText(status, '请在预览框中选择文本并手动复制。'); }
                 };
                 if (snapshot) present(snapshot);
                 else void run();
@@ -232,10 +238,11 @@
             state.closed = true;
             state.controller?.abort();
             if (active === state) active = null;
+            window.modHubRefreshLanguageSelectors?.();
             if (previousFocus?.isConnected !== false) previousFocus?.focus?.({ preventScroll: true });
         });
         return state.promise;
     }
 
-    Object.assign(api, { render, show });
+    Object.assign(api, { render, show, isBusy: () => Boolean(active?.controller) });
 })();

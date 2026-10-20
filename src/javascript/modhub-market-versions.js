@@ -155,7 +155,7 @@
         for (const key of keys) { try { localStorage.removeItem(key); } catch (_) {} }
     }
 
-    /** 中文主状态与原始诊断分开，兼容旧服务端和未知错误代码。 */
+    /** 主状态与原始诊断分开，保留任意语言的具体错误原因。 */
     function getHistoryErrorInfo(error) {
         const raw = typeof error?.message === 'string' ? error.message.trim() : '';
         const messages = {
@@ -175,7 +175,7 @@
             RELEASE_SOURCE_CHANGED: '历史发布来源已变化，请刷新市场后重试',
             RELEASE_RESPONSE_INVALID: '历史发布数据格式异常，请稍后重试'
         };
-        const message = /[\u3400-\u9fff]/.test(raw) ? raw : messages[error?.code]
+        const message = raw || messages[error?.code]
             || (error?.status === 429 ? '版本列表请求暂时受限，请稍后重试' : '版本列表读取失败，请稍后重试或查看作者主页');
         const details = [];
         if (typeof error?.code === 'string' && error.code) details.push(`错误代码：${error.code}`);
@@ -840,20 +840,27 @@
                 && window.modHubMarket.compareVersions(candidate.version, version, mod) > 0));
         if (new Set(candidates.map(candidate => candidate.seriesKey)).size <= 1) return candidates;
         const market = window.modHubMarket, source = getReleaseSource(normalizeSource(mod?.githubUrl));
-        if (!source
-            || candidates.some(candidate => !normalizeGameVersion(market.normalizeModVersion(mod, candidate.version))
-                || getReleaseSource(normalizeSource(candidate.assetUrl))?.key !== source.key)) return candidates;
+        if (!source || candidates.some(candidate => getReleaseSource(normalizeSource(candidate.assetUrl))?.key !== source.key)) return candidates;
         const scoped = Boolean(mod?.sharedRepository || mod?.releaseTrackingSourceUrl || window.modHubMarketVariants?.normalizeVariant?.(mod?.variant));
         const names = scoped ? mod.bootNames || [] : [...(mod.bootNames || []), ...(mod.aliases || []), ...(mod.repositories || []), mod.name, source.key.split('/')[1]];
         const identities = new Set(names.map(name => market.getAssetSeries(name)).filter(Boolean));
         candidates.filter(candidate => candidate.versionSource === 'verified-boot' && (mod.bootNames || []).includes(candidate.bootName))
             .forEach(candidate => identities.add(candidate.seriesKey));
         const identified = candidates.filter(candidate => identities.has(candidate.seriesKey));
-        if (!identified.length || scoped && identified.length !== candidates.length) return candidates;
+        if (!identified.length || identified.some(candidate => !normalizeGameVersion(market.normalizeModVersion(mod, candidate.version)))
+            || scoped && identified.length !== candidates.length) return candidates;
         const latest = latestUnambiguousCandidate(identified, mod);
-        const current = identified.filter(candidate => candidate.seriesKey === latest?.seriesKey);
-        if (!latest || candidates.some(candidate => !current.includes(candidate)
-                && market.compareVersions(candidate.version, latest.version, mod) >= 0)) return candidates;
+        if (!latest) return candidates;
+        const current = identified.filter(candidate => candidate.seriesKey === latest.seriesKey);
+        if (candidates.some(candidate => {
+            if (current.includes(candidate)) return false;
+            if (normalizeGameVersion(market.normalizeModVersion(mod, candidate.version))) {
+                return market.compareVersions(candidate.version, latest.version, mod) >= 0;
+            }
+            // 旧特殊版不参与数值比较；只有真实发布时间严格更早时才排除其自动选择干扰。
+            const published = candidatePublicationTime(candidate, true), latestPublished = candidatePublicationTime(latest, true);
+            return !Number.isFinite(published) || !Number.isFinite(latestPublished) || published >= latestPublished;
+        })) return candidates;
         return current;
     }
 
@@ -982,12 +989,13 @@
     }
 
     function renderCandidateOptions(candidates, recommendedKey = '') {
-        return [{ value: '', label: '请选择版本与安装包' }, ...candidates.map(candidate => {
+        const t = key => window.modHubT ? window.modHubT(key) : key;
+        return [{ value: '', label: t('请选择版本与安装包') }, ...candidates.map(candidate => {
             const recommended = candidate.candidateKey === recommendedKey;
             const status = getCandidateStatus(candidate);
-            const prefix = recommended ? (candidate.compatibility?.evidence === 'filename' ? '参考推荐：' : '推荐：') : '';
+            const prefix = recommended ? t(candidate.compatibility?.evidence === 'filename' ? '参考推荐：' : '推荐：') : '';
             return { value: candidate.candidateKey,
-                label: `${prefix}${candidate.version || candidate.tagName || '版本未知'} · ${status.label} · ${candidate.assetName || '安装包'}` };
+                label: `${prefix}${candidate.version || candidate.tagName || t('版本未知')} · ${t(status.label)} · ${candidate.assetName || t('安装包')}` };
         })];
     }
 

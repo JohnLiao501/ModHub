@@ -28,6 +28,11 @@
         "模组管理",
         "模组市场",
         "一键更新"
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "zh-TW",
+        "en"
       ]
     },
     {
@@ -49,7 +54,10 @@
       "repositoryKeys": [
         "3naka/DarksOuLs"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "combat-terminator",
@@ -68,6 +76,9 @@
       "category": "玩法与内容",
       "tags": [
         "战斗"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -92,7 +103,10 @@
       "repositoryKeys": [
         "3naka/DarkSoULs"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "auto-school",
@@ -140,6 +154,9 @@
         "综合优化",
         "园艺",
         "衣柜"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -178,6 +195,9 @@
         "料理",
         "物品",
         "剧情"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -200,6 +220,10 @@
         "AI",
         "剧情",
         "战斗"
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -221,6 +245,9 @@
       "tags": [
         "界面",
         "数值"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -234,6 +261,9 @@
       "category": "玩法与内容",
       "tags": [
         "料理"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -277,6 +307,9 @@
       "category": "剧情与角色",
       "tags": [
         "恋爱"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -297,6 +330,9 @@
       "category": "玩法与内容",
       "tags": [
         "农场"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -319,6 +355,9 @@
         "剧情",
         "NPC",
         "恋爱"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -345,6 +384,9 @@
         {
           "id": "maplebirch"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -380,6 +422,10 @@
           "assetSeries": "deadwood-reblooms-audio",
           "evidenceUrl": "https://github.com/MaplebirchLeaf/Deadwood-Reblooms/releases"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -425,6 +471,9 @@
           "size": 20078985,
           "sha256": "4844b53004a3ce799c7b1d217c97b6161c898f9003b6509d895dd1817328c0a4"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -467,6 +516,9 @@
           "size": 124940,
           "verifiedAt": "2026-10-14T06:46:54Z"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -490,6 +542,9 @@
       "tags": [
         "社交",
         "聊天"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -512,6 +567,9 @@
       "tags": [
         "地点",
         "玩法"
+      ],
+      "packageLanguages": [
+        "zh-TW"
       ]
     },
     {
@@ -532,6 +590,10 @@
       "category": "框架与前置",
       "tags": [
         "开发接口"
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -558,6 +620,10 @@
         {
           "id": "maplebirch"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -585,6 +651,9 @@
         {
           "id": "maplebirch"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -611,6 +680,10 @@
       "category": "框架与前置",
       "tags": [
         "开发接口"
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -640,6 +713,9 @@
           "gameVersionRange": "=0.5.12.13",
           "evidenceUrl": "https://github.com/koooooiCarp/DOL-BabyHawk-Mod/releases/tag/v1.8"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -686,6 +762,9 @@
         "任务",
         "界面",
         "攻略"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -708,6 +787,9 @@
       "tags": [
         "NPC",
         "恋爱"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -734,7 +816,10 @@
       "repositoryKeys": [
         "3naka/DarkSoULs"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "sydney-bare-study",
@@ -755,6 +840,9 @@
       "tags": [
         "NPC",
         "剧情"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -789,7 +877,11 @@
           "verifiedAt": "2026-10-14T07:39:54Z"
         }
       ],
-      "releaseTrackingSourceUrl": "https://github.com/Eudemonism00/DOL-NPC-Avatars-Mod/releases"
+      "releaseTrackingSourceUrl": "https://github.com/Eudemonism00/DOL-NPC-Avatars-Mod/releases",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ]
     },
     {
       "id": "woven-realm-cooking",
@@ -836,6 +928,9 @@
       "tags": [
         "NPC",
         "剧情"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -862,6 +957,9 @@
       "category": "界面与便利",
       "tags": [
         "翻译"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -898,7 +996,11 @@
         "剧情",
         "NPC"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ]
     },
     {
       "id": "dol-sims",
@@ -919,6 +1021,9 @@
       "tags": [
         "地点",
         "玩法"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -939,7 +1044,10 @@
         "规则",
         "对话"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "overfits-slots",
@@ -959,6 +1067,9 @@
         "服装",
         "装备",
         "界面"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -980,7 +1091,10 @@
         "背景",
         "模板"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "en"
+      ]
     },
     {
       "id": "eliminate-spaces",
@@ -999,6 +1113,9 @@
       "tags": [
         "文本",
         "显示"
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -1021,6 +1138,9 @@
         "地点",
         "宠物",
         "玩法"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1059,6 +1179,9 @@
           "size": 704260,
           "verifiedAt": "2026-10-14T12:18:24.852Z"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1080,6 +1203,9 @@
       "tags": [
         "物品",
         "互动"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1101,6 +1227,9 @@
       "tags": [
         "规则",
         "对话"
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -1120,7 +1249,10 @@
         "规则",
         "事件"
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "trauma-appearance",
@@ -1137,6 +1269,9 @@
       "tags": [
         "数值",
         "属性"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1149,6 +1284,9 @@
       "tags": [
         "农场",
         "商店"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1161,6 +1299,9 @@
       "tags": [
         "数值",
         "捕捉"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1179,6 +1320,9 @@
         {
           "id": "simple-framework"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1193,7 +1337,10 @@
         "MagicalAstrogy/AngelHalos"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "no-auto-rebuy-trash",
@@ -1208,7 +1355,10 @@
       ],
       "category": "界面与便利",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "time-hourglass",
@@ -1223,7 +1373,10 @@
       ],
       "category": "玩法与内容",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "cheat-extend-hsskyboy",
@@ -1237,7 +1390,10 @@
         "HSSkyBoy/DOL-CheatExtend"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "strange-garden",
@@ -1251,7 +1407,10 @@
         "chris81605/Degrees-of-Lewdity_strangeGarden"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-TW"
+      ]
     },
     {
       "id": "bailey-rent",
@@ -1265,7 +1424,10 @@
         "chris81605/Degrees-of-Lewdity_Bailey_rent_mod"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-TW"
+      ]
     },
     {
       "id": "remy-love",
@@ -1279,7 +1441,10 @@
         "chazi152/Remy_love_mod"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "longer-combat-emicoto",
@@ -1294,7 +1459,11 @@
       ],
       "category": "规则与数值",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ]
     },
     {
       "id": "candy-and-robot",
@@ -1331,6 +1500,10 @@
           "fileName": "i.Candy.and.Robot.ver2.4.5.1.fix.zip",
           "verifiedAt": "2026-10-14T07:39:54Z"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -1345,7 +1518,10 @@
         "Future-R/DOLMOD-FishingLife"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "lower-sky-box",
@@ -1360,7 +1536,10 @@
       ],
       "category": "外观与资源",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "love-locket-text",
@@ -1396,7 +1575,10 @@
         }
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "eden-fence-rescue",
@@ -1410,7 +1592,10 @@
         "MissedHeart/Degrees-of-Lewdity-Eden-Fence-Rescue-Fixed"
       ],
       "category": "修复与兼容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "universal-combat-beautification",
@@ -1424,7 +1609,10 @@
         "site098/mysterious"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "eden-after-sunset",
@@ -1438,7 +1626,10 @@
         "LooopSpiner/In-The-Eden-After-Sunset"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "eden-visuals",
@@ -1452,7 +1643,10 @@
         "LooopSpiner/Eden-Visuals-Mod"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "ui-bar-background",
@@ -1466,7 +1660,10 @@
         "LooopSpiner/DOL-UI-Bar-Background"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "bunny-transformation",
@@ -1480,7 +1677,10 @@
         "sylphiet/Bunny-TransformationCN"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "custom-spellbook",
@@ -1494,7 +1694,10 @@
         "ZeroRing233/DOL-Custom-Spellbook-Mod"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "combat-status-display",
@@ -1508,7 +1711,10 @@
         "DoL-Lyra/CombatStatusDisplay"
       ],
       "category": "界面与便利",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "cheat-lyra",
@@ -1522,7 +1728,10 @@
         "DoL-Lyra/Cheat"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "better-cheat-command-management",
@@ -1546,6 +1755,9 @@
           "size": 19447,
           "verifiedAt": "2026-10-14T12:18:21.985Z"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1560,7 +1772,10 @@
         "HiddenCirno/DoL-CustomHair"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "a-red-secret",
@@ -1574,7 +1789,10 @@
         "PrunusSerrulata/ARedSecret"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "bes-armcover-fix",
@@ -1588,7 +1806,10 @@
         "travellerse/BES-armcover-unofficial-fix"
       ],
       "category": "修复与兼容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "universal-combat-zed-fix",
@@ -1602,7 +1823,10 @@
         "Zed660033/mysterious"
       ],
       "category": "修复与兼容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "gwl-rollback",
@@ -1617,7 +1841,10 @@
       ],
       "category": "剧情与角色",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "no-anal-ride-neo",
@@ -1632,7 +1859,10 @@
       ],
       "category": "规则与数值",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "fallen-loop",
@@ -1647,7 +1877,10 @@
       ],
       "category": "规则与数值",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "kitchen-plus",
@@ -1661,7 +1894,10 @@
         "Lethivia/DoL-mod-kitchenplus"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "time-multi",
@@ -1675,7 +1911,10 @@
         "Lethivia/DoL-timemulti"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "guide-to-me",
@@ -1689,7 +1928,10 @@
         "Ayndpa/DOL-GuideToMe"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "chimera-blessing",
@@ -1703,7 +1945,10 @@
         "zbf0/Chimera-s-Blessing"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "wraith-reflection",
@@ -1717,7 +1962,10 @@
         "Water2311/WraithsReflection"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "nail-art",
@@ -1731,7 +1979,10 @@
         "chris81605/NailArt-Extension-"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-TW"
+      ]
     },
     {
       "id": "brand-new-spaces",
@@ -1745,7 +1996,10 @@
         "lingyu230514/-"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "ranch-story",
@@ -1759,7 +2013,10 @@
         "dawalizhang/-"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "inuno-image-pack",
@@ -1812,6 +2069,9 @@
           "gameVersionRange": "<0.5.8",
           "evidenceUrl": "https://github.com/inuno-233/DOL-inuno-image-pack/releases/tag/%E5%8E%9F%E7%89%88%E6%9C%8D%E8%A3%85"
         }
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -1826,7 +2086,10 @@
         "ANLINSTUDIO/Degrees-of-Lewdity-DolLitterPC"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "exhibitionism-expansion",
@@ -1840,7 +2103,10 @@
         "ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion"
       ],
       "category": "玩法与内容",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "neoui-patch",
@@ -1854,7 +2120,10 @@
         "RyaraSUKI/dol-neoui-patch"
       ],
       "category": "界面与便利",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zxx"
+      ]
     },
     {
       "id": "clothing-trait-compatibility",
@@ -1882,6 +2151,9 @@
           "fileName": "Clothing.Trait.Compatibility.zip",
           "verifiedAt": "2026-10-14T07:39:54Z"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -1910,6 +2182,9 @@
           "fileName": "LegacyHeadMaskCompat.0.5.10.12+.zip",
           "verifiedAt": "2026-10-14T07:39:54Z"
         }
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -1924,7 +2199,10 @@
         "aliya2333/Sena-s-Sydney-Dialogue-Events-Expansion"
       ],
       "category": "剧情与角色",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "longer-combat-maplebirch",
@@ -1981,7 +2259,10 @@
       ],
       "category": "规则与数值",
       "tags": [],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "cheat-extended-chris",
@@ -1995,7 +2276,11 @@
         "chris81605/Degrees-of-Lewdity_Cheat_Extended"
       ],
       "category": "规则与数值",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN",
+        "zh-TW"
+      ]
     },
     {
       "id": "special-pose-extension",
@@ -2009,7 +2294,10 @@
         "chris81605/Special-Pose-Extension-"
       ],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-TW"
+      ]
     },
     {
       "id": "au-beautification",
@@ -2052,6 +2340,9 @@
           "assetSeries": "AUandrogynous.model",
           "exclusive": false
         }
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -2072,7 +2363,10 @@
           "id": "au-beautification"
         }
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "au-facial-expansion",
@@ -2097,7 +2391,10 @@
           }
         }
       ],
-      "sharedRepository": true
+      "sharedRepository": true,
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "dol-mod-center",
@@ -2127,6 +2424,9 @@
           "size": 143845,
           "verifiedAt": "2026-10-04T04:13:23.138054+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2157,6 +2457,9 @@
           "size": 24096,
           "verifiedAt": "2026-10-04T04:23:52.160316+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2195,6 +2498,9 @@
           "size": 2485,
           "verifiedAt": "2026-10-04T04:23:53.442993+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2227,6 +2533,9 @@
           "size": 2126,
           "verifiedAt": "2026-10-04T04:23:53.575827+00:00"
         }
+      ],
+      "packageLanguages": [
+        "en"
       ]
     },
     {
@@ -2257,6 +2566,10 @@
           "size": 1730235,
           "verifiedAt": "2026-10-04T04:39:45.065740+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -2285,6 +2598,9 @@
           "size": 1575,
           "verifiedAt": "2026-10-04T04:39:46.309327+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -2313,6 +2629,9 @@
           "size": 46347,
           "verifiedAt": "2026-10-04T04:39:46.466708+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2341,6 +2660,10 @@
           "size": 3908689,
           "verifiedAt": "2026-10-04T05:47:58.829418+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
       ]
     },
     {
@@ -2369,6 +2692,9 @@
           "size": 1659326,
           "verifiedAt": "2026-10-04T05:47:58.830134+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -2398,7 +2724,10 @@
           "verifiedAt": "2026-10-04T06:03:18.544958+00:00"
         }
       ],
-      "releaseTrackingSourceUrl": "https://github.com/Eudemonism00/DOL-Eu-ArtMods/releases"
+      "releaseTrackingSourceUrl": "https://github.com/Eudemonism00/DOL-Eu-ArtMods/releases",
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "layering-fixes",
@@ -2420,6 +2749,9 @@
           "size": 729,
           "verifiedAt": "2026-10-04T06:22:55.767301+00:00"
         }
+      ],
+      "packageLanguages": [
+        "zxx"
       ]
     },
     {
@@ -2432,22 +2764,43 @@
       "repositories": [],
       "repositoryKeys": [],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ]
     },
     {
       "id": "ray-extra-clothes",
       "name": "RAY额外服装",
       "bootNames": [
-        "RAY额外服装"
+        "RAY额外服装",
+        "Ray额外服装"
       ],
       "aliases": [],
-      "repositories": [],
-      "repositoryKeys": [],
+      "repositories": [
+        "Ray-Art-Mod-Released"
+      ],
+      "repositoryKeys": [
+        "Ray-ray2345/Ray-Art-Mod-Released"
+      ],
       "category": "外观与资源",
       "tags": [],
       "dependencies": [
         {
           "id": "ray-beautification"
+        }
+      ],
+      "packageLanguages": [],
+      "sharedRepository": true,
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.extra.clothes.zip",
+          "sha256": "b3c579b3f25fe1b31490d7f7ad072f8887522918248ea2929b7b6d8df805dc57",
+          "bootName": "Ray额外服装",
+          "version": "1.5.3",
+          "size": 31388679,
+          "verifiedAt": "2026-10-19T11:43:41.816082+00:00"
         }
       ]
     },
@@ -2461,7 +2814,10 @@
       "repositories": [],
       "repositoryKeys": [],
       "category": "外观与资源",
-      "tags": []
+      "tags": [],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     },
     {
       "id": "fertility-expansion",
@@ -2534,6 +2890,9 @@
             }
           ]
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2557,6 +2916,9 @@
       "tags": [
         "存档",
         "便利"
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2609,6 +2971,9 @@
           "packageRole": "resource",
           "evidenceUrl": "https://github.com/102326/DoL-Game-UI/releases/tag/v2.6.0"
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
     },
     {
@@ -2663,7 +3028,99 @@
             }
           ]
         }
+      ],
+      "packageLanguages": [
+        "zh-CN"
       ]
+    },
+    {
+      "id": "degrees-immersion",
+      "name": "Degrees of Immersion",
+      "bootNames": [
+        "Degrees of Inmersion"
+      ],
+      "aliases": [],
+      "repositories": [
+        "Degrees-of-Inmersion"
+      ],
+      "repositoryKeys": [
+        "whelm027/Degrees-of-Inmersion"
+      ],
+      "category": "界面与便利",
+      "tags": [],
+      "packageLanguages": [
+        "en"
+      ],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/whelm027/Degrees-of-Inmersion/releases/download/1.2.2/DegreesImmersion-1.2.2.fixedfrfr.zip",
+          "sha256": "e83e6438371ad44eb9c2f0764da5c57f5973ab9a5d8573e41dc6c66bfd2c6eb3",
+          "bootName": "Degrees of Inmersion",
+          "version": "1.2.2",
+          "size": 31636,
+          "verifiedAt": "2026-10-19T12:18:43.004255+00:00"
+        }
+      ]
+    },
+    {
+      "id": "combat-ui-rework",
+      "name": "Combat UI Rework",
+      "bootNames": [
+        "DOL Combat UI Rework"
+      ],
+      "aliases": [],
+      "repositories": [
+        "D4Mods-Releases"
+      ],
+      "repositoryKeys": [
+        "LeafGithub/D4Mods-Releases"
+      ],
+      "category": "界面与便利",
+      "tags": [],
+      "packageLanguages": [
+        "en"
+      ],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/LeafGithub/D4Mods-Releases/releases/download/v20261004.100940-cc92637/dol-combat-ui-rework-mod.zip",
+          "sha256": "906f299658c9686a1c869cbf9856ed4ca9d986f6f2dec35ff922b5290a7921db",
+          "bootName": "DOL Combat UI Rework",
+          "version": "2.2.1",
+          "size": 53324,
+          "verifiedAt": "2026-10-19T12:18:43.004255+00:00"
+        }
+      ],
+      "sharedRepository": true
+    },
+    {
+      "id": "outfit-transfer",
+      "name": "Outfit Transfer",
+      "bootNames": [
+        "DOL Outfit Transfer"
+      ],
+      "aliases": [],
+      "repositories": [
+        "D4Mods-Releases"
+      ],
+      "repositoryKeys": [
+        "LeafGithub/D4Mods-Releases"
+      ],
+      "category": "界面与便利",
+      "tags": [],
+      "packageLanguages": [
+        "en"
+      ],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/LeafGithub/D4Mods-Releases/releases/download/v20261004.142506-bbdb652/dol-outfit-transfer-mod.zip",
+          "sha256": "1c765e86e6a02a6cc285bc6629ecf4e9233d0a921c7c105a7b6672b62d07438e",
+          "bootName": "DOL Outfit Transfer",
+          "version": "0.1.0",
+          "size": 29399,
+          "verifiedAt": "2026-10-19T12:18:43.004255+00:00"
+        }
+      ],
+      "sharedRepository": true
     }
   ]
 }

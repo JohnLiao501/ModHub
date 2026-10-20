@@ -155,7 +155,7 @@ async function main() {
     { name: 'Eu Clothing Addition', githubUrl: 'https://github.com/Eudemonism00/DOL-Eu-ArtMods' },
   ], catalog).map(mod => mod.identityId), [null, null, null, null, null, 'eu-clothing-addition'],
   '通用名称与共享仓库不能替代维护者指定的语言或项目身份');
-  assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-extra-clothes').bootNames, ['RAY额外服装']);
+  assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-extra-clothes').bootNames, ['RAY额外服装', 'Ray额外服装']);
   assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-beautification').bootNames, ['Ray美化']);
   const originalHistoryFetch = globalThis.fetch;
   try {
@@ -221,6 +221,63 @@ async function main() {
       assert.equal(error.details.message, 'API rate limit exceeded');
       return true;
     });
+    const primaryApi = 'https://dol.alseece.top';
+    const backupApi = 'https://dolmod-release-index.johnliao381658675.workers.dev';
+    const historyMod = { id: 'sample', githubUrl: sourceUrl };
+    const validHistory = { schemaVersion: 1, id: 'sample', sourceUrl, page: 1, hasMore: false, stale: false, releases: [] };
+    const packageUrl = `${sourceUrl}/releases/download/v1/Sample.mod.zip`;
+    for (const failure of ['html', 'network']) {
+      const calls = [];
+      globalThis.fetch = async url => {
+        calls.push(new URL(url).origin);
+        if (calls.length === 1) {
+          if (failure === 'network') throw new TypeError('Failed to fetch');
+          return new Response('<html>503 Service Unavailable</html>', { status: 503, headers: { 'Content-Type': 'text/html' } });
+        }
+        return Response.json(validHistory);
+      };
+      assert.deepEqual(await modHubFetchModReleases(historyMod), validHistory);
+      assert.deepEqual(calls, [primaryApi, backupApi], '网络失败或无法解析 JSON 时仅重试备用入口');
+      assert.equal(new URL(modHubGetDownloadUrl(packageUrl)).origin, backupApi, '成功通过备用查询后下载使用同一备用代理');
+      assert.equal(modHubGetDownloadUrl(`${packageUrl}?raw=1`), `${packageUrl}?raw=1`, '备用入口不能放宽 GitHub 附件校验');
+    }
+    const failedJsonCalls = [];
+    globalThis.fetch = async url => {
+      failedJsonCalls.push(new URL(url).origin);
+      return new Response('<html>Unavailable</html>', { status: 503 });
+    };
+    await assert.rejects(modHubFetchModReleases(historyMod), error => error.name === 'SyntaxError');
+    assert.deepEqual(failedJsonCalls, [primaryApi, backupApi]);
+    assert.equal(new URL(modHubGetDownloadUrl(packageUrl)).origin, backupApi, '两入口均未取得 JSON 时不改变已选下载代理');
+    const controller = new AbortController(), cancelledCalls = [];
+    controller.abort();
+    globalThis.fetch = async (url, options) => {
+      cancelledCalls.push(new URL(url).origin);
+      assert.equal(options.signal, controller.signal);
+      throw controller.signal.reason;
+    };
+    await assert.rejects(modHubFetchModReleases(historyMod, { signal: controller.signal }), error => error.name === 'AbortError');
+    assert.deepEqual(cancelledCalls, [primaryApi], '已取消请求不能尝试备用入口');
+    const businessCalls = [];
+    globalThis.fetch = async url => {
+      businessCalls.push(new URL(url).origin);
+      return Response.json({ code: 'RELEASE_RATE_LIMITED', error: 'API rate limit exceeded' }, { status: 429 });
+    };
+    await assert.rejects(modHubFetchModReleases(historyMod), error => error.code === 'RELEASE_RATE_LIMITED' && error.status === 429);
+    assert.deepEqual(businessCalls, [primaryApi], '有效 JSON 业务错误不能借备用入口重试');
+    const changedSourceCalls = [];
+    globalThis.fetch = async url => {
+      changedSourceCalls.push(new URL(url).origin);
+      return Response.json({ ...validHistory, sourceUrl: 'https://github.com/Other/Repo' });
+    };
+    await assert.rejects(modHubFetchModReleases(historyMod), error => error.code === 'RELEASE_SOURCE_CHANGED');
+    assert.deepEqual(changedSourceCalls, [primaryApi], '来源变化必须直接拒绝，不能借备用来源掩盖');
+    globalThis.fetch = async url => {
+      assert.equal(new URL(url).origin, primaryApi);
+      return Response.json(validHistory);
+    };
+    await modHubFetchModReleases(historyMod);
+    assert.equal(new URL(modHubGetDownloadUrl(packageUrl)).origin, primaryApi, '国内入口恢复并取得 JSON 后下载恢复同一入口');
   } finally { globalThis.fetch = originalHistoryFetch; }
   assert.ok(catalog.mods.every((mod) => !mod.repositories.length
     || (Array.isArray(mod.repositoryKeys) && mod.repositoryKeys.every((key) => /^[^/]+\/[^/]+$/.test(key)))),

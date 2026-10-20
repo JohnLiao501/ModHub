@@ -2,11 +2,18 @@
 (function () {
     'use strict';
 
+    const modHubHtml = html => window.modHubTranslateHtml ? window.modHubTranslateHtml(html) : html;
+    const modHubText = (node, value) => { if (window.modHubBindText && node?.setAttribute && node?.getAttribute) window.modHubBindText(node, String(value ?? '')); else node.textContent = window.modHubT ? window.modHubT(value) : value; return value; };
+
+
     const MODHUB_SPECIAL_DEPENDENCIES = new Set(['gameversion', 'modloader', 'sugarcube', 'dol', 'degrees of lewdity']);
     const market = () => window.modHubMarket;
     const versions = () => window.modHubMarketVersions;
     const rangeText = value => versions().formatVersionRange(value || '*');
     const escape = value => window.modHubEscapeHtml(String(value ?? ''));
+    const t = (key, params) => window.modHubT ? window.modHubT(key, params) : String(key ?? '').replace(/\{(\w+)\}/g, (match, name) => params?.[name] ?? match);
+    const label = (key, params) => `<span data-modhub-i18n-key="${escape(key)}"${params ? ` data-modhub-i18n-key-params="${escape(JSON.stringify(params))}"` : ''}>${escape(t(key, params))}</span>`;
+    const displayVariantLabel = value => window.modHubMarketVariants?.getLabelText?.(value) ?? value;
     const normalize = value => String(value || '').trim().toLowerCase();
     const keyOf = mod => market().getMarketModKey(mod);
     const stopped = () => Boolean(market().batchInstallState?.stopRequested);
@@ -16,10 +23,10 @@
         || (window._modHubModState?.sideMods || []).some(item => normalize(item.name) === normalize(name) && item.enabled === false);
 
     const historyFailure = error => versions().getHistoryErrorInfo?.(error) || {
-        message: /[\u3400-\u9fff]/.test(error?.message || '') ? error.message : '版本列表读取失败，请稍后重试或查看作者主页',
+        message: error?.message || '版本列表读取失败，请稍后重试或查看作者主页',
         details: error?.message ? [`原始错误：${error.message}`] : []
     };
-    const errorDetailsHtml = details => details?.length ? `<details class="modhub-version-error-details modhub-version-status grey"><summary>错误详情</summary><div>${details.map(escape).join('<br>')}</div></details>` : '';
+    const errorDetailsHtml = details => details?.length ? `<details class="modhub-version-error-details modhub-version-status grey"><summary>${label('错误详情')}</summary><div data-modhub-i18n-ignore>${details.map(escape).join('<br>')}</div></details>` : '';
     const sourceWarningsHtml = history => {
         const warnings = [...new Map((history?.sourceWarnings || []).map(warning => [warning.sourceUrl, warning])).values()];
         return warnings.length ? `<p class="gold">部分历史附件未通过核验，已从可安装列表排除；其他版本可继续选择。</p>${errorDetailsHtml(warnings.map(warning =>
@@ -50,17 +57,17 @@
             ?? Boolean(member.githubUrl && member.autoInstall !== false && !getLocal(member)));
         const choices = members.map(member => {
             const local = getLocal(member);
-            return { value: keyOf(member), label: `${member.variant?.label || member.name}${local
-                ? ` · 已安装 ${localBoot(local)?.version || '版本未知'}${isDisabled(local.name) ? ' · 已禁用' : ''}` : ' · 未安装'}`,
+            return { value: keyOf(member), label: `${displayVariantLabel(member.variant?.label || member.name)}${local
+                ? ` · ${t('已安装')} ${localBoot(local)?.version || t('版本未知')}${isDisabled(local.name) ? ` · ${t('已禁用')}` : ''}` : ` · ${t('未安装')}`}`,
             disabled: !eligible(member) };
         });
         const installed = members.filter(member => getLocal(member));
         const selected = await window.modHubConfirm({
-            title: `选择【${group.name}】${kind}`,
-            message: kind === '语言' ? `请先选择安装语言，再选择该语言的版本。${installed.length > 1 ? '\n已同时安装多种语言，请明确选择本次目标。' : ''}`
-                : `请选择要安装的版本，再选择版本号。${installed.length > 1 ? '\n已安装多个版本，请选择本次要更新的版本。' : ''}`,
-            selectOptions: [{ value: '', label: `请选择安装${kind}`, disabled: true }, ...choices], selectValue: '',
-            selectLabel: `安装${kind}`, requireSelection: true,
+            title: t('选择【{name}】{kind}', { name: group.name, kind: t(kind) }),
+            message: kind === '语言' ? t('请先选择安装语言，再选择该语言的版本。') + (installed.length > 1 ? `\n${t('已同时安装多种语言，请明确选择本次目标。')}` : '')
+                : t('请选择要安装的版本，再选择版本号。') + (installed.length > 1 ? `\n${t('已安装多个版本，请选择本次要更新的版本。')}` : ''),
+            selectOptions: [{ value: '', label: t(`请选择安装${kind}`), disabled: true }, ...choices], selectValue: '',
+            selectLabel: t(`安装${kind}`), requireSelection: true,
             canConfirm: dialog => choices.some(choice => !choice.disabled && choice.value === dialog?.querySelector('.modhub-modal-select')?.value),
             confirmText: `选择此${kind}的版本`, cancelText: '取消', dialogClass: 'modhub-install-dialog modhub-version-dialog'
         });
@@ -78,7 +85,9 @@
         const signature = JSON.stringify([keyOf(mod), others.map(({ member, local }) => [keyOf(member), bootSnapshot(localBoot(local))]).sort()]);
         if (acknowledged.has(signature)) return true;
         const ok = await window.modHubConfirm({ title: '确认保留其他语言包',
-            message: `本次目标：${mod.variant?.label || mod.name}（${mod.name}）。\n已安装其他语言：${others.map(({ member, local }) => `${member.variant?.label || member.name}（${localBoot(local)?.name || local.name} ${localBoot(local)?.version || '版本未知'}${isDisabled(local.name) ? '，已禁用' : ''}）`).join('、')}。\n\n继续将同时保留两份语言包，可能产生功能冲突。若要切换语言，请取消后前往模组管理移除旧语言包，再重新安装。`,
+            message: t('本次目标：{target}。\n已安装其他语言：{installed}。\n\n继续将同时保留两份语言包，可能产生功能冲突。若要切换语言，请取消后前往模组管理移除旧语言包，再重新安装。', {
+                target: `${displayVariantLabel(mod.variant?.label || mod.name)}（${mod.name}）`,
+                installed: others.map(({ member, local }) => `${displayVariantLabel(member.variant?.label || member.name)}（${localBoot(local)?.name || local.name} ${localBoot(local)?.version || t('版本未知')}${isDisabled(local.name) ? `，${t('已禁用')}` : ''}）`).join('、') }),
             confirmText: '保留旧语言包并继续', cancelText: '取消', dialogClass: 'modhub-install-dialog' });
         if (ok) acknowledged.add(signature);
         return Boolean(ok);
@@ -99,7 +108,7 @@
         const selected = await window.modHubConfirm({ title: `选择【${mod.name}】安装版本`,
             message: '请选择要安装的版本。' + (editions.every(edition => edition.exclusive) ? '选择其他版本后，原版本将停用，安装包会保留。' : ''),
             selectOptions: [{ value: '', label: '请选择安装版本', disabled: true }, ...editions.map(edition => ({ value: edition.id,
-                label: `${edition.label}${installed.some(item => item.edition.id === edition.id) ? ' · 已安装' : ''}` }))],
+                label: `${displayVariantLabel(edition.label)}${installed.some(item => item.edition.id === edition.id) ? ` · ${t('已安装')}` : ''}` }))],
             selectValue: inherited.length === 1 ? inherited[0] : '', selectLabel: '安装版本', requireSelection: true,
             canConfirm: dialog => editions.some(edition => edition.id === dialog?.querySelector('.modhub-modal-select')?.value),
             confirmText: '查看可用版本', cancelText: '取消', dialogClass: 'modhub-install-dialog modhub-version-dialog'
@@ -212,16 +221,16 @@
         assets: [...(candidate.assets || []), ...(candidate.optionalAssets || []).filter(asset => urls.has(asset.downloadUrl))],
         defaultReason: candidate.candidateKey === defaults.defaultKey ? defaults.defaultReason || '' : '',
         defaultRisk: candidate.candidateKey === defaults.defaultKey && Boolean(defaults.defaultRisk) });
-    const assetSizeText = asset => Number(asset?.size) ? asset.size < 104858 ? '小于 0.1 MB' : `${(asset.size / 1048576).toFixed(1)} MB` : '大小未知';
-    const roleText = asset => asset.label || ((asset.packageRole || market().getAssetRole?.(asset.name)) === 'audio' ? '音频扩展包' : asset.packageRole === 'resource' ? '附属资源包' : '主包');
-    const assetsHtml = (candidate, note = '') => candidate?.assets?.length ? `<details class="modhub-version-package-details" data-detail-key="packages:${escape(candidate.candidateKey || candidate.version || '')}"><summary>安装包${candidate.assets.length > 1 ? `（${candidate.assets.length} 个）` : ''}</summary>${note ? `<span class="modhub-version-description grey">${escape(note)}</span>` : ''}${candidate.assets.map(asset => `<span class="modhub-version-asset-name grey">${escape(asset.name)}<span class="modhub-version-meta">${escape(asset.version || candidate.version || '版本未知')} · ${assetSizeText(asset)}</span></span>`).join('')}</details>` : '';
+    const assetSizeText = asset => Number(asset?.size) ? asset.size < 104858 ? t('小于 0.1 MB') : `${(asset.size / 1048576).toFixed(1)} MB` : t('大小未知');
+    const roleText = asset => asset.label || t((asset.packageRole || market().getAssetRole?.(asset.name)) === 'audio' ? '音频扩展包' : asset.packageRole === 'resource' ? '附属资源包' : '主包');
+    const assetsHtml = (candidate, note = '') => candidate?.assets?.length ? `<details class="modhub-version-package-details" data-detail-key="packages:${escape(candidate.candidateKey || candidate.version || '')}"><summary>${label('安装包')}${candidate.assets.length > 1 ? ` (${label('{count} 个', { count: candidate.assets.length })})` : ''}</summary>${note ? `<span class="modhub-version-description grey">${escape(t(note))}</span>` : ''}${candidate.assets.map(asset => `<span class="modhub-version-asset-name grey"><span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${escape(asset.version || candidate.version || t('版本未知'))} · ${escape(assetSizeText(asset))}</span></span>`).join('')}</details>` : '';
     const optionalHtml = (candidate, selected, enabled, key) => (candidate?.optionalAssets || []).map(asset => {
         const installed = optionalInstalled(asset, candidate.version), local = componentLocal(asset);
-        return `<div class="modhub-version-optional"><label class="modhub-version-optional-label"><input type="checkbox" class="modhub-version-optional-input" data-key="${escape(key)}" data-url="${escape(asset.downloadUrl)}" ${selected.has(asset.downloadUrl) ? 'checked' : ''} ${!enabled ? 'disabled' : ''}><span><strong class="purple">${escape(roleText(asset))}${installed ? ' · 已安装' : ''}${local && isDisabled(local.name) ? ' · 保持禁用' : ''}</strong></span></label><details class="modhub-version-package-details" data-detail-key="optional:${escape(key)}:${escape(asset.downloadUrl)}"><summary>安装包详情</summary><span class="modhub-version-asset-name grey">${escape(asset.name)}</span><span class="modhub-version-meta grey">当前：${escape(local?.version || '未安装')} · 所选：${escape(asset.version || candidate.version || '版本未知')} · ${assetSizeText(asset)}</span></details></div>`;
+        return `<div class="modhub-version-optional"><label class="modhub-version-optional-label"><input type="checkbox" class="modhub-version-optional-input" data-key="${escape(key)}" data-url="${escape(asset.downloadUrl)}" ${selected.has(asset.downloadUrl) ? 'checked' : ''} ${!enabled ? 'disabled' : ''}><span><strong class="purple"><span data-modhub-i18n-ignore>${escape(roleText(asset))}</span>${installed ? ` · ${label('已安装')}` : ''}${local && isDisabled(local.name) ? ` · ${label('保持禁用')}` : ''}</strong></span></label><details class="modhub-version-package-details" data-detail-key="optional:${escape(key)}:${escape(asset.downloadUrl)}"><summary>${label('安装包详情')}</summary><span class="modhub-version-asset-name grey" data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta grey">${label('当前')}：${escape(local?.version || t('未安装'))} · ${label('所选')}：${escape(asset.version || candidate.version || t('版本未知'))} · ${escape(assetSizeText(asset))}</span></details></div>`;
     }).join('');
 
     function candidateLabel(candidate) {
-        return `${candidate.version || candidate.tagName || '版本未知'} · ${candidate.assetName || candidate.assets?.[0]?.name || '安装包'}`;
+        return `${candidate.version || candidate.tagName || t('版本未知')} · ${candidate.assetName || candidate.assets?.[0]?.name || t('安装包')}`;
     }
 
     function groupCandidates(candidates, gameVersion, recommendedKey = '') {
@@ -230,7 +239,7 @@
             const info = candidate.compatibility || {};
             const target = String(info.targetGameVersion || '').trim(), range = String(info.gameVersionRange || '').trim();
             const key = target ? `target:${target}` : range ? `range:${range}` : 'unknown';
-            const group = groups.get(key) || { key, label: target ? `DoL ${target}` : range ? `作者声明：DoL ${rangeText(range)}` : '适配待核对', candidates: [], preferred: false };
+            const group = groups.get(key) || { key, label: target ? `DoL ${target}` : range ? t('作者声明：DoL {range}', { range: t(rangeText(range)) }) : t('适配待核对'), candidates: [], preferred: false };
             group.candidates.push(candidate);
             group.preferred ||= candidate.candidateKey === recommendedKey || Boolean(gameVersion && (target
                 ? market().compareVersions(target, gameVersion) === 0 : range && info.status === 'compatible'));
@@ -243,7 +252,7 @@
         try {
             const parsed = new URL(url);
             return parsed.protocol === 'https:' && !parsed.username && !parsed.password
-                ? `<a href="${escape(parsed.toString())}" target="_blank" rel="noopener noreferrer">${escape(text)}</a>` : '';
+                ? `<a href="${escape(parsed.toString())}" target="_blank" rel="noopener noreferrer">${label(text)}</a>` : '';
         } catch (_) { return ''; }
     }
 
@@ -298,25 +307,25 @@
             return `<div class="modhub-version-option ${candidate.candidateKey === selectedKey ? 'modhub-version-selected' : ''}">
                 <input type="radio" name="modHubMarketVersion" aria-label="选择版本 ${escape(candidate.version || candidate.tagName)}" value="${escape(candidate.candidateKey)}" ${candidate.candidateKey === selectedKey ? 'checked' : ''}>
                 <span class="modhub-version-content"><span class="modhub-version-heading"><strong class="modhub-version-number gold">${escape(candidate.version || candidate.tagName || '版本未知')}</strong><span class="modhub-version-badge ${status.tone}">${escape(status.label)}</span>${matchesLocalVersion(candidate, localVersion) ? '<span class="modhub-version-badge gold">与已安装版本号相同</span>' : ''}</span>
-                    <span class="modhub-version-meta grey">${escape(candidate.updateDate || '发布日期未知')} · ${Number(candidate.assetSize) ? (candidate.assetSize < 104858 ? '小于 0.1 MB' : `${(candidate.assetSize / 1048576).toFixed(1)} MB`) : '包体大小未知'}</span>
-                    <span class="modhub-version-description">${escape(status.reason)}</span>
-                    ${candidate.candidateKey === selectedKey && candidate.candidateKey === defaults.defaultKey && defaults.defaultReason ? `<span class="modhub-version-description ${defaults.defaultRisk ? 'gold' : 'grey'}">${escape(defaults.defaultReason)}</span>` : ''}
+                    <span class="modhub-version-meta grey">${escape(candidate.updateDate || t('发布日期未知'))} · ${Number(candidate.assetSize) ? escape(assetSizeText({ size: candidate.assetSize })) : escape(t('包体大小未知'))}</span>
+                    <span class="modhub-version-description">${escape(t(status.reason))}</span>
+                    ${candidate.candidateKey === selectedKey && candidate.candidateKey === defaults.defaultKey && defaults.defaultReason ? `<span class="modhub-version-description ${defaults.defaultRisk ? 'gold' : 'grey'}">${escape(t(defaults.defaultReason))}</span>` : ''}
                     ${assetsHtml(candidate)}
                     ${optionalHtml(candidate, selectedOptional, candidate.candidateKey === selectedKey, candidate.candidateKey)}
                     ${sourceLink(candidate.htmlUrl, '发布说明')}
                 </span></div>`;
         };
-        const listHtml = () => `<div class="modhub-version-context"><strong class="gold">${escape(mod.name)}</strong><span class="grey">当前游戏版本：<strong class="gold">${gameVersion ? `DoL ${escape(gameVersion)}` : '未识别'}</strong></span><span class="grey">当前已安装模组版本：<strong class="gold">${escape(localVersion || (local ? '未识别' : '未安装'))}</strong></span></div>
-            ${requires.length ? `<p class="modhub-install-plan-warning"><strong class="gold">需要前置版本：${escape(requires.map(requirementText).join('；'))}。</strong></p>` : ''}
+        const listHtml = () => `<div class="modhub-version-context"><strong class="gold" data-modhub-i18n-ignore>${escape(mod.name)}</strong><span class="grey">${label('当前游戏版本')}：<strong class="gold">${gameVersion ? `DoL ${escape(gameVersion)}` : label('未识别')}</strong></span><span class="grey">${label('当前已安装模组版本')}：<strong class="gold">${escape(localVersion || t(local ? '未识别' : '未安装'))}</strong></span></div>
+            ${requires.length ? `<p class="modhub-install-plan-warning"><strong class="gold">${label('需要前置版本')}：${escape(requires.map(requirementText).join('；'))}。</strong></p>` : ''}
             <p class="grey">请选择适合当前游戏的模组版本。${sourceLink(mod.githubUrl, '作者主页')}</p>
             ${localContext}
-            ${requirementSources ? `<p class="grey">前置要求来源：<br>${requirementSources}</p>` : ''}
+            ${requirementSources ? `<p class="grey">${label('前置要求来源')}：<br><span data-modhub-i18n-ignore>${requirementSources}</span></p>` : ''}
             ${loading ? `<div class="modhub-version-loading">${window.modHubLoadingHtml(candidates.length ? '正在读取更早版本…' : '正在读取版本列表…')}<span class="grey">${slow ? '发布服务响应较慢，请稍候；也可以取消后重试。' : '正在查找可用安装包并核对适配说明，可以随时取消。'}</span></div>` : ''}
-            ${errorMessage ? `<div class="modhub-version-status" role="status"><p class="gold">${escape(errorMessage)}</p>${errorDetailsHtml(errorDetails)}${!history ? '<button type="button" class="macro-button modhub-version-retry">重试版本列表</button>' : ''}<span class="grey">也可以查看作者主页获取安装包。</span></div>` : ''}
-            ${staleFetchedAt ? `<p class="gold">正在使用过期缓存，发布数据可能已变化。获取时间：${escape(staleFetchedAt)}。</p>` : ''}${sourceWarningsHtml(history)}
+            ${errorMessage ? `<div class="modhub-version-status" role="status"><p class="gold">${escape(t(errorMessage))}</p>${errorDetailsHtml(errorDetails)}${!history ? '<button type="button" class="macro-button modhub-version-retry">重试版本列表</button>' : ''}<span class="grey">也可以查看作者主页获取安装包。</span></div>` : ''}
+            ${staleFetchedAt ? `<p class="gold">${label('正在使用过期缓存，发布数据可能已变化。获取时间：{time}。', { time: staleFetchedAt })}</p>` : ''}${sourceWarningsHtml(history)}
             <div class="modhub-version-list" role="radiogroup" aria-label="按游戏版本分类选择模组版本" tabindex="0">${options.allowSkip ? `<label class="modhub-version-option ${selectedKey === '__skip__' ? 'modhub-version-selected' : ''}"><input type="radio" name="modHubMarketVersion" value="__skip__" ${selectedKey === '__skip__' ? 'checked' : ''}><span class="modhub-version-content"><strong class="gold">暂不安装此前置</strong><span class="modhub-version-description">保留目标模组，前置由您自行处理。缺少前置或版本不符可能导致模组无法运行。</span></span></label>` : ''}${groupCandidates(candidates, gameVersion, initialKey).map(group => {
                 const open = openGroups.has(group.key) ? openGroups.get(group.key) : group.preferred;
-                return `<details class="modhub-version-group" data-group-key="${escape(group.key)}" ${open ? 'open' : ''}><summary class="modhub-version-group-summary" aria-expanded="${open}"><strong class="gold">${escape(group.label)}</strong><span class="grey">${group.candidates.length} 个版本</span></summary>${group.candidates.map(candidateHtml).join('')}</details>`;
+                return `<details class="modhub-version-group" data-group-key="${escape(group.key)}" ${open ? 'open' : ''}><summary class="modhub-version-group-summary" aria-expanded="${open}"><strong class="gold">${escape(group.label)}</strong><span class="grey">${label('{count} 个版本', { count: group.candidates.length })}</span></summary>${group.candidates.map(candidateHtml).join('')}</details>`;
             }).join('') || (!loading && !errorMessage ? '<p class="grey">没有找到可自动安装的发布包。</p>' : '')}</div>
             ${history?.hasMore ? `<button type="button" class="macro-button modhub-version-load-more" ${loading ? 'disabled' : ''}>${errorMessage ? '重试加载更早版本' : '加载更早版本'}</button>` : ''}`;
         try {
@@ -329,7 +338,7 @@
                     const area = dialog.querySelector('#modHubVersionChoices');
                     const syncConfirm = () => {
                         const button = dialog.querySelector('.modhub-modal-btn-confirm');
-                        if (button) button.textContent = selectedInstalled() ? '已安装' : '查看安装计划';
+                        if (button) modHubText(button, selectedInstalled() ? '已安装' : '查看安装计划');
                         dialog.modHubSyncConfirmState?.();
                     };
                     const render = () => {
@@ -340,7 +349,7 @@
                         const focusKey = document.activeElement?.name === 'modHubMarketVersion' ? document.activeElement.value : '';
                         renderedGroups.forEach((group, key) => openGroups.set(key, group.open));
                         renderedGroups.clear();
-                        area.innerHTML = listHtml();
+                        area.innerHTML = modHubHtml(listHtml());
                         area.querySelectorAll('.modhub-version-group').forEach(group => {
                             renderedGroups.set(group.dataset.groupKey, group);
                             const summary = group.querySelector('summary');
@@ -396,7 +405,7 @@
                         loading = true; slow = false; errorMessage = ''; errorDetails = []; render();
                         slowTimer = setTimeout(() => {
                             if (!closed && loading) { slow = true; const status = area.querySelector('.modhub-version-loading');
-                                if (status) status.innerHTML = window.modHubLoadingHtml('发布服务响应较慢，请稍候；也可以取消后重试。'); }
+                                if (status) status.innerHTML = modHubHtml(window.modHubLoadingHtml('发布服务响应较慢，请稍候；也可以取消后重试。')); }
                         }, 3000);
                         try {
                             if (first) {
@@ -493,24 +502,25 @@
             const selected = row.candidates.find(candidate => candidate.candidateKey === row.selectedKey);
             const selectedAssets = selectedRelease(selected, row.selectedOptional)?.assets || [];
             const totalSize = selectedAssets.reduce((total, asset) => total + (Number(asset.size) || 0), 0);
-            const sizeText = totalSize ? `${selectedAssets.some(asset => !Number(asset.size)) ? '已知大小' : '总大小'} ${assetSizeText({ size: totalSize })}` : '大小未知';
+            const sizeText = totalSize ? `<span>${selectedAssets.some(asset => !Number(asset.size)) ? '已知大小' : '总大小'}</span> <span>${escape(assetSizeText({ size: totalSize }))}</span>` : '大小未知';
             const choices = groupCandidates(row.candidates, row.gameVersion, row.defaultKey).map(group => `<optgroup label="${escape(group.label)}">${group.candidates.map(candidate => `<option value="${escape(candidate.candidateKey)}" ${candidate.candidateKey === row.selectedKey ? 'selected' : ''} ${row.root && !releaseNeedsAction(row.mod, candidate, row.local) && !candidate.optionalAssets?.length ? 'disabled' : ''}>${escape(candidateLabel(candidate))}</option>`).join('')}</optgroup>`).join('');
             const editionOptions = packageEditions(row.mod);
-            const editions = editionOptions.length && !versions().getLegacyVerifiedRelease?.(row.mod) ? `<label class="modhub-version-edition-label"><span class="grey">安装版本</span><select class="modhub-version-edition-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !needsEdition(row) ? 'disabled' : ''}><option value="">请选择安装版本</option>${editionOptions.map(edition => `<option value="${escape(edition.id)}" ${row.mod._selectedPackageEdition === edition.id ? 'selected' : ''}>${escape(edition.label)}</option>`).join('')}</select></label>` : '';
+            const editions = editionOptions.length && !versions().getLegacyVerifiedRelease?.(row.mod) ? `<label class="modhub-version-edition-label"><span class="grey">安装版本</span><select class="modhub-version-edition-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !needsEdition(row) ? 'disabled' : ''}><option value="">请选择安装版本</option>${editionOptions.map(edition => `<option value="${escape(edition.id)}" ${row.mod._selectedPackageEdition === edition.id ? 'selected' : ''}>${escape(displayVariantLabel(edition.label))}</option>`).join('')}</select></label>` : '';
             const required = row.requirements.some(requirement => requirement.required);
             const requirementText = [...new Set(row.requirements.map(requirement => `${requirement.bootName || row.mod.name} ${rangeText(requirement.version)}`))].join('；');
-            return `<div class="modhub-version-batch-row${row.root ? '' : ' modhub-version-batch-dependency'}" data-key="${escape(keyOf(row.mod))}"><label><strong class="gold">${escape(row.mod.name)}</strong>${!row.root ? '<span class="grey">前置模组</span>' : ''}</label>${editions}<label><span class="modhub-version-batch-current grey">${escape(localVersion || (row.local ? '版本未识别' : '未安装'))}${selected ? ` → <strong class="gold">${escape(selected.version || selected.tagName || '版本未识别')}</strong> · ${sizeText}` : ''}</span><select class="modhub-version-batch-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !row.history || localError || needsEdition(row) ? 'disabled' : ''}><option value="">${checkingLocal || localError ? '等待核对完成' : needsEdition(row) ? '请先选择安装版本' : row.loading && !row.history ? '正在读取版本列表…' : row.error && !row.history ? '读取失败' : row.root ? '请选择版本或跳过此项' : '请选择前置版本'}</option>${!row.root && !required ? `<option value="__skip__" ${row.selectedKey === '__skip__' ? 'selected' : ''}>暂不安装此前置</option>` : ''}${choices}</select></label>${requirementText ? `<span class="grey">需要：${escape(requirementText)}</span>` : ''}${row.selectedKey === '__skip__' ? '<span class="gold">此前置由您自行处理，相关模组可能无法运行。</span>' : ''}${row.defaultReason && row.selectedKey === row.defaultKey && row.defaultRisk ? `<span class="modhub-version-default-note gold">${escape(row.defaultReason)}</span>` : ''}${assetsHtml(selected, row.selectedKey === row.defaultKey && !row.defaultRisk ? row.defaultReason : '')}${optionalHtml(selected, row.selectedOptional, !row.loading || Boolean(row.history), keyOf(row.mod))}${sourceWarningsHtml(row.history)}${!checkingLocal && !localError && (row.error || row.loading) ? `<span class="grey">${escape(row.error || (row.history ? '正在加载更早版本…' : '正在读取版本列表…'))}</span>` : ''}${errorDetailsHtml(row.errorDetails)}${row.history?.stale ? `<span class="gold">正在显示缓存版本。获取时间：${escape(row.history.fetchedAt || '未知')}。</span>` : ''}<div class="modhub-version-row-links">${sourceLink(row.mod.githubUrl, '作者主页')}${row.history?.hasMore || row.error ? `<button type="button" class="macro-button modhub-version-batch-more" data-key="${escape(keyOf(row.mod))}" ${row.loading ? 'disabled' : ''}>${row.error ? row.history ? '重试加载更早版本' : '重试版本列表' : '加载更早版本'}</button>` : ''}</div></div>`;
+            return `<div class="modhub-version-batch-row${row.root ? '' : ' modhub-version-batch-dependency'}" data-key="${escape(keyOf(row.mod))}"><label><strong class="gold" data-modhub-i18n-ignore>${escape(row.mod.name)}</strong>${!row.root ? '<span class="grey">前置模组</span>' : ''}</label>${editions}<label><span class="modhub-version-batch-current grey">${escape(localVersion || t(row.local ? '版本未识别' : '未安装'))}${selected ? ` → <strong class="gold">${escape(selected.version || selected.tagName || t('版本未识别'))}</strong> · ${sizeText}` : ''}</span><select class="modhub-version-batch-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !row.history || localError || needsEdition(row) ? 'disabled' : ''}><option value="">${checkingLocal || localError ? '等待核对完成' : needsEdition(row) ? '请先选择安装版本' : row.loading && !row.history ? '正在读取版本列表…' : row.error && !row.history ? '读取失败' : row.root ? '请选择版本或跳过此项' : '请选择前置版本'}</option>${!row.root && !required ? `<option value="__skip__" ${row.selectedKey === '__skip__' ? 'selected' : ''}>暂不安装此前置</option>` : ''}${choices}</select></label>${requirementText ? `<span class="grey">${label('需要')}：${escape(requirementText)}</span>` : ''}${row.selectedKey === '__skip__' ? '<span class="gold">此前置由您自行处理，相关模组可能无法运行。</span>' : ''}${row.defaultReason && row.selectedKey === row.defaultKey && row.defaultRisk ? `<span class="modhub-version-default-note gold">${escape(t(row.defaultReason))}</span>` : ''}${assetsHtml(selected, row.selectedKey === row.defaultKey && !row.defaultRisk ? row.defaultReason : '')}${optionalHtml(selected, row.selectedOptional, !row.loading || Boolean(row.history), keyOf(row.mod))}${sourceWarningsHtml(row.history)}${!checkingLocal && !localError && (row.error || row.loading) ? `<span class="grey">${escape(t(row.error || (row.history ? '正在加载更早版本…' : '正在读取版本列表…')))}</span>` : ''}${errorDetailsHtml(row.errorDetails)}${row.history?.stale ? `<span class="gold">${label('正在显示缓存版本。获取时间：{time}。', { time: row.history.fetchedAt || t('未知') })}</span>` : ''}<div class="modhub-version-row-links">${sourceLink(row.mod.githubUrl, '作者主页')}${row.history?.hasMore || row.error ? `<button type="button" class="macro-button modhub-version-batch-more" data-key="${escape(keyOf(row.mod))}" ${row.loading ? 'disabled' : ''}>${row.error ? row.history ? '重试加载更早版本' : '重试版本列表' : '加载更早版本'}</button>` : ''}</div></div>`;
         };
         const previewHtml = () => {
-            if (previewBusy) return window.modHubLoadingHtml('正在核对安装内容…');
+            if (previewBusy) return '';
             if (previewError) return `<p class="red">${escape(previewError)}</p>`;
             if (!preview) return '<p class="grey">选择版本后显示安装内容。</p>';
             const pending = [...preview.nodes.values()].some(node => node.selectionPending);
             return `${unresolved.map(node => `<label class="modhub-version-unresolved"><span class="gold">【${escape(node.mod.name)}】的部分前置需要手动处理：${escape(node.unresolved.map(item => `${item.bootName || item.id} ${rangeText(item.version)}`).join('；'))}</span><select class="modhub-version-unresolved-choice" data-key="${escape(node.key)}"><option value="stop" ${unresolvedChoices.get(node.key) !== 'skip' ? 'selected' : ''}>跳过依赖此前置的目标模组</option><option value="skip" ${unresolvedChoices.get(node.key) === 'skip' ? 'selected' : ''}>暂不安装此前置，保留目标模组</option></select></label>`).join('')}${pending ? '<p class="grey">请完成前置模组选择。</p>' : ''}${planHtml(preview, runtimeChecks(preview), { inline: true })}${renderPlanRisks(preview, risks().risks)}`;
         };
         const html = () => {
-            const status = checkingLocal ? '正在核对已安装模组…' : loading() ? '正在读取可用版本…' : '请选择版本，并核对本次安装内容。';
-            return `<p class="grey">当前游戏版本：<strong class="gold">${versions().getGameVersion() ? `DoL ${escape(versions().getGameVersion())}` : '未识别'}</strong></p><div class="modhub-version-status grey">${localError ? `<p class="red">${escape(localError)}</p>${errorDetailsHtml(localErrorDetails)}<button type="button" class="macro-button modhub-btn-secondary modhub-version-local-retry">重新核对</button>` : loading() ? window.modHubLoadingHtml(status) : `<span role="status" aria-live="polite">${status}</span>`}</div>${visibleRows().map(rowHtml).join('')}<div id="modHubInstallPlanPreview" class="modhub-install-plan-preview" aria-live="polite">${previewHtml()}</div>`;
+            const statusHtml = localError ? `<div class="modhub-version-status grey"><p class="red">${escape(localError)}</p>${errorDetailsHtml(localErrorDetails)}<button type="button" class="macro-button modhub-btn-secondary modhub-version-local-retry">重新核对</button></div>`
+                : loading() ? '' : '<div class="modhub-version-status grey"><span role="status" aria-live="polite">请选择版本，并核对本次安装内容。</span></div>';
+            return `<p class="grey">${label('当前游戏版本')}：<strong class="gold">${versions().getGameVersion() ? `DoL ${escape(versions().getGameVersion())}` : label('未识别')}</strong></p>${statusHtml}${visibleRows().map(rowHtml).join('')}<div id="modHubInstallPlanPreview" class="modhub-install-plan-preview" aria-live="polite">${previewHtml()}</div>`;
         };
         try {
             targets.forEach(mod => market().updateDownloadProgress?.(mod.name, null, '等待选择版本与安装内容', 'confirming'));
@@ -534,7 +544,7 @@
                         const focusKey = focusClass ? focused.dataset.key : '';
                         const detailKey = detail => `${detail.closest('.modhub-version-batch-row')?.dataset?.key || 'plan'}:${detail.dataset?.detailKey || detail.className}`;
                         const openedDetails = new Map([...area.querySelectorAll('details')].map(detail => [detailKey(detail), detail.open]));
-                        area.innerHTML = html();
+                        area.innerHTML = modHubHtml(html());
                         area.querySelectorAll('details').forEach(detail => { if (openedDetails.has(detailKey(detail))) detail.open = openedDetails.get(detailKey(detail)); });
                         const button = dialog.querySelector('.modhub-modal-btn-confirm');
                         const busy = checkingLocal || loading() || previewBusy;
@@ -543,7 +553,7 @@
                             button.classList.toggle('modhub-btn-danger', !busy && risks().risks.length > 0);
                             button.classList.toggle('modhub-btn-primary', busy || !risks().risks.length);
                             const label = button.querySelector('.modhub-button-busy-label') || button;
-                            label.textContent = busy ? '正在核对安装内容' : risks().risks.length ? '仍然下载并安装' : '下载并安装';
+                            modHubText(label, busy ? '正在核对安装内容' : risks().risks.length ? '仍然下载并安装' : '下载并安装');
                         }
                         dialog.modHubSyncConfirmState?.();
                         area.querySelectorAll('.modhub-version-batch-select').forEach(select => {
@@ -1221,7 +1231,7 @@
                 const reuse = action.prepared ? preparedInstalled(action.prepared, component, profile) : releaseInstalled({ ...action.release, version: asset.version || action.release?.version, assets: [asset], ...(index ? { packageEdition: null } : {}) }, profile);
                 const keepDisabled = Boolean(asset.optional && profile && isDisabled(profile.name));
                 const state = reuse ? keepDisabled ? '保留同版，保持禁用' : profile && isDisabled(profile.name) ? '保留同版，启用' : '已安装，保留同版' : keepDisabled ? '更新，保持禁用' : profile ? '更新' : '安装';
-                return `<span class="modhub-version-asset-name grey"><strong class="${asset.optional ? 'purple' : 'gold'}">${escape(roleText(asset))}</strong>：${escape(asset.name)}<span class="modhub-version-meta">当前：${escape(profile?.version || '未安装')} · 所选：${escape(component?.version || asset.version || action.release?.version || '版本未知')} · ${escape(state)} · ${assetSizeText(asset)}</span></span>`;
+                return `<span class="modhub-version-asset-name grey"><strong class="${asset.optional ? 'purple' : 'gold'}">${escape(roleText(asset))}</strong>：<span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${label('当前')}：${escape(profile?.version || t('未安装'))} · ${label('所选')}：${escape(component?.version || asset.version || action.release?.version || t('版本未知'))} · ${escape(t(state))} · ${assetSizeText(asset)}</span></span>`;
             }).join('');
             const gameRanges = actionBoots(action).flatMap(item => item.dependenceInfo || []).filter(item => normalize(item.modName) === 'gameversion');
             const assessment = gameRanges.map(item => versions().assessCompatibility(item.version));
@@ -1237,12 +1247,12 @@
                 const aliases = [...new Set(node.requirements.filter(item => item.parent === action.key && item.bootName && normalize(item.bootName) !== normalize(boot?.name)).map(item => item.bootName))];
                 return `<span class="modhub-version-asset-name grey">${escape(node.mod.name)} ${escape(boot?.version || '版本未知')}${(window._modHubModState?.builtInMods || []).some(name => normalize(name) === normalize(node.local?.name)) ? '（游戏内置）' : ''}</span>${aliases.length ? `<span class="modhub-version-description grey">【${escape(node.mod.name)}】已提供所需的【${escape(aliases.join('、'))}】功能，无需另外安装。</span>` : ''}`;
             };
-            return `<div class="modhub-install-plan-item"><div class="modhub-install-plan-heading"><div class="modhub-install-plan-identity"><svg class="modhub-install-plan-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5"/></svg><strong class="modhub-install-plan-name">${escape(action.mod.name)}</strong></div><span class="modhub-install-plan-operation gold">${escape(operation)} ${escape(version)}</span></div>
-                ${action.local && action.type !== 'enable' ? `<div class="modhub-install-plan-meta">${recorded ? '安装前版本' : '当前已安装'}：${escape(action.local.version)}</div>` : ''}
-                <p class="modhub-install-plan-meta ${status === 'incompatible' ? 'red' : ''}">${gameNote}${gameRanges.length ? ` 支持范围：DoL ${escape(gameRanges.map(item => rangeText(item.version)).join('；'))}。` : ''}</p>
-                ${assets.length ? `<details class="modhub-version-assets modhub-install-plan-files"><summary>查看安装包${assets.length > 1 ? `（${assets.length} 个）` : ''}</summary>${componentHtml}</details>` : ''}
+            return `<div class="modhub-install-plan-item"><div class="modhub-install-plan-heading"><div class="modhub-install-plan-identity"><svg class="modhub-install-plan-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5"/></svg><strong class="modhub-install-plan-name" data-modhub-i18n-ignore>${escape(action.mod.name)}</strong></div><span class="modhub-install-plan-operation gold">${label(operation)} <span data-modhub-i18n-ignore>${escape(version)}</span></span></div>
+                ${action.local && action.type !== 'enable' ? `<div class="modhub-install-plan-meta">${label(recorded ? '安装前版本' : '当前已安装')}：<span data-modhub-i18n-ignore>${escape(action.local.version)}</span></div>` : ''}
+                <p class="modhub-install-plan-meta ${status === 'incompatible' ? 'red' : ''}">${label(gameNote)}${gameRanges.length ? ` ${label('支持范围')}：DoL ${escape(gameRanges.map(item => t(rangeText(item.version))).join('；'))}。` : ''}</p>
+                ${assets.length ? `<details class="modhub-version-assets modhub-install-plan-files"><summary>${label('查看安装包')}${assets.length > 1 ? ` (${label('{count} 个', { count: assets.length })})` : ''}</summary>${componentHtml}</details>` : ''}
                 ${action.switchGroup?.disabledNames.length ? `<div class="modhub-install-plan-warning gold">安装成功后停用：${escape(action.switchGroup.disabledNames.join('、'))}。保留旧安装包，可在模组管理中重新选择。</div>` : ''}
-                ${existing.length ? `<details class="modhub-version-assets modhub-install-plan-prerequisites"><summary><span class="green">前置模组已就绪（${existing.length} 项）</span></summary>${existing.map(providerHtml).join('')}</details>` : ''}</div>`;
+                ${existing.length ? `<details class="modhub-version-assets modhub-install-plan-prerequisites"><summary><span class="green">${label('前置模组已就绪（{count} 项）', { count: existing.length })}</span></summary>${existing.map(providerHtml).join('')}</details>` : ''}</div>`;
         };
         const targets = plan.actions.filter(action => plan.roots.has(action.key));
         const dependencies = plan.actions.filter(action => !plan.roots.has(action.key));
@@ -1266,17 +1276,17 @@
             : `<p class="modhub-install-plan-meta">${plan.downloaded ? recorded ? '本次未取得完整兼容性检查结果，请结合游戏运行情况核对。' : '尚未完成兼容性检查。您可以取消安装，稍后重试。' : onlyEnable ? '启用前会检查前置模组和兼容性。' : '下载后会自动检查前置模组和兼容性。'}</p>`;
         const requirements = plan.actions.flatMap(action => requiredDependencies(action.mod).map(item => {
             const name = api.getMarketMods().find(mod => (mod.bootNames || []).includes(item.bootName))?.name || item.bootName || item.id;
-            return `<p>【${escape(action.mod.name)}】需要【${escape(name)}】${item.version && item.version !== '*' ? `，版本要求：${escape(rangeText(item.version))}` : ''}。${item.evidence ? `<span class="modhub-install-plan-meta">作者说明：${escape(item.evidence)}</span>` : ''}</p>`;
+            return `<p>${label('【{name}】需要【{dependency}】{details}。', { name: action.mod.name, dependency: name, details: item.version && item.version !== '*' ? t('，版本要求：{range}', { range: t(rangeText(item.version)) }) : '' })}${item.evidence ? `<span class="modhub-install-plan-meta">${label('作者说明')}：<span data-modhub-i18n-ignore>${escape(item.evidence)}</span></span>` : ''}</p>`;
         }));
-        if (inline) return `<div class="modhub-install-plan">${compatibilityHtml}<p class="modhub-install-plan-intro">本次安装 ${targets.length} 项${dependencies.length ? `，同时处理 ${dependencies.length} 项前置` : ''}。</p>
-            ${dependencies.length ? `<div class="modhub-install-plan-inline-dependencies grey">${dependencies.map(action => `<span>${escape(action.mod.name)} ${escape(action.release?.version || localBoot(action.local)?.version || '')} · ${action.type === 'enable' ? '启用' : action.local ? '更换版本' : '安装'}</span>`).join('')}</div>` : ''}
+        if (inline) return `<div class="modhub-install-plan">${compatibilityHtml}<p class="modhub-install-plan-intro">${label('本次安装 {count} 项{details}。', { count: targets.length, details: dependencies.length ? t('，同时处理 {count} 项前置', { count: dependencies.length }) : '' })}</p>
+            ${dependencies.length ? `<div class="modhub-install-plan-inline-dependencies grey">${dependencies.map(action => `<span>${escape(action.mod.name)} ${escape(action.release?.version || localBoot(action.local)?.version || '')} · ${label(action.type === 'enable' ? '启用' : action.local ? '更换版本' : '安装')}</span>`).join('')}</div>` : ''}
             ${plan.actions.filter(action => action.switchGroup?.disabledNames.length).map(action => `<p class="gold">安装【${escape(action.mod.name)}】后停用：${escape(action.switchGroup.disabledNames.join('、'))}。保留旧安装包，可在模组管理中重新选择。</p>`).join('')}
-            ${warnings.length ? `<div class="modhub-install-plan-warning">${warnings.map(warning => `<p>${escape(warning)}</p>`).join('')}</div>` : ''}
+            ${warnings.length ? `<div class="modhub-install-plan-warning">${warnings.map(warning => `<p>${escape(t(warning))}</p>`).join('')}</div>` : ''}
             ${runtimes.length || requirements.length ? `<details class="modhub-install-plan-details"><summary>查看安装详情</summary>${requirements.join('')}${runtimes.map(item => `<p>【${escape(item.modName)}】需要 ${escape(item.name)} ${escape(rangeText(item.range))}。当前版本：${escape(item.current || '无法识别')}；${item.status === 'compatible' ? '已满足要求' : item.status === 'incompatible' ? '不满足要求，请更换模组或加载器版本' : '暂时无法确认，请查看模组说明'}。</p>`).join('')}</details>` : ''}</div>`;
         return `<div class="modhub-install-plan">${compatibilityHtml}<p class="modhub-install-plan-intro">${recorded ? '以下为安装处理前核对的内容。实际处理结果请查看各项状态。' : onlyEnable ? '确认后将启用以下模组。' : plan.downloaded ? '安装文件已准备好。确认后开始安装。' : '确认后将下载并安装以下内容。'}</p>
-            <strong class="modhub-install-plan-section-title">安装内容（${targets.length} 项）</strong>${targets.map(actionHtml).join('')}
-            ${dependencies.length ? `<strong class="modhub-install-plan-section-title">同时安装或启用的前置（${dependencies.length} 项）</strong>${dependencies.map(actionHtml).join('')}` : ''}
-            ${warnings.length ? `<div class="modhub-install-plan-warning">${warnings.map(warning => `<p>${escape(warning)}</p>`).join('')}</div>` : ''}
+            <strong class="modhub-install-plan-section-title">${label('安装内容（{count} 项）', { count: targets.length })}</strong>${targets.map(actionHtml).join('')}
+            ${dependencies.length ? `<strong class="modhub-install-plan-section-title">${label('同时安装或启用的前置（{count} 项）', { count: dependencies.length })}</strong>${dependencies.map(actionHtml).join('')}` : ''}
+            ${warnings.length ? `<div class="modhub-install-plan-warning">${warnings.map(warning => `<p>${escape(t(warning))}</p>`).join('')}</div>` : ''}
             ${runtimes.length || requirements.length ? `<details class="modhub-install-plan-details"><summary>查看安装详情</summary>
                 ${requirements.length ? `<div class="modhub-install-plan-meta"><strong>前置要求</strong>${requirements.join('')}</div>` : ''}
                 ${runtimes.length ? `<div class="modhub-install-plan-meta"><strong>加载器与运行库</strong>${runtimes.map(item => `<p>【${escape(item.modName)}】需要 ${escape(item.name)} ${escape(rangeText(item.range))}。当前版本：${escape(item.current || '无法识别')}；${item.status === 'compatible' ? '已满足要求' : item.status === 'incompatible' ? '不满足要求，请更换模组或加载器版本' : '暂时无法确认，请查看模组说明'}。</p>`).join('')}</div>` : ''}
@@ -1482,7 +1492,7 @@
             const issues = [...(plan.reachable.get(key) || [key])].map(id => plan.nodes.get(id)).filter(node => node.issue);
             const reasons = (issues.length ? issues : [{ ...root, issue: reason }]).map(node => {
                 const download = node.downloadFailureDetails;
-                const dependency = node.key !== key ? `<p class="modhub-install-error-dependency grey">前置模组：<strong>${escape(node.mod.name)}</strong></p>` : '';
+                const dependency = node.key !== key ? `<p class="modhub-install-error-dependency grey">前置模组：<strong data-modhub-i18n-ignore>${escape(node.mod.name)}</strong></p>` : '';
                 if (!download) return `${dependency}<p class="modhub-install-error-cause">${escape(node.issue).replace(/\n/g, '<br>')}</p>`;
                 const groups = new Map();
                 for (const failure of download.failures) {
@@ -1490,13 +1500,13 @@
                     groups.get(failure.message).add(failure.mirrorName);
                 }
                 return `${dependency}<p class="modhub-install-error-cause red">安装包下载失败。</p>
-                    <div class="modhub-install-error-file"><span class="grey">安装包</span><strong>${escape(download.fileName)}</strong></div>
+                    <div class="modhub-install-error-file"><span class="grey">安装包</span><strong data-modhub-i18n-ignore>${escape(download.fileName)}</strong></div>
                     <details class="modhub-version-group modhub-install-error-details" open>
                         <summary class="modhub-version-group-summary">下载线路详情<span class="grey">${download.failures.length} 条记录</span></summary>
                         ${[...groups].map(([message, mirrors]) => `<div class="modhub-install-error-group"><p class="modhub-install-error-cause">${escape(message).replace(/\n/g, '<br>')}</p><p class="modhub-install-error-mirrors grey">${[...mirrors].map(escape).join('、')}</p></div>`).join('')}
                     </details>`;
             }).join('');
-            return `<section class="modhub-install-error-item"><h3 class="gold">${escape(root.mod.name)}</h3>${reasons}</section>`;
+            return `<section class="modhub-install-error-item"><h3 class="gold" data-modhub-i18n-ignore>${escape(root.mod.name)}</h3>${reasons}</section>`;
         }).join('');
         return window.modHubConfirm({
             title: '安装计划无法执行',

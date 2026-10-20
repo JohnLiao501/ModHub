@@ -3432,10 +3432,13 @@ button.modhub-btn-primary:active,
     margin-bottom: 0;
 }
 
-.modhub-manager-helpbar {
+.modhub-manager-preferences {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
     gap: 10px;
+    margin-bottom: 8px;
     font-size: 0.85em;
 }
 
@@ -3455,7 +3458,7 @@ button.modhub-btn-primary:active,
     line-height: 1.45;
 }
 
-.modhub-manager-helpbar .modhub-safemode-label {
+.modhub-manager-preferences .modhub-safemode-label {
     display: inline-flex;
     align-items: center;
     flex-shrink: 0;

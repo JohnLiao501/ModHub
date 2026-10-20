@@ -344,6 +344,7 @@ window.initModReadMe = async function() {
     const gui = window.modHubGetGui();
     if (!gui) {
         container.innerHTML = '<div class="mod-empty grey">无法获取 ModLoader 实例。</div>';
+        window.modHubLocalizeOwned?.(container);
         return;
     }
 
@@ -380,6 +381,7 @@ window.initModReadMe = async function() {
     `;
 
     const searchInput = document.getElementById('modHubReadmeSearch');
+    window.modHubLocalizeOwned?.(container);
     if (searchInput) {
         searchInput.oninput = () => {
             window.modHubFilterReadmeList(searchInput.value.trim());
@@ -410,6 +412,7 @@ window.modHubFilterReadmeList = function(keyword) {
 
     if (filtered.length === 0) {
         listEl.innerHTML = '<li class="mod-empty grey">无匹配模组</li>';
+        window.modHubLocalizeOwned?.(listEl);
         return;
     }
 
@@ -417,7 +420,7 @@ window.modHubFilterReadmeList = function(keyword) {
         const isSelected = name === window._modHubSelectedMod;
         return `
             <li class="modhub-readme-mod-item ${isSelected ? 'active gold' : ''}" data-mod-name="${window.modHubEscapeHtml(name)}">
-                <span class="mod-name" title="${window.modHubEscapeHtml(name)}">${window.modHubEscapeHtml(name)}</span>
+                <span class="mod-name" data-modhub-no-translate title="${window.modHubEscapeHtml(name)}">${window.modHubEscapeHtml(name)}</span>
             </li>
         `;
     }).join('');
@@ -429,6 +432,16 @@ window.modHubSelectReadmeMod = function(modName) {
     window.modHubFilterReadmeList(searchInput ? searchInput.value.trim() : '');
     window.modHubLoadReadme(modName);
 };
+
+window.addEventListener?.('modhub:languagechange', () => {
+    // 文档原文跳过翻译；图片失败提示属于 ModHub，单独更新其显式绑定。
+    document.querySelectorAll?.('.modhub-image-fallback [data-modhub-i18n-key]').forEach(node => {
+        const key = node.getAttribute('data-modhub-i18n-key');
+        let params = {};
+        try { params = JSON.parse(node.getAttribute('data-modhub-i18n-key-params') || '{}'); } catch (_) {}
+        window.modHubBindText?.(node, key, params);
+    });
+});
 
 // 辅助：根据文件后缀获取合法图片 MIME 类型
 window.modHubGetMimeTypeByExt = function(filePath) {
@@ -522,13 +535,14 @@ window.modHubSetupReadmeImages = async function(container, modName, isCurrent = 
         placeholder.innerHTML = `
             <span class="fallback-icon">[图片]</span>
             <span class="fallback-content">
-                <strong class="fallback-title">${window.modHubEscapeHtml(alt || '网络图片未能加载')}</strong>
+                <strong class="fallback-title" ${alt ? 'data-modhub-no-translate' : ''}>${window.modHubEscapeHtml(alt || '网络图片未能加载')}</strong>
                 <span class="fallback-tip grey">（可能受限于当前网络环境）</span>
                 ${origSrc && /^https?:\/\//i.test(origSrc) ? `
                     <a class="fallback-link gold" href="${window.modHubEscapeHtml(origSrc)}" target="_blank" rel="noopener noreferrer">在新窗口中打开原图</a>
                 ` : ''}
             </span>
         `;
+        window.modHubLocalizeOwned?.(placeholder);
         img.replaceWith(placeholder);
     };
 
@@ -712,9 +726,9 @@ window.modHubLoadReadme = async function(modName) {
                 <div class="childItem modhub-readme-market-summary">
                     <div class="modhub-readme-market-header" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                         <strong class="gold">模组市场资料</strong>
-                        ${category ? `<span class="dep-tag gold">[${window.modHubEscapeHtml(category)}]</span>` : ''}
+                        ${category ? `<span class="dep-tag gold" data-modhub-no-translate>[${window.modHubEscapeHtml(category)}]</span>` : ''}
                     </div>
-                    ${description ? `<p style="margin: 4px 0 8px 0; line-height: 1.5;">${window.modHubEscapeHtml(description)}</p>` : ''}
+                    ${description ? `<p data-modhub-no-translate style="margin: 4px 0 8px 0; line-height: 1.5;">${window.modHubEscapeHtml(description)}</p>` : ''}
                     ${repositoryUrl ? `<a class="macro-button modhub-btn-primary modhub-readme-repo" href="${window.modHubEscapeHtml(repositoryUrl)}" target="_blank" rel="noopener noreferrer">访问模组仓库</a>` : ''}
                 </div>
             `;
@@ -722,10 +736,10 @@ window.modHubLoadReadme = async function(modName) {
 
         let contentHtml = `
             <div class="modhub-readme-header">
-                <h3 class="gold" style="margin: 0 0 6px 0;">${window.modHubEscapeHtml(modName)}</h3>
+                <h3 class="gold" data-modhub-no-translate style="margin: 0 0 6px 0;">${window.modHubEscapeHtml(modName)}</h3>
                 <div class="modhub-readme-meta grey">
                     <span>版本: <strong class="def">${window.modHubEscapeHtml(boot.version || '未知')}</strong></span>
-                    ${author ? `<span>作者: <strong class="def">${window.modHubEscapeHtml(author)}</strong></span>` : ''}
+                    ${author ? `<span>作者: <strong class="def" data-modhub-no-translate>${window.modHubEscapeHtml(author)}</strong></span>` : ''}
                 </div>
             </div>
             ${marketHtml}
@@ -736,7 +750,7 @@ window.modHubLoadReadme = async function(modName) {
                 contentHtml += `<p class="grey modhub-readme-source">以下说明来自 <a class="modhub-readme-link" href="${window.modHubEscapeHtml(githubReadme.sourceUrl || repositoryUrl)}" target="_blank" rel="noopener noreferrer">GitHub 仓库 README</a>。</p>`;
                 if (githubReadme.isStale) contentHtml += '<p class="grey">网络暂不可用，显示上次成功读取的说明，内容可能不是最新版本。</p>';
             }
-            contentHtml += `<div class="modhub-markdown-view">${window.modHubRenderMarkdown(effectiveReadme, {
+            contentHtml += `<div class="modhub-markdown-view" data-modhub-no-translate>${window.modHubRenderMarkdown(effectiveReadme, {
                 modName,
                 repositoryUrl,
                 remoteImageBaseUrl: githubReadme?.downloadUrl || '',
@@ -776,7 +790,7 @@ window.modHubLoadReadme = async function(modName) {
                     <div class="modhub-meta-grid">
                         <div class="childItem meta-item">
                             <span class="grey meta-key">模组名称</span>
-                            <span class="meta-val def">${window.modHubEscapeHtml(boot.name || modName)}</span>
+                            <span class="meta-val def" data-modhub-no-translate>${window.modHubEscapeHtml(boot.name || modName)}</span>
                         </div>
                         <div class="childItem meta-item">
                             <span class="grey meta-key">版本号</span>
@@ -804,10 +818,12 @@ window.modHubLoadReadme = async function(modName) {
         }
 
         bodyEl.innerHTML = contentHtml;
+        window.modHubLocalizeOwned?.(bodyEl);
         await window.modHubSetupReadmeImages(bodyEl, modName, isCurrent);
     } catch (e) {
         if (!isCurrent()) return;
         console.error('[ModHub] 读取 ReadMe 失败', e);
         bodyEl.innerHTML = `<div class="mod-empty red">读取文档失败：${window.modHubEscapeHtml(e.message)}</div>`;
+        window.modHubLocalizeOwned?.(bodyEl);
     }
 };

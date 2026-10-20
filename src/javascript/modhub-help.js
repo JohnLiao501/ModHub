@@ -1,6 +1,11 @@
 /** ModHub 帮助中心：按现象检查、确认配置修复与本地求助报告。 */
 (function() {
     'use strict';
+    const ui = html => window.modHubTranslateHtml ? window.modHubTranslateHtml(html) : html;
+    const setText = (node, value) => {
+        if (window.modHubBindText) window.modHubBindText(node, String(value ?? ''));
+        else node.textContent = value;
+    };
 
     const key = value => String(value || '');
     const detail = error => String(error?.message || error || '未提供具体原因');
@@ -22,6 +27,7 @@
     let viewRevision = 0;
     let remoteOpenRequested = null;
     let repairing = false;
+    let aiBusy = () => false;
     const configurationStamp = snapshot => JSON.stringify([snapshot.gameVersion, snapshot.loaderVersion,
         listStamp(snapshot.lists), packageStamp(snapshot.packages), snapshot.runtime.map(item => [item.name, item.source, bootStamp(item.bootJson)])]);
 
@@ -311,7 +317,7 @@
     async function repair(snapshot, issueId) {
         if (!snapshot || snapshot.stale) return { ok: false, status: 'stale', reason: '检查结果已过期，请重新检查。' };
         if (repairing || busy()) return { ok: false, status: 'failed', reason: '另一项操作尚未完成，请稍后再试。' };
-        repairing = true;
+        repairing = true; window.modHubRefreshLanguageSelectors?.();
         try {
             const fresh = await check();
             if (fresh.stale || configurationStamp(fresh) !== configurationStamp(snapshot)) return { ok: false, status: 'stale', reason: '配置或安装包已经变化，请重新检查。', snapshot: fresh };
@@ -338,7 +344,7 @@
             return { ok: true, status: 'saved', reason: '配置修复已保存。请重新载入游戏，重试之前的操作并查看最新日志。', snapshot: after };
         } catch (error) {
             return { ok: false, status: 'failed', reason: detail(error) };
-        } finally { repairing = false; }
+        } finally { repairing = false; window.modHubRefreshLanguageSelectors?.(); }
     }
 
     const remotePlans = new WeakMap();
@@ -360,7 +366,7 @@
         const record = remotePlans.get(preview);
         if (!record || record.stamp !== JSON.stringify(preview)) throw new Error('配置修复预览已改变，请重新检查。');
         if (repairing || busy()) throw new Error('另一项操作尚未完成，请稍后再试。');
-        repairing = true;
+        repairing = true; window.modHubRefreshLanguageSelectors?.();
         try {
             const fresh = await check();
             if (fresh.stale || configurationStamp(fresh) !== record.snapshot) throw new Error('配置或安装包已改变，请重新检查。');
@@ -376,7 +382,7 @@
             }
             remotePlans.delete(preview);
             return { ...result, status: 'saved' };
-        } finally { repairing = false; }
+        } finally { repairing = false; window.modHubRefreshLanguageSelectors?.(); }
     }
 
     function buildReport(snapshot, { allLogs = false } = {}) {
@@ -486,10 +492,11 @@
         aiConnectionAbort?.abort();
         aiStopProgress?.();
         const api = window.modHubAiRepair;
-        if (!api) { host.textContent = 'AI 修复模块尚未就绪。请重新载入后再试。'; return; }
+        if (!api) { setText(host, 'AI 修复模块尚未就绪。请重新载入后再试。'); return; }
         let stage = 1, ticket = 0, working = false, analyzing = false, candidate = null, prepared = null, plan = null, last = null;
         let availablePointId = null, restoreReason = '', historyTicket = 0;
         let testing = false, testTicket = 0, testController = null, progressTimer = null, continuationBlocked = false, needsPreparation = false;
+        aiBusy = () => host.isConnected !== false && (working || testing);
         let analysis = initialAnalysis;
         let suggestions = null;
         try {
@@ -508,7 +515,7 @@
         } catch (_) {}
         const button = (id, label, primary = false) => '<button type="button" id="modHubAi' + id + '" class="macro-button modhub-btn-' + (primary ? 'primary' : 'secondary') + '">' + label + '</button>';
         const notice = MODHUB_AI_NOTICE.split('\n');
-        host.innerHTML = '<header class="modhub-help-block-heading"><h3>AI 协助</h3><p id="modHubAiWelcome" class="grey">描述模组问题，预览分析材料后，使用您配置的 AI 服务排查原因和修复建议。</p></header>'
+        host.innerHTML = ui('<header class="modhub-help-block-heading"><h3>AI 协助</h3><p id="modHubAiWelcome" class="grey">描述模组问题，预览分析材料后，使用您配置的 AI 服务排查原因和修复建议。</p></header>'
             + '<div id="modHubAiToolbar" class="modhub-ai-toolbar"><span id="modHubAiConnectionStatus" class="grey"></span>' + button('Settings', 'AI 连接设置') + '</div>'
             + '<section id="modHubAiSettingsPanel" class="modhub-help-topic modhub-ai-settings" hidden><h3>连接您的 AI 服务</h3><p class="grey">填写服务商提供的连接信息。保存后即可返回，继续处理刚才的问题。</p>'
             + '<div class="modhub-ai-settings-fields"><label class="modhub-ai-field modhub-ai-settings-address">API 地址<input id="modHubAiEndpoint" type="url" placeholder="https://服务地址/v1" autocomplete="off" spellcheck="false" aria-describedby="modHubAiEndpointHint"><small id="modHubAiEndpointHint" class="grey">支持基础地址、/v1 或完整 /chat/completions 地址。</small></label>'
@@ -533,7 +540,7 @@
             + '<div id="modHubAiStep2" hidden><section class="modhub-ai-review"><h3>将发送哪些信息</h3><p class="grey modhub-ai-review-hint">已在本机整理。确认后，AI 将分析原因并查找处理方法。</p>'
             + '<dl class="modhub-ai-overview"><dt>分析范围</dt><dd id="modHubAiTargetSummary" hidden></dd><dt>源码</dt><dd id="modHubAiSelectionSummary"></dd></dl>'
             + '<div id="modHubAiLogSummary" class="modhub-ai-log-summary"></div>'
-            + '<details class="modhub-help-topic"><summary>您描述的问题</summary><p id="modHubAiProblem" class="modhub-ai-problem"></p></details>'
+            + '<details class="modhub-help-topic"><summary>您描述的问题</summary><p id="modHubAiProblem" class="modhub-ai-problem" data-modhub-i18n-ignore></p></details>'
             + '<div id="modHubAiSetup" hidden>'
             + '<details id="modHubAiMaterialDetails" class="modhub-help-topic"><summary>查看将发送的完整材料</summary><textarea id="modHubAiMaterial" class="modhub-help-report" readonly aria-label="将发送的材料"></textarea></details>'
             + '<div class="modhub-ai-send"><p id="modHubAiConnectionHint" class="grey"></p>'
@@ -557,7 +564,7 @@
             + '<footer id="modHubAiFooter" class="modhub-ai-footer" hidden><div id="modHubAiNavigation" class="modhub-help-actions modhub-ai-navigation" hidden>' + button('Back', '返回描述问题', true) + action('加载日志') + action('模组说明') + '</div>'
             + '<div id="modHubAiHistoryActions" class="modhub-help-actions modhub-help-actions-links modhub-ai-history-actions modhub-ai-restore-actions"><p id="modHubAiRestoreStatus" class="grey" role="status" hidden></p>' + button('Last', '查看上次修复与撤销入口') + '</div></footer></div>'
             + '<details class="modhub-help-topic modhub-help-notice"><summary>使用声明、数据与撤销范围</summary><dl>'
-            + ['发送内容', '密钥保存', '应用修改', '验证与撤销'].map((title, index) => '<dt>' + title + '</dt><dd>' + escape(notice[index]) + '</dd>').join('') + '</dl></details>';
+            + ['发送内容', '密钥保存', '应用修改', '验证与撤销'].map((title, index) => '<dt>' + title + '</dt><dd>' + escape(notice[index]) + '</dd>').join('') + '</dl></details>');
         const el = id => host.querySelector('#modHubAi' + id);
         const current = value => mounted === viewRevision && value === ticket && host.isConnected !== false;
         const stopProgress = () => {
@@ -572,24 +579,24 @@
             el('Progress').hidden = false;
             const update = () => {
                 if (mounted !== viewRevision || host.isConnected === false) { stopProgress(); return; }
-                el('ProgressText').textContent = '已用 ' + Math.floor((Date.now() - started) / 1000) + ' 秒；处理时间取决于材料大小和服务响应。';
+                setText(el('ProgressText'), '已用 ' + Math.floor((Date.now() - started) / 1000) + ' 秒；处理时间取决于材料大小和服务响应。');
             };
             update();
             progressTimer = setInterval(update, 1000);
             aiStopProgress = stopProgress;
         };
         const status = (message, color = 'grey') => {
-            el('Status').textContent = message;
+            setText(el('Status'), message);
             el('Status').className = 'modhub-ai-status ' + color;
             el('ErrorDetails').hidden = true;
-            el('Error').textContent = '';
+            setText(el('Error'), '');
         };
         const renderSuggestions = () => {
             if (suggestions) analysis = readLogs();
             suggestions = suggestQuestions(analysis);
             el('Suggestions').hidden = !suggestions.length;
-            el('SuggestionList').innerHTML = suggestions.map((item, index) => '<button type="button" class="macro-button modhub-btn-secondary" data-ai-suggestion="' + index + '"><span>'
-                + escape(item.question) + '</span><small class="grey">' + (item.level === 'error' ? '来自错误日志' : '来自警告日志') + '</small></button>').join('');
+            el('SuggestionList').innerHTML = ui(suggestions.map((item, index) => '<button type="button" class="macro-button modhub-btn-secondary" data-ai-suggestion="' + index + '"><span>'
+                + escape(item.question) + '</span><small class="grey">' + (item.level === 'error' ? '来自错误日志' : '来自警告日志') + '</small></button>').join(''));
         };
         const show = (next, scroll = true) => {
             stage = next;
@@ -612,6 +619,7 @@
         };
         const controls = value => {
             working = value;
+            window.modHubRefreshLanguageSelectors?.();
             host.setAttribute('aria-busy', String(value));
             host.querySelectorAll('button, input, select, textarea:not([readonly])').forEach(item => { item.disabled = value; });
             el('MaxRounds').disabled = value || el('UnlimitedRounds').checked;
@@ -621,9 +629,9 @@
             el('SettingsProgress').hidden = !testing;
             el('SettingsCancel').disabled = false;
             el('SettingsBack').disabled = value && !testing;
-            el('SettingsTest').textContent = testing ? '正在测试…' : '测试连接';
+            setText(el('SettingsTest'), testing ? '正在测试…' : '测试连接');
             el('Analyze').disabled = value || !prepared;
-            el('Analyze').textContent = analyzing ? '正在分析…' : '发送并分析';
+            setText(el('Analyze'), analyzing ? '正在分析…' : '发送并分析');
             el('Apply').disabled = value || !plan?.changes?.length;
             el('Apply').hidden = !plan?.changes?.length;
             const canContinue = !continuationBlocked && Boolean(plan?.readRequest || plan?.canContinue || plan?.canTriage);
@@ -631,9 +639,9 @@
             el('LocalRepair').hidden = stage !== 3 || !plan || Boolean(plan.changes.length) || canContinue;
             el('Continue').disabled = value || !canContinue;
             el('Continue').hidden = !canContinue;
-            el('Continue').textContent = plan?.validationFeedback?.kind === 'response-format' && plan?.responseCorrection ? '继续校正回复' : plan?.readRequest ? '确认新增材料并继续' : '继续自动排查';
+            setText(el('Continue'), plan?.validationFeedback?.kind === 'response-format' && plan?.responseCorrection ? '继续校正回复' : plan?.readRequest ? '确认新增材料并继续' : '继续自动排查');
             el('Last').disabled = el('Undo').disabled = value || !availablePointId || availablePointId !== last?.pointId;
-            el('RestoreStatus').textContent = restoreReason;
+            setText(el('RestoreStatus'), restoreReason);
             el('RestoreStatus').hidden = !last || Boolean(availablePointId) || stage !== 4 && el('Footer').hidden;
             el('Verified').disabled = value || !last || last.verified || last.uncertain;
             el('Reload').disabled = value || Boolean(last?.uncertain);
@@ -664,7 +672,7 @@
         const invalidate = () => {
             prepared = plan = null;
             el('Material').value = '';
-            el('SelectionSummary').textContent = '正在整理。';
+            setText(el('SelectionSummary'), '正在整理。');
             controls(working);
         };
         const run = async action => {
@@ -677,7 +685,7 @@
             catch (error) {
                 if (current(value)) {
                     status('操作未完成。请查看具体原因，调整后重试；已填写的内容保留。', 'red');
-                    el('Error').textContent = detail(error);
+                    setText(el('Error'), detail(error));
                     el('ErrorDetails').hidden = false;
                     el('ErrorDetails').open = true;
                     revealHelp(el('Status'));
@@ -694,21 +702,21 @@
             const enabled = targets.filter(item => item.enabled);
             const selected = targets.some(item => item.name === aiDraft.modName) ? aiDraft.modName
                 : mentioned.length === 1 ? mentioned[0].name : enabled.length === 1 ? enabled[0].name : '';
-            el('Target').innerHTML = '<option value="">不确定，先分析日志</option>' + targets.map(item => '<option value="' + escape(item.name) + '">' + escape(item.name) + ' ' + escape(item.bootJson?.version || '') + (item.error ? '（包体待核对）' : item.enabled ? '' : '（已禁用）') + '</option>').join('');
+            el('Target').innerHTML = ui('<option value="">不确定，先分析日志</option>' + targets.map(item => '<option value="' + escape(item.name) + '">' + escape(item.name) + ' ' + escape(item.bootJson?.version || '') + (item.error ? '（包体待核对）' : item.enabled ? '' : '（已禁用）') + '</option>').join(''));
             el('Target').value = selected;
         };
         const connectionStatus = () => {
             const ready = aiConnection.endpoint.trim() && aiConnection.model.trim();
-            el('ConnectionStatus').textContent = ready ? 'AI 服务已配置 · 模型：' + aiConnection.model : '尚未配置 AI 服务';
-            el('ConnectionHint').textContent = ready ? '发送至：' + aiConnection.endpoint + ' · 模型：' + aiConnection.model : '尚未配置 AI 服务。请从上方“AI 连接设置”入口填写；整理材料不需要联网。';
+            setText(el('ConnectionStatus'), ready ? 'AI 服务已配置 · 模型：' + aiConnection.model : '尚未配置 AI 服务');
+            setText(el('ConnectionHint'), ready ? '发送至：' + aiConnection.endpoint + ' · 模型：' + aiConnection.model : '尚未配置 AI 服务。请从上方“AI 连接设置”入口填写；整理材料不需要联网。');
         };
         const renderLogSummary = () => {
             const lines = (analysis.lines || []).filter(item => ['error', 'warn'].includes(item.level));
             const excerpts = aiDraft.error ? [{ message: aiDraft.error }, ...lines.filter(item => item.message !== aiDraft.error)] : lines;
-            el('LogSummary').innerHTML = '<details class="modhub-help-topic"><summary>加载日志：' + (analysis.errorCount || 0) + ' 条错误，' + (analysis.warnCount || 0) + ' 条警告</summary>'
+            el('LogSummary').innerHTML = ui('<details class="modhub-help-topic"><summary>加载日志：' + (analysis.errorCount || 0) + ' 条错误，' + (analysis.warnCount || 0) + ' 条警告</summary>'
                 + (aiDraft.error ? '<p class="grey">已保留您选择的完整错误。</p>' : '')
                 + (excerpts.length ? excerpts.slice(0, 3).map(item => '<pre class="modhub-ai-error">' + escape(item.message) + '</pre>').join('') : '<p class="grey">暂无错误或警告，将结合您的描述与环境清单分析。</p>')
-                + '<p class="grey">日志提及的模组不一定是问题原因；本次日志不能验证尚未重新载入的配置。</p></details>';
+                + '<p class="grey">日志提及的模组不一定是问题原因；本次日志不能验证尚未重新载入的配置。</p></details>');
         };
         const allowedSources = next => {
             const scope = new Map((next.sourceCatalog || []).map(source => [source.name, new Set(source.files.map(file => file.path))]));
@@ -729,18 +737,18 @@
             const gameEvidence = JSON.parse(next.material).gameEvidence || [];
             el('Material').value = next.material;
             el('MaterialDetails').open = false;
-            el('TargetSummary').textContent = next.name ? '【' + next.name + '】' + (next.bootJson?.version ? ' ' + next.bootJson.version : '') + '（待核对）' : '问题描述、环境清单与加载日志';
-            el('SelectionSummary').textContent = next.files.length ? next.files.length + ' 个相关文件。可展开查看完整内容。'
+            setText(el('TargetSummary'), next.name ? '【' + next.name + '】' + (next.bootJson?.version ? ' ' + next.bootJson.version : '') + '（待核对）' : '问题描述、环境清单与加载日志');
+            const selectionText = next.files.length ? next.files.length + ' 个相关文件。可展开查看完整内容。'
                 : evidenceCount ? evidenceCount + ' 份只读源码证据；不能直接应用修改。'
                 : next.sourceCatalog?.length ? '已整理文件清单和补丁声明。分析时可补充相关源码。' : '本次不提供源码。';
-            if (gameEvidence.length) el('SelectionSummary').textContent += ' 另附 ' + gameEvidence.length + ' 份游戏段落只读证据，可在完整材料中查看。';
+            setText(el('SelectionSummary'), selectionText + (gameEvidence.length ? ' 另附 ' + gameEvidence.length + ' 份游戏段落只读证据，可在完整材料中查看。' : ''));
             const scope = allowedSources(next);
             const maxRounds = JSON.parse(next.material).diagnosisContext?.maxRounds ?? aiConnection.maxRounds;
-            el('AutoScope').textContent = scope.size ? '勾选后，将从下列 ' + scope.size + ' 个模组的声明文件自动核对问题来源并生成修改，您无需选择修复对象。' + roundLimitText(maxRounds) + '，每轮源码不超过 512 KiB；找到方案或没有新证据时提前停止。可随时取消，轮次增加可能产生更多服务费用；范围外材料需再次确认。大文件仅发送标明位置的只读片段。'
-                : '本次没有可补充的已核验源码。将分析当前材料，不自动扩大范围。';
+            setText(el('AutoScope'), scope.size ? '勾选后，将从下列 ' + scope.size + ' 个模组的声明文件自动核对问题来源并生成修改，您无需选择修复对象。' + roundLimitText(maxRounds) + '，每轮源码不超过 512 KiB；找到方案或没有新证据时提前停止。可随时取消，轮次增加可能产生更多服务费用；范围外材料需再次确认。大文件仅发送标明位置的只读片段。'
+                : '本次没有可补充的已核验源码。将分析当前材料，不自动扩大范围。');
             el('AutoScopeDetails').hidden = !scope.size && !gameEvidence.length;
-            el('AutoScopeList').innerHTML = [...scope].map(([name, paths]) => '<details class="modhub-help-topic"><summary>' + escape(name) + '（' + paths.size + ' 个文件）</summary><ul>' + [...paths].map(path => '<li>' + escape(path) + '</li>').join('') + '</ul></details>').join('');
-            if (gameEvidence.length) el('AutoScopeList').innerHTML += '<details class="modhub-help-topic"><summary>游戏段落只读证据（' + gameEvidence.length + ' 份）</summary><ul>' + gameEvidence.map(item => '<li>' + escape(item.passage) + '（仅供核对，不能修改）</li>').join('') + '</ul></details>';
+            el('AutoScopeList').innerHTML = ui([...scope].map(([name, paths]) => '<details class="modhub-help-topic"><summary>' + escape(name) + '（' + paths.size + ' 个文件）</summary><ul>' + [...paths].map(path => '<li>' + escape(path) + '</li>').join('') + '</ul></details>').join(''));
+            if (gameEvidence.length) el('AutoScopeList').innerHTML += ui('<details class="modhub-help-topic"><summary>游戏段落只读证据（' + gameEvidence.length + ' 份）</summary><ul>' + gameEvidence.map(item => '<li>' + escape(item.passage) + '（仅供核对，不能修改）</li>').join('') + '</ul></details>');
             el('ScopeDetails').open = false;
             el('Setup').hidden = false;
             if (review) {
@@ -748,12 +756,12 @@
                 status('材料已整理。请确认后开始分析。');
             }
             if (next.sourceUnavailable?.length) {
-                el('Error').textContent = next.sourceUnavailable.map(item => (item.name ? '【' + item.name + '】' : '') + item.reason).join('\n');
+                setText(el('Error'), next.sourceUnavailable.map(item => (item.name ? '【' + item.name + '】' : '') + item.reason).join('\n'));
                 el('ErrorDetails').hidden = false;
             }
         };
         const renderFiles = (next, paths) => {
-            el('Files').innerHTML = (next?.fileNames || []).map(item => '<label class="modhub-ai-file"><input type="checkbox" data-ai-file="' + escape(item.path) + '"' + (paths.includes(item.path) ? ' checked' : '') + (item.size > 262144 ? ' disabled data-ai-unavailable' : '') + '><span>' + escape(item.path) + ' <span class="grey">(' + (item.size / 1024).toFixed(1) + ' KiB)</span></span></label>').join('');
+            el('Files').innerHTML = ui((next?.fileNames || []).map(item => '<label class="modhub-ai-file"><input type="checkbox" data-ai-file="' + escape(item.path) + '"' + (paths.includes(item.path) ? ' checked' : '') + (item.size > 262144 ? ' disabled data-ai-unavailable' : '') + '><span>' + escape(item.path) + ' <span class="grey">(' + (item.size / 1024).toFixed(1) + ' KiB)</span></span></label>').join(''));
             el('SelectionDetails').hidden = !next?.fileNames.length;
             el('Files').onchange = () => { invalidate(); status('分析范围已更改。请在高级选项中点击“按选择更新材料”。', 'gold'); };
             controls(working);
@@ -803,19 +811,19 @@
             if (!current(value)) return;
             if (!next) next = await prepareLogSources(value);
             if (!current(value)) return;
-            el('SelectionReason').textContent = reason + (paths.length ? ' 将提供 ' + paths.length + ' 个声明文件，可展开查看完整材料。'
-                : next.sourceCatalog?.length ? ' 已附可用源码清单，AI 可请求相关文件继续生成修复方案。本次不发送源码。' : ' 本次不提供源码；AI 仅给出排查建议。');
-            if (!paths.length && JSON.parse(next.material).gameEvidence?.length) el('SelectionReason').textContent = reason + ' 本次未提供可修改源码，已附游戏段落只读证据供核对；可展开查看完整材料。';
+            setText(el('SelectionReason'), reason + (paths.length ? ' 将提供 ' + paths.length + ' 个声明文件，可展开查看完整材料。'
+                : next.sourceCatalog?.length ? ' 已附可用源码清单，AI 可请求相关文件继续生成修复方案。本次不发送源码。' : ' 本次不提供源码；AI 仅给出排查建议。'));
+            if (!paths.length && JSON.parse(next.material).gameEvidence?.length) setText(el('SelectionReason'), reason + ' 本次未提供可修改源码，已附游戏段落只读证据供核对；可展开查看完整材料。');
             setMaterial(next);
             if (next.sourceUnavailable?.length) packageError = [packageError, ...next.sourceUnavailable.map(item => (item.name ? '【' + item.name + '】' : '') + item.reason)].filter(Boolean).join('\n');
             if (packageError) {
-                el('Error').textContent = packageError;
+                setText(el('Error'), packageError);
                 el('ErrorDetails').hidden = false;
             }
             return el('Status');
         };
         const testStatus = (message, color = 'grey') => {
-            el('SettingsStatus').textContent = message;
+            setText(el('SettingsStatus'), message);
             el('SettingsStatus').className = 'modhub-ai-status ' + color;
         };
         const cancelTest = () => {
@@ -848,7 +856,7 @@
             const testCurrent = () => mounted === viewRevision && host.isConnected !== false && value === testTicket;
             testing = true;
             controls(true);
-            el('SettingsError').textContent = '';
+            setText(el('SettingsError'), '');
             testStatus('正在测试连接，最多等待 15 秒；您可以取消。');
             try {
                 await api.testConnection({ endpoint: aiConnection.endpoint, model: aiConnection.model, key: aiConnection.key, signal: controller.signal });
@@ -873,7 +881,7 @@
             el('Workflow').hidden = true;
             el('Welcome').hidden = el('Toolbar').hidden = true;
             el('Settings').setAttribute('aria-expanded', 'true');
-            el('SettingsError').textContent = '';
+            setText(el('SettingsError'), '');
             host.scrollIntoView?.({ block: 'start' });
             el('Endpoint').focus();
         };
@@ -889,7 +897,7 @@
                     ...(aiConnection.remember ? { remember: true, key: aiConnection.key } : {}) }));
                 closeSettings();
                 status('连接设置已保存，未发送请求。' + (aiConnection.remember ? '已在本机记住密钥。' : '密钥仅保留在本次页面内存，本机保存的密钥已移除。') + (needsPreparation ? '请点击“重新整理材料”以使用新的轮次设置。' : '请继续处理问题。'), 'gold');
-            } catch (error) { el('SettingsError').textContent = detail(error); revealHelp(el('SettingsError')); }
+            } catch (error) { setText(el('SettingsError'), detail(error)); revealHelp(el('SettingsError')); }
         };
         el('Endpoint').value = aiConnection.endpoint;
         el('Model').value = aiConnection.model;
@@ -916,7 +924,7 @@
             invalidate();
             needsPreparation = true;
             el('Setup').hidden = true;
-            el('SettingsError').textContent = '';
+            setText(el('SettingsError'), '');
             if (hadMaterial) show(2);
             status('轮次设置已更改。请重新整理材料，确认后再发送。', 'gold');
         };
@@ -929,7 +937,7 @@
             cancelTest();
             aiConnection[id.toLowerCase()] = el(id).value;
             testStatus('');
-            el('SettingsError').textContent = '';
+            setText(el('SettingsError'), '');
             connectionStatus();
             controls(false);
         };
@@ -940,7 +948,7 @@
             invalidate();
             el('Setup').hidden = true;
             const length = el('Description').value.length;
-            el('DescriptionCount').textContent = length + ' / 4000 字' + (length > 4000 ? '，请精简描述后继续' : '');
+            setText(el('DescriptionCount'), length + ' / 4000 字' + (length > 4000 ? '，请精简描述后继续' : ''));
             el('DescriptionCount').className = length > 4000 ? 'red' : 'grey';
         };
         el('Start').onclick = () => run(async value => {
@@ -974,7 +982,7 @@
             const next = candidate && paths.length ? await api.prepare(candidate.name, candidate.description, { paths, logError: aiDraft.error, includeSources: true, maxRounds: aiConnection.maxRounds })
                 : await prepareLogSources(value);
             if (!current(value)) return;
-            el('SelectionReason').textContent = next.files.length ? '按您的选择提供 ' + paths.length + ' 个文件，可展开查看完整材料。' : '本次仅分析日志与环境，不提供源码。';
+            setText(el('SelectionReason'), next.files.length ? '按您的选择提供 ' + paths.length + ' 个文件，可展开查看完整材料。' : '本次仅分析日志与环境，不提供源码。');
             setMaterial(next);
             return el('Status');
         });
@@ -987,24 +995,24 @@
             const correctingFormat = next.responseCorrection && formatFeedback;
             const title = hasChanges ? '找到待确认的代码修改' : stoppedReason ? '定位已暂停' : formatFeedback ? correctingFormat ? '需要校正分析回复' : '回复未通过校验' : next.readRequest ? '需要读取相关源码' : next.canContinue ? '还需定位问题来源' : '已获得排查建议';
             const summary = String(next.summary || '');
-            el('Advice').innerHTML = '<h3>' + title + '</h3><p class="modhub-ai-advice-text">' + escape(summary.length > 240 ? summary.slice(0, 240) + '…' : summary) + '</p>';
-            el('AdviceDetails').innerHTML = (summary.length > 240 ? '<details class="modhub-help-topic"><summary>查看完整分析</summary><p class="modhub-ai-advice-text">' + escape(summary) + '</p></details>' : '')
+            el('Advice').innerHTML = ui('<h3>' + title + '</h3><p class="modhub-ai-advice-text" data-modhub-i18n-ignore>' + escape(summary.length > 240 ? summary.slice(0, 240) + '…' : summary) + '</p>');
+            el('AdviceDetails').innerHTML = ui((summary.length > 240 ? '<details class="modhub-help-topic"><summary>查看完整分析</summary><p class="modhub-ai-advice-text">' + escape(summary) + '</p></details>' : '')
                 + '<details class="modhub-help-topic"><summary>分析依据</summary><p class="modhub-ai-advice-text">' + escape(next.evidence) + '</p></details>'
                 + '<details class="modhub-help-topic"><summary>如何验证结果</summary><p class="modhub-ai-advice-text">' + escape(next.verification) + '</p></details>'
-                + (next.notice ? '<details class="modhub-help-topic"><summary>回复说明</summary><p>' + escape(next.notice) + '</p></details>' : '');
-            if (next.readRequest) el('AdviceDetails').innerHTML += '<details class="modhub-help-topic"><summary>需要查看的文件（' + next.readRequest.paths.length + ' 个）</summary><p>【' + escape(next.readRequest.name) + '】：' + escape(next.readRequest.reason) + '</p><ul>'
-                + next.readRequest.paths.map(path => '<li>' + escape(path) + '</li>').join('') + '</ul></details>';
-            el('NextHint').textContent = stoppedReason || (hasChanges ? '请查看下方修改内容。确认后，将建立还原点并保存。'
+                + (next.notice ? '<details class="modhub-help-topic"><summary>回复说明</summary><p>' + escape(next.notice) + '</p></details>' : ''));
+            if (next.readRequest) el('AdviceDetails').innerHTML += ui('<details class="modhub-help-topic"><summary>需要查看的文件（' + next.readRequest.paths.length + ' 个）</summary><p data-modhub-i18n-ignore>【' + escape(next.readRequest.name) + '】：' + escape(next.readRequest.reason) + '</p><ul>'
+                + next.readRequest.paths.map(path => '<li>' + escape(path) + '</li>').join('') + '</ul></details>');
+            setText(el('NextHint'), stoppedReason || (hasChanges ? '请查看下方修改内容。确认后，将建立还原点并保存。'
                 : correctingFormat ? '可使用已确认的材料校正回复，无需补充日志或源码。校正占用本次分析轮次。'
                 : next.readRequest ? '继续后只在本机整理【' + next.readRequest.name + '】的 ' + next.readRequest.paths.length + ' 个文件。确认发送后，再生成修复方案。'
                 : next.canContinue ? '尚无可应用的修改。可继续核对源码来源，再确认发送。'
-                : next.continuationReason || '暂无可应用的修改。可返回调整分析范围，或按下方建议排查。');
+                : next.continuationReason || '暂无可应用的修改。可返回调整分析范围，或按下方建议排查。'));
             el('Diff').value = next.diff || 'AI 没有提出可应用的代码改动。可使用配置检查，或按上述建议处理。';
             el('Diff').hidden = !hasChanges;
             el('CodeRepairHint').hidden = hasChanges;
-            el('CodeRepairHint').textContent = !stoppedReason && correctingFormat ? '系统将保留现有材料和已完成的诊断，在原范围与轮次上限内校正一次回复；尚未修改文件。'
+            setText(el('CodeRepairHint'), !stoppedReason && correctingFormat ? '系统将保留现有材料和已完成的诊断，在原范围与轮次上限内校正一次回复；尚未修改文件。'
                 : !stoppedReason && (next.canContinue || next.canTriage || next.readRequest) ? '将根据日志和已读取的源码自动核对修复对象，您无需判断或选择模组。'
-                : '本次尚未生成可应用的修改。当前日志、环境和已读源码均已保留，您无需再次提供这些材料。可先检查已有配置或查看具体分析依据；调整问题说明为可选操作。游戏本体、内嵌模组及大文件只读片段不在代码修改范围内；配置检查仅处理前置和加载顺序。';
+                : '本次尚未生成可应用的修改。当前日志、环境和已读源码均已保留，您无需再次提供这些材料。可先检查已有配置或查看具体分析依据；调整问题说明为可选操作。游戏本体、内嵌模组及大文件只读片段不在代码修改范围内；配置检查仅处理前置和加载顺序。');
             show(3);
             status(hasChanges ? '分析已完成。请审阅修改；尚未保存任何文件。' : '分析已结束，尚无可应用的代码修改。已保留具体原因和下一步，您无需选择修复对象。');
             el('Status').focus({ preventScroll: true });
@@ -1022,7 +1030,7 @@
         el('Analyze').onclick = () => run(async value => {
             if (!prepared) throw new Error('材料尚未就绪。请重新整理材料后再试。');
             try { api.validateConnection(aiConnection); }
-            catch (error) { el('Settings').onclick(); el('SettingsError').textContent = detail(error); return el('Endpoint'); }
+            catch (error) { el('Settings').onclick(); setText(el('SettingsError'), detail(error)); return el('Endpoint'); }
             const controller = new AbortController();
             const connection = { ...aiConnection };
             const maxRounds = api.normalizeMaxRounds(JSON.parse(prepared.material).diagnosisContext?.maxRounds ?? connection.maxRounds);
@@ -1043,10 +1051,10 @@
             try {
                 if (automatic) {
                     plan = null;
-                    el('Advice').innerHTML = '<h3>正在分析问题</h3><p>将根据加载日志核对相关源码。找到修改方案或无法继续时，会显示结果。</p>';
-                    el('AdviceDetails').innerHTML = '';
+                    el('Advice').innerHTML = ui('<h3>正在分析问题</h3><p>将根据加载日志核对相关源码。找到修改方案或无法继续时，会显示结果。</p>');
+                    el('AdviceDetails').innerHTML = ui('');
                     el('CodeRepairHint').hidden = true;
-                    el('NextHint').textContent = '将自动核对问题来源并生成修改，' + roundLimitText(maxRounds) + '；找到方案或没有新证据时提前停止。可随时取消，代码修改需要单独确认。';
+                    setText(el('NextHint'), '将自动核对问题来源并生成修改，' + roundLimitText(maxRounds) + '；找到方案或没有新证据时提前停止。可随时取消，代码修改需要单独确认。');
                     el('Diff').hidden = true;
                     show(3);
                     controls(true);
@@ -1135,8 +1143,8 @@
             aiDraft.modName = next.name || '';
             el('Target').value = next.name || '';
             renderFiles(next, next.files.map(file => file.path));
-            el('SelectionReason').textContent = next.name ? '已整理【' + next.name + '】的 ' + next.files.length + ' 个相关文件。已保留前次分析，确认发送后继续。'
-                : '已保留前次分析与已核对文件记录。将继续从真实声明清单查找来源，本次不提供可修改源码。';
+            setText(el('SelectionReason'), next.name ? '已整理【' + next.name + '】的 ' + next.files.length + ' 个相关文件。已保留前次分析，确认发送后继续。'
+                : '已保留前次分析与已核对文件记录。将继续从真实声明清单查找来源，本次不提供可修改源码。');
             setMaterial(next);
             status(next.name ? '相关源码已整理。请确认后继续分析。' : '来源清单已整理。请确认后继续定位。');
             return el('Status');
@@ -1150,7 +1158,7 @@
             status('材料仍保留。需要时可在高级选项调整范围，再点击“发送并分析”。');
         };
         const saved = (scroll = true) => {
-            el('Saved').textContent = '【' + last.name + '】' + (last.uncertain ? '操作未完整通过核验。请先查看具体原因，核对或还原修复前状态。' : last.verified ? '已由您确认原问题解决。' : '代码修改已保存，等待重新载入并验证。') + (availablePointId === last.pointId ? ' 修复前还原点：' + last.pointId : '');
+            setText(el('Saved'), '【' + last.name + '】' + (last.uncertain ? '操作未完整通过核验。请先查看具体原因，核对或还原修复前状态。' : last.verified ? '已由您确认原问题解决。' : '代码修改已保存，等待重新载入并验证。') + (availablePointId === last.pointId ? ' 修复前还原点：' + last.pointId : ''));
             el('Verified').disabled = working || last.verified || last.uncertain;
             show(4, scroll);
         };
@@ -1246,7 +1254,7 @@
 
     function renderResults(container, snapshot, checked) {
         if (snapshot.stale) {
-            container.innerHTML = '<p class="gold" role="status">检查期间配置发生变化。请等待操作完成后重新检查。</p>';
+            container.innerHTML = ui('<p class="gold" role="status">检查期间配置发生变化。请等待操作完成后重新检查。</p>');
             return;
         }
         const config = snapshot.issues.filter(issue => !issue.id.startsWith('log-'));
@@ -1259,13 +1267,13 @@
                 + '</p><p class="grey">建议：' + escape(issue.advice) + '</p><div class="modhub-help-actions">'
                 + (issue.repair ? '<button type="button" class="macro-button modhub-btn-primary" data-help-repair="' + escape(issue.id) + '">预览修复</button>' : '')
                 + action(issue.tab, issue.query) + '</div></article>').join('');
-        container.innerHTML = '<p class="modhub-help-result-state ' + (problem ? 'red' : review || !checked ? 'gold' : 'green') + '">' + title + '</p>'
+        container.innerHTML = ui('<p class="modhub-help-result-state ' + (problem ? 'red' : review || !checked ? 'gold' : 'green') + '">' + title + '</p>'
             + '<p class="grey">' + (!checked ? '点击开始检查，核对前置模组和加载顺序。' : '可修复的问题可选择“预览修复”，其他问题请查看处理建议。') + '</p>'
             + cards(config) + (snapshot.different ? '<div class="modhub-help-actions"><button type="button" class="macro-button modhub-btn-primary" data-help-reload>重新载入以验证配置</button></div>' : '')
             + '<details id="modHubHelpLogDetails" class="modhub-help-topic"><summary>本次运行日志：错误 ' + snapshot.analysis.errorCount + ' 条，警告 ' + snapshot.analysis.warnCount + ' 条</summary>'
             + '<p class="grey">以下是本次启动日志。修改模组配置后，请重新载入游戏，再查看最新日志。</p>'
             + cards(logs) + action('加载日志') + '</details>'
-            + (snapshot.compatibility && window.modHubCompatibility?.render ? '<details class="modhub-help-topic"><summary>兼容性依据与检查范围</summary>' + window.modHubCompatibility.render(snapshot, { compact: true }) + '</details>' : '');
+            + (snapshot.compatibility && window.modHubCompatibility?.render ? '<details class="modhub-help-topic"><summary>兼容性依据与检查范围</summary>' + window.modHubCompatibility.render(snapshot, { compact: true }) + '</details>' : ''));
     }
 
     function remoteSummary() {
@@ -1277,7 +1285,7 @@
         const count = Number(summary.unread || 0) + Number(summary.pending || 0);
         const label = '远程协助：' + Number(summary.unread || 0) + ' 条未读消息，' + Number(summary.pending || 0) + ' 项待处理操作';
         document.querySelectorAll('.modhub-remote-entry-count').forEach(element => {
-            element.textContent = count ? label : '';
+            setText(element, count ? label : '');
         });
         document.querySelectorAll('.modhub-sidebar-entry').forEach(entry => {
             let badge = entry.querySelector('.modhub-assist-entry-badge');
@@ -1290,9 +1298,9 @@
             }
             if (!badge) return;
             badge.hidden = !count;
-            badge.textContent = count > 99 ? '99+' : String(count);
-            badge.title = label;
-            badge.setAttribute('aria-label', label + '，打开协助工作区');
+            setText(badge, count > 99 ? '99+' : String(count));
+            badge.title = window.modHubT?.(label) || label;
+            badge.setAttribute('aria-label', window.modHubT?.(label + '，打开协助工作区') || label + '，打开协助工作区');
         });
     }
 
@@ -1340,7 +1348,7 @@
         let snapshot = null;
         let request = 0;
         window.modHubRemoteAssist?.unmount();
-        container.innerHTML = '<div id="modHubHelpHome"><header class="modhub-help-home-header"><h2>帮助中心</h2><p class="grey">我们随时为您提供帮助。请告诉我们您遇到的问题，以便为您提供合适的帮助和支持。</p></header>'
+        container.innerHTML = ui('<div id="modHubHelpHome"><header class="modhub-help-home-header"><h2>帮助中心</h2><p class="grey">我们随时为您提供帮助。请告诉我们您遇到的问题，以便为您提供合适的帮助和支持。</p></header>'
             + '<section id="modHubHelpCommon" class="modhub-help-section modhub-help-home-block" aria-labelledby="modHubHelpCommonTitle"><header class="modhub-help-block-heading"><h3 id="modHubHelpCommonTitle">常见问题</h3><p class="grey">查看排查步骤和可用的配置修复，无需连接 AI。</p></header><div class="modhub-help-topics">'
             + MODHUB_HELP_TOPICS.map((topic, index) => '<button type="button" class="macro-button modhub-btn-secondary" data-help-topic="' + index + '">' + escape(topic.title) + '</button>').join('') + '</div>'
             + '<details id="modHubHelpLocalDetails" class="modhub-help-topic"><summary>检查配置与可用修复</summary><div class="modhub-help-local-content"><p class="grey">查看排查步骤，检查配置，再预览可以执行的修复。</p>'
@@ -1356,7 +1364,7 @@
             + '<label><input id="modHubHelpAllLogs" type="checkbox">附带全部已捕获日志</label><div class="modhub-help-actions modhub-help-actions-primary">'
             + '<button id="modHubHelpPreview" type="button" class="macro-button modhub-btn-primary">生成并预览求助信息</button>'
             + '<button id="modHubHelpCopy" type="button" class="macro-button modhub-btn-secondary" disabled>复制求助信息</button></div>'
-            + '<textarea id="modHubHelpReport" class="modhub-help-report" aria-label="求助信息预览，可选择文本手动复制" readonly placeholder="生成报告后可在此预览和选择文本。"></textarea></details></div></div><section id="modHubHelpRemoteWorkspace" hidden aria-label="远程协助工作区"></section>';
+            + '<textarea id="modHubHelpReport" class="modhub-help-report" aria-label="求助信息预览，可选择文本手动复制" readonly placeholder="生成报告后可在此预览和选择文本。"></textarea></details></div></div><section id="modHubHelpRemoteWorkspace" hidden aria-label="远程协助工作区"></section>');
         const initial = { analysis: readLogs(), issues: [] };
         const refreshAiHistory = initAi(container.querySelector('#modHubHelpAi'), mounted, initial.analysis);
         const results = container.querySelector('#modHubHelpResults');
@@ -1375,10 +1383,10 @@
         };
         symptom.onchange = () => {
             const topic = symptom.value === '' ? null : MODHUB_HELP_TOPICS[Number(symptom.value)];
-            topicView.innerHTML = topic ? '<h4>排查步骤</h4><details class="modhub-help-topic" open><summary>' + escape(topic.title) + '</summary><ol>'
+            topicView.innerHTML = ui(topic ? '<h4>排查步骤</h4><details class="modhub-help-topic" open><summary>' + escape(topic.title) + '</summary><ol>'
                 + topic.steps.map(step => '<li>' + escape(step) + '</li>').join('') + '</ol><div class="modhub-help-actions">'
                 + (Number(symptom.value) === 3 ? '<button type="button" class="macro-button modhub-btn-primary" data-help-images>刷新图像缓存</button>' : '')
-                + topic.tabs.map(tab => action(tab)).join('') + (topic.restore ? '<button type="button" class="macro-button modhub-btn-secondary" data-help-restore>时间点还原</button>' : '') + '</div></details>' : '';
+                + topic.tabs.map(tab => action(tab)).join('') + (topic.restore ? '<button type="button" class="macro-button modhub-btn-secondary" data-help-restore>时间点还原</button>' : '') + '</div></details>' : '');
         };
         logIssues(initial);
         renderResults(results, initial, false);
@@ -1387,16 +1395,16 @@
             disable(true);
             copyButton.disabled = true;
             preview.value = '';
-            status.textContent = '';
+            setText(status, '');
             results.className = ''; results.setAttribute('role', 'status');
-            results.innerHTML = window.modHubLoadingHtml('正在读取配置与安装包声明，请稍候。');
+            results.innerHTML = ui(window.modHubLoadingHtml('正在读取配置与安装包声明，请稍候。'));
             try {
                 const next = await check();
                 if (!current(ticket)) return;
                 snapshot = next;
                 renderResults(results, next, true);
                 revealHelp(results);
-                checkButton.textContent = '重新检查';
+                setText(checkButton, '重新检查');
                 if (report && !next.stale) {
                     container.querySelector('#modHubHelpReportDetails').open = true;
                     preview.value = buildReport(next, { allLogs: allLogs.checked });
@@ -1406,7 +1414,7 @@
             } catch (error) {
                 if (current(ticket)) {
                     results.className = 'red'; results.setAttribute('role', 'alert');
-                    results.textContent = '检查失败：' + detail(error); revealHelp(results);
+                    setText(results, '检查失败：' + detail(error)); revealHelp(results);
                     if (!results.closest?.('[hidden]') && !document.hidden) await window.modHubAlert?.(detail(error), '检查未完成');
                 }
             } finally {
@@ -1449,12 +1457,12 @@
                 copyButton.disabled = true;
                 preview.value = '';
                 status.className = 'gold';
-                status.innerHTML = window.modHubLoadingHtml('正在核对修复条件，请稍候。');
+                status.innerHTML = ui(window.modHubLoadingHtml('正在核对修复条件，请稍候。'));
                 const result = await repair(snapshot, repairButton.dataset.helpRepair);
                 if (!current(ticket)) return;
                 if (result.snapshot) { snapshot = result.snapshot; renderResults(results, snapshot, true); }
                 status.className = result.ok ? 'green' : result.status === 'failed' ? 'red' : 'gold';
-                status.textContent = result.reason;
+                setText(status, result.reason);
                 disable(false);
                 revealHelp(status);
                 if (result.status === 'failed' && !status.closest?.('[hidden]') && !document.hidden) await window.modHubAlert?.(result.reason, '修复未完成');
@@ -1467,8 +1475,8 @@
                 try {
                     const refreshed = window.modHubRefreshBeautyImages?.();
                     status.className = refreshed ? 'gold' : 'red';
-                    status.textContent = refreshed ? '图像缓存已刷新。请检查图片是否恢复显示；如仍异常，请核对图像包和覆盖顺序。' : '图像缓存或画布未能完整刷新。请核对图像包，保存游戏进度后重新载入。';
-                } catch (error) { status.className = 'red'; status.textContent = '刷新未完成：' + detail(error); }
+                    setText(status, refreshed ? '图像缓存已刷新。请检查图片是否恢复显示；如仍异常，请核对图像包和覆盖顺序。' : '图像缓存或画布未能完整刷新。请核对图像包，保存游戏进度后重新载入。');
+                } catch (error) { status.className = 'red'; setText(status, '刷新未完成：' + detail(error)); }
                 revealHelp(status);
                 if (status.className === 'red' && !status.closest?.('[hidden]') && !document.hidden) await window.modHubAlert?.(status.textContent, '刷新未完成');
                 return;
@@ -1498,7 +1506,11 @@
         }
     }
 
-    window.modHubHelp = { init, openRemote, openProblem, suggestQuestions, check, getDependencyContext, checkDeclarations, buildRepairPlan, repair, buildReport, copyReport, previewRemoteConfiguration, applyRemoteConfiguration, redactRemoteCredentials };
+    window.modHubHelp = { isBusy: () => repairing || aiBusy(), init, openRemote, openProblem, suggestQuestions, check, getDependencyContext, checkDeclarations, buildRepairPlan, repair, buildReport, copyReport, previewRemoteConfiguration, applyRemoteConfiguration, redactRemoteCredentials };
+    window.addEventListener('modhub:languagechange', () => {
+        window.modHubLocalizeOwned?.(document.getElementById('modHubHelpContainer'));
+        updateRemoteBadges();
+    });
     window.addEventListener('modHubRemoteAssistUpdate', updateRemoteBadges);
     window.jQuery?.(document).on?.(':passagedisplay.modHubRemoteAssistBadge', updateRemoteBadges);
     window.jQuery?.(document).one?.(':storyready.modHubRemoteAssist', () => {

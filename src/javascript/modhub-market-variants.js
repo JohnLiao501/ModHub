@@ -18,6 +18,20 @@
         return { groupId: group, groupName, type: value.type, id, label };
     }
 
+    function normalizePackageLanguages(value) {
+        if (!Array.isArray(value)) return [];
+        const result = [];
+        for (const item of value) {
+            const locale = text(item, 48);
+            if (!/^[a-z]{2,3}(?:-[a-z0-9]{2,8})*$/i.test(locale)) continue;
+            try {
+                const normalized = Intl.getCanonicalLocales(locale)[0];
+                if (normalized && !result.includes(normalized)) result.push(normalized);
+            } catch (_) {}
+        }
+        return result;
+    }
+
     const assetUrl = value => {
         try {
             const url = new URL(value);
@@ -139,6 +153,12 @@
         return variant ? `${name}（${variant.label}）` : name;
     }
 
-    window.modHubMarketVariants = { normalizeVariant, normalizeRequiredDependencies, normalizePackageEditions,
-        normalizeOptionalResources, getPackageEdition, groupMods, getMembers, getDisplayName };
+    function getLabelText(label, locale) {
+        const source = typeof label === 'string' ? label : '';
+        if (!source) return source;
+        return window.modHubGetMarketCardText?.({ name: source }, 'name', locale)?.text || source;
+    }
+
+    window.modHubMarketVariants = { normalizeVariant, normalizePackageLanguages, normalizeRequiredDependencies, normalizePackageEditions,
+        normalizeOptionalResources, getPackageEdition, groupMods, getMembers, getDisplayName, getLabelText };
 })();

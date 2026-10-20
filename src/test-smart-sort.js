@@ -14,11 +14,14 @@ process.on('beforeExit', () => {
 (async () => {
     require('../tests/wiki-title-core.test.cjs');
     await require('../tests/style.test')();
+    await require('../tests/i18n.test')();
     await require('../tests/manager.test')();
     await require('../tests/restore.test')();
     await require('../tests/restore-panel.test')();
     await require('../tests/restore-startup.test')();
     await require('../tests/market-catalog.test')();
+    await require('../tests/market-content-language.test')();
+    await require('../tests/market-card-i18n.test')();
     await require('../tests/market-performance.test')();
     await require('../tests/market-startup.test')();
     await require('../tests/market-search.test')();
@@ -32,6 +35,7 @@ process.on('beforeExit', () => {
     await require('../tests/ai-manager.test')();
     await require('../tests/ai-repair.test')();
     await require('../tests/help.test')();
+    await require('../tests/help-i18n.test')();
     await require('../tests/help-ai.test')();
     await require('../tests/remote-help.test')();
     await require('../tests/game-command.test')();
@@ -47,7 +51,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.7.6 全部测试通过');
+    console.log('ModHub v1.8.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

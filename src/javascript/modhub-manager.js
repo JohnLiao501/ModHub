@@ -1,3 +1,4 @@
+const modHubTranslateManagerHtml = html => window.modHubTranslateHtml?.(html) ?? html;
 /**
  * ModHub - 模组管理与公共入口
  * 提供模组导入、状态持久化、排序与操作协调，连接美化、说明及日志模块
@@ -187,9 +188,15 @@ window._modHubDisabledModInfo = window._modHubDisabledModInfo || new Map();
 window._modHubBatchMode = false;
 window._modHubSelectedMods = window._modHubSelectedMods || new Set();
 
+const MODHUB_TABS = { manager: '模组管理', market: '模组市场', readme: '模组说明', log: '加载日志', help: '帮助中心' };
+window.modHubGetTabId = function(value) {
+    if (value?.dataset?.modhubTab) return value.dataset.modhubTab;
+    const text = String(typeof value === 'string' ? value : value?.textContent || '').trim();
+    return Object.keys(MODHUB_TABS).find(id => text === id || text.startsWith(MODHUB_TABS[id]) || text.startsWith(window.modHubT?.(MODHUB_TABS[id]) || MODHUB_TABS[id])) || '';
+};
 window.modHubIsManagerTabLabel = function(text) {
     const label = String(text || '').trim();
-    return ['模组管理', '模组市场', '模组说明', '加载日志', '帮助中心'].some(name => label.startsWith(name));
+    return !!window.modHubGetTabId(label);
 };
 
 window.modHubIsCloseButton = function(elementOrText) {
@@ -208,10 +215,18 @@ window.modHubIsCloseButton = function(elementOrText) {
     return false;
 };
 
-// 模组管理器顶栏标签初始化（过滤并保留管理 Tab 及移动端左侧关闭按钮）
+// 模组管理器顶栏初始化，保留原生移动关闭选项对应的页签索引。
 window.modHubInitOverlayTabs = function() {
     window.modHubEnsureStyles?.({ active: true });
     window.modHubBindReloadReminder();
+    const tabRoot = document.querySelector?.('#overlayTabs.modhub-modloader-tabs');
+    for (const button of tabRoot?.querySelectorAll('button') || []) {
+        const id = window.modHubGetTabId(button);
+        if (id) button.setAttribute('data-modhub-tab', id);
+    }
+    const title = document.getElementById?.('customOverlayTitle');
+    window.modHubLocalizeOwned?.(title || tabRoot);
+    window.modHubRefreshLanguageSelectors?.();
     window.modHubUpdateMarketTabBadge();
     if (typeof $ === 'undefined') return;
     var tabs = $("#overlayTabs.modhub-modloader-tabs");
@@ -653,7 +668,9 @@ window.modHubGetModSubtext = function(modName, modInfo, isBuiltin = false, skipM
         // 1. 优先提取 boot.json 中的 nickName（支持多语言对象或直接字符串）
         if (boot.nickName) {
             if (typeof boot.nickName === 'object') {
-                nick = boot.nickName['zh-CN'] || boot.nickName['zh'] || boot.nickName['cn'] || boot.nickName['chs'] || boot.nickName['hans'] || '';
+                const language = window.modHubGetLanguage?.() || 'zh-CN';
+                const keys = language === 'en' ? ['en', 'en-US', 'en-GB'] : language === 'zh-TW' ? ['zh-TW', 'zh-Hant', 'zh-HK', 'tw', 'cht', 'hant', 'zh'] : ['zh-CN', 'zh-Hans', 'zh', 'cn', 'chs', 'hans'];
+                nick = keys.map(key => boot.nickName[key]).find(value => typeof value === 'string' && value.trim()) || '';
                 if (!nick) {
                     const firstVal = Object.values(boot.nickName).find(v => typeof v === 'string' && v.trim());
                     if (firstVal) nick = firstVal;
@@ -847,18 +864,19 @@ window.modHubUpdateMarketTabBadge = function(count = window._modHubUpdatableCoun
     window._modHubUpdatableCount = count;
     if (typeof document === 'undefined') return;
     const buttons = [...document.querySelectorAll('#overlayTabs button')]
-        .filter(btn => btn.textContent.includes('模组市场'));
+        .filter(btn => window.modHubGetTabId(btn) === 'market');
     buttons.push(...document.querySelectorAll('.modhub-sidebar-entry > button:not(.modhub-assist-entry-badge)'));
     for (const btn of buttons) {
+        const visibleCount = window.modHubGetTabId(btn) === 'market' && ['en', 'none'].includes(window.modHubMarket?.getEffectiveContentLanguage?.()) ? 0 : count;
         let badge = btn.querySelector('.modhub-tab-badge');
-        if (count > 0) {
+        if (visibleCount > 0) {
             if (!badge) {
                 badge = document.createElement('span');
                 badge.className = 'modhub-tab-badge';
                 btn.appendChild(badge);
             }
-            badge.textContent = count;
-            badge.title = `${count} 个模组有新版本可用`;
+            badge.textContent = visibleCount;
+            badge.title = window.modHubT?.('{count} 个模组有新版本可用', { count: visibleCount }) || `${visibleCount} 个模组有新版本可用`;
             badge.setAttribute('aria-label', badge.title);
         } else if (badge) {
             badge.remove();
@@ -893,11 +911,12 @@ window.modHubNotifyUpdateState = function(count, list) {
         const tag = row.querySelector('.modhub-update-tag');
         const button = row.querySelector('.btn-inline-update');
         if (tag) {
-            tag.textContent = version ? ` | [可更新 -> ${version}]` : '';
+            if (version && window.modHubBindText) window.modHubBindText(tag, ' | [可更新 -> {p0}]', { p0: version });
+            else tag.textContent = version ? ` | [可更新 -> ${version}]` : '';
             tag.style.display = version ? '' : 'none';
         }
         if (button) {
-            button.title = version ? `立即升级至 ${version}` : '';
+            button.title = version ? (window.modHubT?.('立即升级至 {p0}', { p0: version }) || `立即升级至 ${version}`) : '';
             button.style.display = version ? '' : 'none';
         }
     }
@@ -909,7 +928,7 @@ window.modHubNotifyUpdateState = function(count, list) {
     const bannerEl = document.getElementById('modHubUpdateBanner');
     if (bannerEl) {
         if (window._modHubUpdatableCount > 0) {
-            bannerEl.innerHTML = `
+            bannerEl.innerHTML = modHubTranslateManagerHtml(`
                 <div class="modhub-update-banner modhub-clickable" onclick="window.modHubGoToMarketUpdates()" title="点击前往模组市场一键更新">
                     <div class="modhub-update-banner-main">
                         <div class="modhub-update-banner-title">发现 ${window._modHubUpdatableCount} 个模组有新版本可用！</div>
@@ -917,7 +936,7 @@ window.modHubNotifyUpdateState = function(count, list) {
                     </div>
                     <button type="button" class="macro-button modhub-btn-primary" onclick="event.stopPropagation(); window.modHubGoToMarketUpdates();">查看更新</button>
                 </div>
-            `;
+            `);
             bannerEl.style.display = 'block';
         } else {
             bannerEl.innerHTML = '';
@@ -932,20 +951,20 @@ window.modHubNotifyUpdateState = function(count, list) {
             fourthCard.title = '点击前往模组市场查看并升级';
             fourthCard.onclick = () => window.modHubGoToMarketUpdates && window.modHubGoToMarketUpdates();
             fourthCard.style.borderColor = 'var(--gold, #d4af37)';
-            fourthCard.innerHTML = `
+            fourthCard.innerHTML = modHubTranslateManagerHtml(`
                 <div class="modhub-stat-num gold modhub-pulse-gold">${window._modHubUpdatableCount}</div>
                 <div class="gold modhub-stat-label">发现新版</div>
-            `;
+            `);
         } else {
             const mlVersion = window.modHubGetGui()?.gModUtils?.version || window.modUtils?.version || '2.x';
             fourthCard.className = 'childItem modhub-stat-card';
             fourthCard.title = '';
             fourthCard.onclick = null;
             fourthCard.style.borderColor = '';
-            fourthCard.innerHTML = `
+            fourthCard.innerHTML = modHubTranslateManagerHtml(`
                 <div class="modhub-stat-num">${window.modHubEscapeHtml(mlVersion)}</div>
                 <div class="grey modhub-stat-label">加载器版本</div>
-            `;
+            `);
         }
     }
 };
@@ -983,7 +1002,7 @@ window.modHubUpdateGeneralInfo = async function() {
                 <div class="grey modhub-stat-label">加载器版本</div>
                </div>`;
 
-        infoEl.innerHTML = `
+        infoEl.innerHTML = modHubTranslateManagerHtml(`
             <div class="childItem modhub-stat-card">
                 <div class="modhub-stat-num gold">${allMods.length}</div>
                 <div class="grey modhub-stat-label">已加载模组</div>
@@ -997,13 +1016,13 @@ window.modHubUpdateGeneralInfo = async function() {
                 <div class="grey modhub-stat-label">已禁用模组</div>
             </div>
             ${fourthCardHtml}
-        `;
+        `);
 
         // 渲染置顶横幅
         const bannerEl = document.getElementById('modHubUpdateBanner');
         if (bannerEl) {
             if (updatableCount > 0) {
-                bannerEl.innerHTML = `
+                bannerEl.innerHTML = modHubTranslateManagerHtml(`
                     <div class="modhub-update-banner modhub-clickable" onclick="window.modHubGoToMarketUpdates()" title="点击前往模组市场一键更新">
                         <div class="modhub-update-banner-main">
                             <div class="modhub-update-banner-title">发现 ${updatableCount} 个模组有新版本可用！</div>
@@ -1011,7 +1030,7 @@ window.modHubUpdateGeneralInfo = async function() {
                         </div>
                         <button type="button" class="macro-button modhub-btn-primary" onclick="event.stopPropagation(); window.modHubGoToMarketUpdates();">查看更新</button>
                     </div>
-                `;
+                `);
                 bannerEl.style.display = 'block';
             } else {
                 bannerEl.innerHTML = '';
@@ -1033,7 +1052,7 @@ window.modHubSwitchTab = function(tabName, options = {}) {
     if (typeof document === 'undefined') return false;
     const tabs = document.querySelectorAll('#overlayTabs button');
     for (const btn of tabs) {
-        if (btn.textContent.trim().includes(tabName)) {
+        if (window.modHubGetTabId(btn) === window.modHubGetTabId(tabName) && window.modHubGetTabId(tabName)) {
             if (options.skipReloadPrompt) window._modHubSkipReloadPrompt = (window._modHubSkipReloadPrompt || 0) + 1;
             try { btn.click(); }
             finally { if (options.skipReloadPrompt) window._modHubSkipReloadPrompt--; }
@@ -1045,6 +1064,7 @@ window.modHubSwitchTab = function(tabName, options = {}) {
 
 // 通用模组管理器弹窗安全呼出接口（支持直达任意 Tab，如“加载日志”）
 window.modHubOpenManager = function(tabName = '模组管理', options = {}) {
+    tabName = MODHUB_TABS[window.modHubGetTabId(tabName)] || tabName;
     const navigation = (window._modHubManagerNavigationRevision || 0) + 1;
     window._modHubManagerNavigationRevision = navigation;
     window._modHubPendingLogSearch = null;
@@ -1836,6 +1856,7 @@ window.modHubLoadModManageState = function(refresh = false, options = {}) {
 };
 
 window.modHubUpdateManagerStatus = function() {
+    window.modHubRefreshLanguageSelectors?.();
     const busy = !!(window._modHubManagerBusy || window._modHubModLoading || window._modHubManagerInit);
     const controls = document.getElementById('modHubManagerControls');
     if (controls) {
@@ -1853,8 +1874,9 @@ window.modHubUpdateManagerStatus = function() {
     const status = document.getElementById('modHubManagerStatus');
     if (status) {
         const message = window._modHubManagerStatus || (busy ? '正在读取配置，请稍候...' : '配置自动保存；模组重新载入后生效，美化即时应用');
-        status.innerHTML = '<span>' + window.modHubEscapeHtml(message) + '</span>';
+        status.innerHTML = modHubTranslateManagerHtml('<span>' + window.modHubEscapeHtml(message) + '</span>');
         status.className = window._modHubManagerSaveFailed ? 'red' : 'grey';
+        status.hidden = !window._modHubManagerStatus && !busy && !window._modHubManagerSaveFailed;
     }
 };
 
@@ -1965,7 +1987,7 @@ window.initModManage = async function(refresh = false) {
     const container = document.getElementById('modHubModManageContainer');
     if (!container) return;
     if (window._modHubModState) window.modHubRenderModManageUI();
-    else container.innerHTML = window.modHubLoadingHtml('正在读取模组列表...');
+    else container.innerHTML = modHubTranslateManagerHtml(window.modHubLoadingHtml('正在读取模组列表...'));
     if (window._modHubManagerInit) return window._modHubManagerInit;
     if (window._modHubManagerBusy) return;
     if (!refresh && window._modHubModState && window._modHubBeautyLoaded && !window._modHubModLoading) return;
@@ -2024,8 +2046,6 @@ window.initModManage = async function(refresh = false) {
 };
 
 const MODHUB_MANAGER_TOOLS = [
-    { id: 'modHubSmartSortAllBtn', label: '智能排序', title: '根据依赖整理模组的加载顺序和美化包的覆盖顺序', action: 'window.modHubSmartSortAll()', busy: true },
-    { id: 'modHubRefreshListBtn', label: '刷新列表', title: '在原版管理器修改后，重新读取列表与模组资料', action: 'window.initModManage(true)', busy: true },
     { id: 'modHubCompatibilityBtn', label: '兼容性检查', title: '检查已安装模组的依赖和兼容性', action: "window.modHubCompatibility?.show?.() || window.modHubAlert('兼容性检查尚未就绪，请等待模组加载完成后重试。')" },
     { id: 'modHubRestorePointsBtn', label: '时间点还原', title: '查看和还原已保存的模组状态', action: 'window.modHubRestore.showHistory()' }
 ];
@@ -2133,7 +2153,7 @@ function modHubBindManagerTools(container) {
             try { localStorage.setItem('modhub_manager_pinned_tools', JSON.stringify(next)); }
             catch (_) { window.modHubShowToast('无法保存固定工具设置，请检查浏览器存储权限。', 'warning'); return; }
             const pinnedTools = container.querySelector('#modHubManagerPinnedTools');
-            if (pinnedTools) pinnedTools.innerHTML = modHubPinnedManagerToolsHtml(next);
+            if (pinnedTools) pinnedTools.innerHTML = modHubTranslateManagerHtml(modHubPinnedManagerToolsHtml(next));
             const active = next.includes(id), label = `${active ? '取消固定' : '固定'}${MODHUB_MANAGER_TOOLS.find(tool => tool.id === id).label}${active ? '' : '到操作栏'}`;
             button.setAttribute('aria-pressed', String(active)); button.setAttribute('aria-label', label); button.setAttribute('title', label);
             window.modHubUpdateManagerStatus();
@@ -2152,7 +2172,7 @@ window.modHubRenderModManageUI = function() {
     window.modHubEnsureModStateSync(window._modHubModState);
     const sectionStates = new Map([...container.querySelectorAll('details[data-section]')].map(detail => [detail.dataset.section, detail.open]));
     const isSectionOpen = (name, defaultOpen = false) => sectionStates.has(name) ? sectionStates.get(name) : defaultOpen;
-    const isNarrowScreen = typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 768px)').matches;
+    const languageControl = container.querySelector('[data-modhub-language-control]');
     const gui = window.modHubGetGui();
     const { sideMods, builtInMods } = window._modHubModState;
     const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
@@ -2162,17 +2182,14 @@ window.modHubRenderModManageUI = function() {
 
     let html = '<fieldset id="modHubManagerControls" class="modhub-manager-controls">';
 
-    // 1. 环境统计看板（原通用页面核心信息）
-    html += '<div id="modHubEnvInfo" class="settingsGridSmall modhub-stats-container"></div>';
+    // 1. 保留统计与更新入口，使用紧凑总览。
+    html += '<div id="modHubEnvInfo" class="modhub-manager-overview"></div>';
     html += '<div id="modHubUpdateBanner" style="display:none;"></div>';
 
-    // 2. 说明与安全模式随页面滚动，仅保留状态提示和核心操作吸顶。
+    // 2. 界面偏好与常用操作随页面自然滚动。
     html += `
-        <div class="modhub-manager-helpbar">
-                <details class="modhub-manager-help grey" data-section="manager-help"${isSectionOpen('manager-help', !isNarrowScreen) ? ' open' : ''}>
-                    <summary>排序操作说明</summary>
-                    <p>智能整理会按依赖调整模组与美化顺序；也可拖拽手动排序，长按上下按钮可置顶或置底。</p>
-                </details>
+        <div class="modhub-manager-preferences">
+                <div class="modhub-manager-language"><span>界面语言</span><div id="modHubManagerLanguageControl"></div></div>
                 <label class="modhub-safemode-label" title="开启后仅加载签名模组，可用于排查异常 Mod">
                     <input type="checkbox" id="toggleSafeMode" class="macro-checkbox" />
                     <span class="gold">安全模式</span>
@@ -2180,20 +2197,28 @@ window.modHubRenderModManageUI = function() {
         </div>
         <div class="modhub-sticky-toolbar">
             <div id="modHubManagerStatus" class="grey" role="status" aria-live="polite"></div>
-            <div class="modhub-group-header">
-                <span class="gold">模组与美化顺序管理</span>
+            <div class="modhub-group-header modhub-manager-actionbar">
                 <div class="modhub-header-actions">
                     <button id="modHubImportModBtn" data-modhub-busy-key="modHubImportModBtn" class="macro-button modhub-btn-primary" type="button" title="从本地选择或直接拖拽 Zip / ModPack 模组文件导入" onclick="window.modHubTriggerImport()">导入模组</button>
                     <button id="modHubRestartGameBtn" class="macro-button modhub-btn-primary" type="button" title="重新载入游戏以使最新模组配置生效，美化调整即时应用" onclick="window.modHubRestartGame()">重新载入游戏</button>
+                    <button id="modHubSmartSortAllBtn" data-modhub-busy-key="modHubSmartSortAllBtn" class="macro-button modhub-btn-primary" type="button" title="根据依赖整理模组的加载顺序和美化包的覆盖顺序" onclick="window.modHubSmartSortAll()">智能排序</button>
                     <div id="modHubManagerPinnedTools" class="modhub-manager-pinned-tools">${modHubPinnedManagerToolsHtml(pinnedTools)}</div>
+                    <div class="modhub-manager-secondary-actions">
+                    <button id="modHubRefreshListBtn" data-modhub-busy-key="modHubRefreshListBtn" class="macro-button modhub-btn-secondary modhub-manager-refresh" type="button" aria-label="刷新" title="在原版管理器修改后，重新读取列表与模组资料" onclick="window.initModManage(true)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M21 12a9 9 0 1 1-9-9c2.5 0 4.9 1 6.7 2.8L21 8M21 3v5h-5"/></svg></button>
                     <div class="modhub-manager-tools">
                         <button id="modHubManagerToolsBtn" class="macro-button modhub-manager-tools-toggle" type="button" aria-haspopup="menu" aria-controls="modHubManagerToolsMenu" aria-expanded="false">更多工具</button>
                         <div id="modHubManagerToolsMenu" class="modhub-manager-tools-menu" role="menu" aria-label="更多工具" hidden>
                             ${modHubManagerToolsMenuHtml(pinnedTools)}
                         </div>
                     </div>
+                    </div>
                 </div>
             </div>
+            <details class="modhub-manager-help grey" data-section="manager-help"${isSectionOpen('manager-help') ? ' open' : ''}>
+                <summary>排序操作说明</summary>
+                <p>智能整理会按依赖调整模组与美化顺序；也可拖拽手动排序，长按上下按钮可置顶或置底。</p>
+                <p>配置自动保存；模组重新载入后生效，美化即时应用</p>
+            </details>
             ${totalSideCount > 0 && window._modHubBatchMode ? `
                 <div id="modHubBatchToolbar" class="modhub-batch-toolbar">
                     <div class="modhub-batch-info">
@@ -2246,10 +2271,10 @@ window.modHubRenderModManageUI = function() {
             if (isRecovery) descParts.push('<span class="gold">为确保时间点还原正常运行，不可调整顺序</span>');
             if (isEnabled) {
                 if (versionText) descParts.push(versionText);
-                if (subText) descParts.push(`<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>`);
+                if (subText) descParts.push(`<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>`);
             } else {
-                descParts.push('已禁用');
-                if (subText) descParts.push(`<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>`);
+                descParts.push('<span>已禁用</span>');
+                if (subText) descParts.push(`<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>`);
             }
             const descHtml = descParts.join(' | ') || '<span class="grey">外部模组</span>';
             const isHighlight = window._modHubHighlightMods && window._modHubHighlightMods.has(modName);
@@ -2265,7 +2290,7 @@ window.modHubRenderModManageUI = function() {
                             </label>
                         ` : (isRecovery ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>')}
                         <div class="modhub-item-main">
-                            <div class="modhub-item-title ${isEnabled ? '' : 'grey'}">${window.modHubEscapeHtml(modName)}</div>
+                            <div class="modhub-item-title ${isEnabled ? '' : 'grey'}" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</div>
                             <div class="grey modhub-item-desc">${descHtml}${updateTagHtml}</div>
                         </div>
                     </div>
@@ -2299,7 +2324,7 @@ window.modHubRenderModManageUI = function() {
             const version = modInfo?.bootJson?.version || '';
             const subText = window.modHubGetModSubtext(modName, modInfo, true);
             const versionText = version ? (window.modHubFormatVersion ? window.modHubFormatVersion(version) : (/^v/i.test(version.trim()) ? version.trim() : 'v' + version.trim())) : '';
-            const descHtml = [versionText, subText ? `<span class="modhub-mod-alias">${window.modHubEscapeHtml(subText)}</span>` : '']
+            const descHtml = [versionText, subText ? `<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>` : '']
                 .filter(Boolean)
                 .join(' | ') || '系统核心组件';
             content += `
@@ -2307,7 +2332,7 @@ window.modHubRenderModManageUI = function() {
                     <div class="modhub-item-info">
                         <span class="gold modhub-status-tag">[核心]</span>
                         <div class="modhub-item-main">
-                            <div class="modhub-item-title">${window.modHubEscapeHtml(modName)}</div>
+                            <div class="modhub-item-title" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</div>
                             <div class="grey modhub-item-desc">${descHtml}</div>
                         </div>
                     </div>
@@ -2326,7 +2351,15 @@ window.modHubRenderModManageUI = function() {
         </details>
     `;
 
-    container.innerHTML = html + '</fieldset>';
+    container.innerHTML = modHubTranslateManagerHtml(html + '</fieldset>');
+    const languageSlot = container.querySelector('#modHubManagerLanguageControl');
+    if (languageSlot) {
+        const control = languageControl || window.modHubCreateLanguageSelector?.();
+        if (control) {
+            control.open = false;
+            languageSlot.appendChild(control);
+        }
+    }
     modHubBindManagerTools(container);
     window.modHubUpdateManagerStatus();
     container.onclick = async event => {
@@ -2377,7 +2410,7 @@ window.modHubRenderModManageUI = function() {
         if (coreSection.isConnected === false || !coreSection.open || coreRendered) return;
         coreRendered = true;
         const core = container.querySelector('#modHubCoreContainer');
-        if (core) core.innerHTML = renderCore();
+        if (core) core.innerHTML = modHubTranslateManagerHtml(renderCore());
     };
     window.modHubUpdateManagerStatus();
 
@@ -3265,7 +3298,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
             const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
             const modItemsHtml = affectedMods.map(m => `
                 <div class="modhub-modal-affected-item">
-                    · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}${m.isEnabled ? '' : ' <span class="grey">[已禁用]</span>'}
+                    · <span class="gold" data-modhub-no-translate>【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''}${m.isEnabled ? '' : ' <span class="grey">[已禁用]</span>'}
                 </div>
             `).join('');
             const modLinesText = affectedMods.map(m => `· 【${m.name}】${m.version ? ` (${m.version})` : ''}${m.isEnabled ? '' : ' [已禁用]'}`).join('\n');
@@ -3274,7 +3307,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
                 title: `确认禁用【${displayName}】？`,
                 message: `禁用【${displayName}】后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}是否仍然确认禁用？`,
                 trustedMessageHtml: `
-                    <div class="modhub-modal-intro">禁用 <span class="gold">【${escape(displayName)}】</span> 后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：</div>
+                    <div class="modhub-modal-intro">禁用 <span class="gold" data-modhub-no-translate>【${escape(displayName)}】</span> 后，以下依赖该${targetTypeLabel}的模组可能会受到影响或无法正常运行：</div>
                     <div class="modhub-modal-affected-box">
                         ${modItemsHtml}
                     </div>
@@ -3339,12 +3372,12 @@ window.modHubDeleteSideMod = async function(modName) {
         const affectedListHtml = affectedMods.map(m => {
             const ver = m.version ? ` (${window.modHubEscapeHtml(m.version)})` : '';
             const status = m.isEnabled ? '' : ' <span class="grey">[已禁用]</span>';
-            return `<div>· <span class="gold">${window.modHubEscapeHtml(m.name)}</span>${ver}${status}</div>`;
+            return `<div>· <span class="gold" data-modhub-no-translate>${window.modHubEscapeHtml(m.name)}</span>${ver}${status}</div>`;
         }).join('');
         const affectedListText = affectedMods.map(m => `· ${m.name}${m.version ? ` (${m.version})` : ''}${m.isEnabled ? '' : ' [已禁用]'}`).join('\n');
 
         const trustedMessageHtml = `
-            <div class="modhub-modal-conflict-intro">确定要彻底删除模组【<span class="gold">${window.modHubEscapeHtml(modDisplayName)}</span>】吗？</div>
+            <div class="modhub-modal-conflict-intro">确定要彻底删除模组【<span class="gold" data-modhub-no-translate>${window.modHubEscapeHtml(modDisplayName)}</span>】吗？</div>
             <div class="modhub-modal-conflict-alert-box" style="margin: 12px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
                 <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
                     警告：检测到以下模组依赖于该模组/框架，删除后可能会受到严重影响或无法正常运行：
@@ -3371,7 +3404,7 @@ window.modHubDeleteSideMod = async function(modName) {
         confirmed = await window.modHubConfirm({
             title: isModHub ? '确认卸载 ModHub' : '确认删除模组',
             message: `确定要删除模组【${modName}】吗？\n${selfNotice || '删除后该模组将从浏览器存储中彻底移除，不可恢复。'}`,
-            trustedMessageHtml: isModHub ? `<p class="modhub-self-removal-intro">确定要删除模组【<strong class="gold">${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${selfNoticeHtml}` : '',
+            trustedMessageHtml: isModHub ? `<p class="modhub-self-removal-intro">确定要删除模组【<strong class="gold" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${selfNoticeHtml}` : '',
             dialogClass: isModHub ? 'modhub-self-removal-dialog' : '',
             confirmText: isModHub ? '确认卸载' : '确认删除',
             cancelText: '取消',
@@ -3602,7 +3635,7 @@ window.modHubBatchDisable = async function() {
         const affectedList = Array.from(affectedMap.values());
         const modItemsHtml = affectedList.map(m => `
             <div class="modhub-modal-affected-item">
-                · <span class="gold">【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''} <span class="grey">（依赖于 ${m.dependOn.map(escape).join('、')}）</span>
+                · <span class="gold" data-modhub-no-translate>【${escape(m.name)}】</span>${m.version ? ` <span class="grey">(${escape(m.version)})</span>` : ''} <span class="grey">（依赖于 ${m.dependOn.map(escape).join('、')}）</span>
             </div>
         `).join('');
         const modLinesText = affectedList.map(m => `· 【${m.name}】（依赖于 ${m.dependOn.join('、')}）`).join('\n');
@@ -3693,14 +3726,14 @@ window.modHubBatchDelete = async function() {
         const modInfo = window.modHubGetModInfo(name);
         const subtext = window.modHubGetModSubtext(name, modInfo, false, true);
         const disp = subtext ? `${name}（${subtext}）` : name;
-        return `<div>· <span class="gold">${escape(disp)}</span></div>`;
+        return `<div>· <span class="gold" data-modhub-no-translate>${escape(disp)}</span></div>`;
     }).join('');
 
     let trustedMessageHtml = '';
     if (affectedMap.size > 0) {
         const affectedList = Array.from(affectedMap.values());
         const affectedListHtml = affectedList.map(m => `
-            <div>· <span class="gold">${escape(m.name)}</span>${m.version ? ` (${escape(m.version)})` : ''} <span class="grey">（依赖于 ${m.dependOn.map(escape).join('、')}）</span></div>
+            <div>· <span class="gold" data-modhub-no-translate>${escape(m.name)}</span>${m.version ? ` (${escape(m.version)})` : ''} <span class="grey">（依赖于 ${m.dependOn.map(escape).join('、')}）</span></div>
         `).join('');
 
         trustedMessageHtml = `
@@ -3775,6 +3808,19 @@ window.modHubBatchDelete = async function() {
 };
 
 // 游戏就绪后核验下一次启动的顺序；只有实际修正时才建立保护点。
+window.addEventListener?.('modhub:languagechange', () => {
+    const container = document.getElementById?.('modHubModManageContainer');
+    window.modHubLocalizeOwned?.(container);
+    window.modHubLocalizeOwned?.(document.getElementById?.('overlayTabs'));
+    if (container) {
+        for (const row of container.querySelectorAll?.('li[data-mod-name]') || []) {
+            const alias = row.querySelector?.('.modhub-mod-alias');
+            if (alias) alias.textContent = window.modHubGetModSubtext(row.dataset.modName, window.modHubGetModInfo(row.dataset.modName), false);
+        }
+        window.modHubNotifyUpdateState(window._modHubUpdatableCount || 0, window._modHubUpdatableMods || []);
+    } else window.modHubUpdateMarketTabBadge();
+});
+
 window.jQuery?.(document).one?.(':storyready.modHubRecoveryPlacement', async () => {
     try {
         await window.modHubLoadModManageState();

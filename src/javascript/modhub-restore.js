@@ -596,18 +596,21 @@
         if (typeof at !== 'number' || !Number.isFinite(at)) return '时间未记录';
         const date = new Date(at);
         if (Number.isNaN(date.getTime())) return '时间未记录';
+        if (window.modHubFormatDate) return window.modHubFormatDate(at, { hour12: false });
         const pad = value => String(value).padStart(2, '0');
         return `${date.getFullYear()}/${date.getMonth() + 1}/${date.getDate()} ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`;
     }
 
     function historyRemovalHtml(points) {
         if (!points.length) return '<p class="green">没有需要删除的还原点。</p>';
-        return `<section class="modhub-restore-notice-section"><p>将删除 <strong class="red">${points.length} 个还原点</strong>：</p><ul class="modhub-restore-notice-list" tabindex="0" aria-label="将删除的还原点">${points.map(point => `<li><strong class="gold">${escapeHtml(point.label)}</strong><br><span class="grey">${escapeHtml(pointDate(point.at))}</span></li>`).join('')}</ul></section><p><strong class="red">删除后无法通过这些还原点恢复。</strong></p><p>只有<strong class="gold">不再被其他还原点或恢复记录引用的包体</strong>才会清理。</p>`;
+        return `<section class="modhub-restore-notice-section"><p>将删除 <strong class="red">${points.length} 个还原点</strong>：</p><ul class="modhub-restore-notice-list" tabindex="0" aria-label="将删除的还原点">${points.map(point => `<li><strong class="gold" data-modhub-no-translate>${escapeHtml(point.label)}</strong><br><span class="grey">${escapeHtml(pointDate(point.at))}</span></li>`).join('')}</ul></section><p><strong class="red">删除后无法通过这些还原点恢复。</strong></p><p>只有<strong class="gold">不再被其他还原点或恢复记录引用的包体</strong>才会清理。</p>`;
     }
 
     function packageVersionText(versions) {
-        const display = value => value === null ? '未安装' : value || '未识别';
-        return `当前版本：${display(versions.current)}；还原后版本：${display(versions.target)}`;
+        const translate = value => window.modHubT?.(value) || value;
+        const display = value => value === null ? translate('未安装') : value || translate('未识别');
+        const current = display(versions.current), target = display(versions.target);
+        return window.modHubT?.('当前版本：{current}；还原后版本：{target}', { current, target }) || `当前版本：${current}；还原后版本：${target}`;
     }
 
     function restoreConfirmationHtml(point, change, riskMessages, packageVersions) {
@@ -615,11 +618,11 @@
         [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '将移除的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].forEach(([key, label]) => {
             if (!change[key].length) return;
             const color = key === 'removed' || key === 'disabled' ? 'red' : 'gold';
-            items.push(`<li><strong class="${color}">${key === 'removed' ? `将移除 ${change[key].length} 个模组` : `${label}（${change[key].length} 个）`}</strong><br>${change[key].map(name => `<strong class="gold">${escapeHtml(name)}</strong>${['installed', 'updated', 'removed'].includes(key) ? `<br><span class="grey">${escapeHtml(packageVersionText(packageVersions[name]))}</span>` : ''}`).join('<br>')}</li>`);
+            items.push(`<li><strong class="${color}">${key === 'removed' ? `将移除 ${change[key].length} 个模组` : `${label}（${change[key].length} 个）`}</strong><br>${change[key].map(name => `<strong class="gold" data-modhub-no-translate>${escapeHtml(name)}</strong>${['installed', 'updated', 'removed'].includes(key) ? `<br><span class="grey">${escapeHtml(packageVersionText(packageVersions[name]))}</span>` : ''}`).join('<br>')}</li>`);
         });
         [['orderChanged', '恢复加载顺序'], ['beautyChanged', '恢复美化配置'], ['settingsChanged', '恢复管理配置']].forEach(([key, label]) => { if (change[key]) items.push(`<li><strong class="gold">${label}</strong></li>`); });
         const list = items.length ? `<ul class="modhub-restore-notice-list" tabindex="0" aria-label="还原变更">${items.join('')}</ul>` : '<p class="grey">目标与当前模组状态一致。</p>';
-        return `<p class="modhub-restore-notice-target">将还原到 <strong class="gold">${escapeHtml(point.label)}</strong> 对应的模组状态。<br>时间：<strong class="gold">${escapeHtml(pointDate(point.at))}</strong></p>${list}<p><strong class="gold">还原前会保存当前模组状态</strong>，方便需要时撤销此次还原。</p><p class="modhub-restore-notice-summary"><strong class="green">当前 ModHub 恢复工具与游戏存档保留</strong>；完成后<strong class="gold">游戏将重新加载</strong>。</p>${riskMessages.length ? `<p class="red">${riskMessages.map(escapeHtml).join('<br>')}</p>` : ''}`;
+        return `<p class="modhub-restore-notice-target">将还原到 <strong class="gold" data-modhub-no-translate>${escapeHtml(point.label)}</strong> 对应的模组状态。<br>时间：<strong class="gold">${escapeHtml(pointDate(point.at))}</strong></p>${list}<p><strong class="gold">还原前会保存当前模组状态</strong>，方便需要时撤销此次还原。</p><p class="modhub-restore-notice-summary"><strong class="green">当前 ModHub 恢复工具与游戏存档保留</strong>；完成后<strong class="gold">游戏将重新加载</strong>。</p>${riskMessages.length ? `<p class="red">${riskMessages.map(escapeHtml).join('<br>')}</p>` : ''}`;
     }
 
     async function saveConfig(config) {
@@ -1197,13 +1200,16 @@
         const button = document.getElementById('modHubRestoreStartupButton');
         if (button) {
             button.style.display = startupReason && !startupFinished && !gameReady() ? '' : 'none';
-            button.title = startupReason;
-            button.setAttribute('aria-label', startupReason ? `${startupReason} 加载遇到问题？尝试时间点恢复` : '加载遇到问题？尝试时间点恢复');
+            const reasonText = window.modHubT?.(startupReason) || startupReason;
+            const buttonText = window.modHubT?.('加载遇到问题？尝试时间点恢复') || '加载遇到问题？尝试时间点恢复';
+            button.title = reasonText;
+            button.setAttribute('aria-label', reasonText ? `${reasonText} ${buttonText}` : buttonText);
+            button.textContent = buttonText;
         }
         const reason = document.getElementById('modHubRestoreStartupReason');
         if (reason) {
             if (button?.parentNode && reason.parentNode !== button.parentNode) { reason.parentNode?.removeChild(reason); button.parentNode.appendChild(reason); }
-            reason.textContent = startupReason;
+            reason.textContent = window.modHubT?.(startupReason) || startupReason;
             reason.style.display = button?.style.display === '' ? '' : 'none';
         }
     }
@@ -1349,7 +1355,7 @@
                     const time = pointDate(successNotice.at);
                     const target = `${successNotice.label || '所选还原点'}${time === '时间未记录' ? '' : `（${time}）`}`;
                     const undo = safetyExists ? '还原前的模组状态已保存为“还原前状态”，需要时可选择该点撤销此次还原。' : '';
-                    await window.modHubConfirm?.({ title: '时间点还原已成功完成', message: `模组状态已还原到 ${target}。\n游戏已重新加载，游戏存档未受影响。${undo ? '\n\n' + undo : ''}`, trustedMessageHtml: `<p><strong class="green">时间点还原已成功完成。</strong></p><p>模组状态已还原到 <strong class="gold">${escapeHtml(successNotice.label || '所选还原点')}</strong>${time === '时间未记录' ? '' : `<br>时间：<strong class="gold">${escapeHtml(time)}</strong>`}。</p><p><strong class="green">游戏存档未受影响。</strong>游戏已重新加载。</p>${undo ? '<p>还原前的模组状态已保存为<strong class="gold">“还原前状态”</strong>，需要时可选择该点<strong class="gold">撤销此次还原</strong>。</p>' : ''}`, dialogClass: 'modhub-restore-notice', confirmText: '关闭', cancelText: '' });
+                    await window.modHubConfirm?.({ title: '时间点还原已成功完成', message: `模组状态已还原到 ${target}。\n游戏已重新加载，游戏存档未受影响。${undo ? '\n\n' + undo : ''}`, trustedMessageHtml: `<p><strong class="green">时间点还原已成功完成。</strong></p><p>模组状态已还原到 <strong class="gold" data-modhub-no-translate>${escapeHtml(successNotice.label || '所选还原点')}</strong>${time === '时间未记录' ? '' : `<br>时间：<strong class="gold">${escapeHtml(time)}</strong>`}。</p><p><strong class="green">游戏存档未受影响。</strong>游戏已重新加载。</p>${undo ? '<p>还原前的模组状态已保存为<strong class="gold">“还原前状态”</strong>，需要时可选择该点<strong class="gold">撤销此次还原</strong>。</p>' : ''}`, dialogClass: 'modhub-restore-notice', confirmText: '关闭', cancelText: '' });
                     successNoticeClosed = true;
                 }
                 await transaction(env, 'readwrite', store => {
@@ -1367,6 +1373,7 @@
     Object.assign(window.modHubRestore, { getPanelState, saveConfig, createPoint, deletePoints, setPointProtection, preview, getRecoveryInfo, mountDialog,
         getStorageIdentity: () => { const { dbName, storeName } = environment(); return { dbName, storeName }; } });
     window.modHubKeepRecoveryOrder = window.modHubKeepRecoveryOrder || recoveryOrder;
+    window.addEventListener?.('modhub:languagechange', syncStartupUi);
     if (!window.indexedDB || typeof window.modUtils?.getModLoader !== 'function') return;
     try {
         const env = environment();

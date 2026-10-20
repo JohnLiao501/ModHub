@@ -21,7 +21,7 @@ window.modHubProgressRingHtml = function(percent = null, label = '', describedBy
     }
     const value = Number.isFinite(percent) ? Math.max(0, Math.min(100, percent)) : null;
     const escape = window.modHubEscapeHtml;
-    const semantics = label ? ' role="progressbar" aria-label="' + escape(label) + '" aria-valuemin="0" aria-valuemax="100"'
+    const semantics = label ? ' role="progressbar" aria-label="' + escape(window.modHubT?.(label) || label) + '" aria-valuemin="0" aria-valuemax="100"'
         + (value === null ? '' : ' aria-valuenow="' + value + '"') : ' aria-hidden="true"';
     return '<svg class="modhub-progress-ring' + (value === null ? '' : ' is-determinate') + '" viewBox="0 0 32 32" focusable="false"' + semantics
         + (describedBy ? ' aria-describedby="' + escape(describedBy) + '"' : '') + '>'
@@ -95,8 +95,9 @@ window.modHubYieldToBrowser = function() {
 };
 
 window.modHubLoadingHtml = function(message) {
-    return '<div class="modhub-loading-state grey" role="status" aria-live="polite">' + window.modHubProgressRingHtml()
+    const html = '<div class="modhub-loading-state grey" role="status" aria-live="polite">' + window.modHubProgressRingHtml()
         + '<p>' + window.modHubEscapeHtml(message) + '</p></div>';
+    return window.modHubTranslateHtml?.(html) || html;
 };
 
 // 统一 Toast 提示
@@ -108,7 +109,8 @@ window.modHubShowToast = function(message, type = '', duration = 2500) {
         toast.className = 'toast';
         document.body.appendChild(toast);
     }
-    toast.textContent = message;
+    if (window.modHubBindText) window.modHubBindText(toast, message);
+    else toast.textContent = message;
     toast.className = 'toast ' + type + ' show';
     if (window._modHubToastTimer) clearTimeout(window._modHubToastTimer);
     window._modHubToastTimer = setTimeout(() => {
@@ -180,7 +182,7 @@ window.modHubConfirm = function(options) {
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
 
-        const messageHtml = trustedMessageHtml || window.modHubEscapeHtml(message).replace(/\n/g, '<br>');
+        const messageHtml = trustedMessageHtml || window.modHubEscapeHtml(window.modHubT?.(message) || message).replace(/\n/g, '<br>');
         const selectHtml = selectOptions.length ? `
             <label class="modhub-modal-select-wrap">
                 <span>${window.modHubEscapeHtml(selectLabel)}</span>
@@ -191,7 +193,7 @@ window.modHubConfirm = function(options) {
         ` : '';
 
         const initialConfirmBtnText = confirmDelay > 0
-            ? `${confirmText} (${confirmDelay}s)`
+            ? `${window.modHubT?.(confirmText) || confirmText} (${confirmDelay}s)`
             : confirmText;
 
         dialog.innerHTML = `
@@ -208,6 +210,7 @@ window.modHubConfirm = function(options) {
                 ${cancelText ? `<button type="button" class="macro-button modhub-modal-btn-cancel">${window.modHubEscapeHtml(cancelText)}</button>` : ''}
             </div>
         `;
+        window.modHubLocalizeOwned?.(dialog);
 
         overlay.appendChild(dialog);
         document.body.appendChild(overlay);
@@ -245,11 +248,12 @@ window.modHubConfirm = function(options) {
                     delayTimer = null;
                     isDelaying = false;
                     if (confirmBtn) {
-                        confirmBtn.textContent = confirmText;
+                        if (window.modHubBindText) window.modHubBindText(confirmBtn, confirmText);
+                        else confirmBtn.textContent = confirmText;
                         syncConfirmState();
                     }
                 } else if (confirmBtn) {
-                    confirmBtn.textContent = `${confirmText} (${remainingSeconds}s)`;
+                    confirmBtn.textContent = `${window.modHubT?.(confirmText) || confirmText} (${remainingSeconds}s)`;
                 }
             }, 1000);
         }
@@ -266,6 +270,7 @@ window.modHubConfirm = function(options) {
         if (typeof onRender === 'function') {
             try {
                 onRender(dialog);
+                window.modHubLocalizeOwned?.(dialog);
             } catch (err) {
                 console.warn('[modHubConfirm] onRender 执行异常:', err);
             }
@@ -298,6 +303,7 @@ window.modHubConfirm = function(options) {
             overlay.classList.add('modhub-modal-closing');
             setTimeout(() => {
                 if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                window.modHubRefreshLanguageSelectors?.();
             }, 180);
             resolve(result);
         };
@@ -323,6 +329,7 @@ window.modHubConfirm = function(options) {
             closeWith
         };
         modHubModalStack.push(modalEntry);
+        window.modHubRefreshLanguageSelectors?.();
 
         if (typeof document.addEventListener === 'function') {
             document.addEventListener('keydown', handleKeydown);

@@ -2,6 +2,11 @@
 (function() {
     'use strict';
 
+    const modHubHtml = html => window.modHubTranslateHtml ? window.modHubTranslateHtml(html) : html;
+    const t = (key, params) => window.modHubT ? window.modHubT(key, params) : String(key ?? '').replace(/\{(\w+)\}/g, (match, name) => params?.[name] ?? match);
+    const labelHtml = (key, params) => `<span data-modhub-i18n-key="${escapeHtml(key)}"${params ? ` data-modhub-i18n-key-params="${escapeHtml(JSON.stringify(params))}"` : ''}>${escapeHtml(t(key, params))}</span>`;
+
+
     const MODHUB_SPELL_CACHE_KEY = 'modhub_market_spells_v1';
     const MODHUB_SOURCE_NAMES = { github: 'GitHub', tieba: '百度贴吧', discord: 'Discord' };
     let revision = -1;
@@ -82,7 +87,7 @@
 
     function filter(search = '', sort = 'date') {
         const query = search ? window.modHubSearch.compile(search) : { tokens: [] };
-        return spells.map(entry => ({ entry, score: query.tokens.length ? window.modHubSearch.score(entry, query) : 0 }))
+        return spells.filter(entry => window.modHubMarket.matchesContentLanguage(entry)).map(entry => ({ entry, score: query.tokens.length ? window.modHubSearch.score(window.modHubMarket.getLocalizedSearchEntry(entry), query) : 0 }))
             .filter(item => item.score >= 0).sort((left, right) => {
                 if (sort === 'name') return String(left.entry.name).localeCompare(String(right.entry.name), 'zh-CN');
                 if (query.tokens.length && left.score !== right.score) return right.score - left.score;
@@ -94,18 +99,18 @@
     function acquisitionHtml(entry) {
         const sources = normalizeSources(entry);
         const packages = normalizePackages(entry);
-        const link = (url, label) => safeUrl(url) ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>` : '';
+        const link = (url, label, original = false) => safeUrl(url) ? `<a href="${escapeHtml(safeUrl(url))}" target="_blank" rel="noopener noreferrer"${original ? ' data-modhub-i18n-ignore' : ''}>${original ? escapeHtml(t(label, {})) : (Array.isArray(label) ? label : [label]).map(key => labelHtml(key)).join(' · ')}</a>` : '';
         const facts = fields => {
             const values = fields.filter(([, value]) => value !== undefined && value !== null && String(value).trim());
             return values.length ? `<dl class="modhub-detail-facts">${values.map(([label, value]) =>
-                `<div><dt>${escapeHtml(label)}：</dt><dd>${escapeHtml(value)}</dd></div>`).join('')}</dl>` : '';
+                `<div><dt>${labelHtml(label)}：</dt><dd data-modhub-i18n-ignore>${escapeHtml(value)}</dd></div>`).join('')}</dl>` : '';
         };
-        const note = (label, value) => value ? `<div class="modhub-detail-note"><span class="modhub-detail-label">${escapeHtml(label)}：</span>`
-            + `<p class="modhub-acquisition-text modhub-detail-readme" tabindex="0">${escapeHtml(value)}</p></div>` : '';
+        const note = (label, value) => value ? `<div class="modhub-detail-note"><span class="modhub-detail-label">${labelHtml(label)}：</span>`
+            + `<p class="modhub-acquisition-text modhub-detail-readme" tabindex="0" data-modhub-i18n-ignore>${escapeHtml(value)}</p></div>` : '';
         const sourceLines = sources.map(source => {
             const label = source.label || MODHUB_SOURCE_NAMES[source.platform] || '原始来源';
             return '<div class="modhub-acquisition-source">'
-                + `<div class="modhub-detail-links">${link(source.url, label)}${source.downloadUrl && source.downloadUrl !== source.url ? link(source.downloadUrl, '下载入口') : ''}</div>`
+                + `<div class="modhub-detail-links">${link(source.url, label, Boolean(source.label))}${source.downloadUrl && source.downloadUrl !== source.url ? link(source.downloadUrl, '下载入口') : ''}</div>`
                 + facts([['提取码', source.extractionCode], ['解压密码', source.archivePassword]])
                 + (source.platform === 'discord' ? '<div class="modhub-detail-hint">需登录 Discord，并按原帖要求加入服务器或取得访问权限。</div>' : '')
                 + note('获取说明', source.instructions) + '</div>';
@@ -123,15 +128,15 @@
                 packageLinks.get(url).push(label);
             }
             return '<article class="modhub-acquisition-package">'
-                + `<div class="modhub-detail-package-heading"><strong>${escapeHtml(record.fileName || record.bootName || '安装包')}</strong>`
-                + (record.version ? `<span class="modhub-detail-version">版本 ${escapeHtml(record.version)}</span>` : '') + '</div>'
-                + `<div class="modhub-detail-status">${isVerifiedPackage(record) ? '安装包结构已核验' : '安装包资料待核对'} · ${record.gameTested === true ? '已游戏验证' : '未游戏实测'}</div>`
-                + facts([['文件格式', record.format], ['模组标识', record.bootName], ['适配 DoL', record.gameVersionRange || '未知，请核对作者说明'],
+                + `<div class="modhub-detail-package-heading"><strong data-modhub-i18n-ignore>${escapeHtml(record.fileName || record.bootName || '安装包')}</strong>`
+                + (record.version ? `<span class="modhub-detail-version">${labelHtml('版本')} <span data-modhub-i18n-ignore>${escapeHtml(record.version)}</span></span>` : '') + '</div>'
+                + `<div class="modhub-detail-status"><span>${isVerifiedPackage(record) ? '安装包结构已核验' : '安装包资料待核对'}</span> · <span>${record.gameTested === true ? '已游戏验证' : '未游戏实测'}</span></div>`
+                + facts([['文件格式', record.format], ['模组标识', record.bootName], ['适配 DoL', record.gameVersionRange || t('未知，请核对作者说明')],
                     ['美化框架', record.framework], ['前置要求', dependencies], ['提取码', record.extractionCode], ['解压密码', record.archivePassword]])
-                + `<div class="modhub-detail-links">${[...packageLinks].map(([url, labels]) => link(url, labels.join(' · '))).join('')}</div>`
+                + `<div class="modhub-detail-links">${[...packageLinks].map(([url, labels]) => link(url, labels)).join('')}</div>`
                 + note('前提条件', prerequisites) + note('安装说明', record.instructions) + note('核验范围', record.verificationScope) + '</article>';
         }).join('');
-        const section = (title, count, body) => count ? `<section class="modhub-detail-section"><div class="modhub-detail-heading">${title}<span>${count} 项</span></div>${body}</section>` : '';
+        const section = (title, count, body) => count ? `<section class="modhub-detail-section"><div class="modhub-detail-heading">${labelHtml(title)}${labelHtml('{count} 项', { count })}</div>${body}</section>` : '';
         return `<div class="modhub-acquisition" tabindex="0" aria-label="来源与安装包资料">`
             + section('来源入口', sources.length, sourceLines) + section('包体资料', packages.length, packageLines)
             + (entry.contentType !== 'spell' ? '<footer class="modhub-detail-footer"><p>从原平台下载后，请按作者说明解压；在此导入支持 ModLoader 的安装包。普通美化文件请按对应框架的说明安装。</p></footer>' : '') + '</div>';
@@ -171,8 +176,8 @@
 
     function renderAcquisitionDetails(entry) {
         const links = getSourceLinks(entry);
-        const linkHtml = links.map(source => `<a class="modhub-market-source-link" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer" title="${escapeHtml(source.title)}">${escapeHtml(source.name)}</a>`).join('<span aria-hidden="true">·</span>');
-        return `<div class="modhub-market-source-bar"><span class="modhub-market-source-summary">来源：</span>`
+        const linkHtml = links.map(source => `<a class="modhub-market-source-link" href="${escapeHtml(source.url)}" target="_blank" rel="noopener noreferrer" data-modhub-i18n-title="${escapeHtml(source.title)}" data-modhub-i18n-title-params="{}" title="${escapeHtml(t(source.title, {}))}"><span data-modhub-i18n-key="${escapeHtml(source.name)}" data-modhub-i18n-key-params="{}">${escapeHtml(t(source.name, {}))}</span></a>`).join('<span aria-hidden="true">·</span>');
+        return `<div class="modhub-market-source-bar"><span class="modhub-market-source-summary">${labelHtml('来源')}：</span>`
             + (linkHtml || '<span class="modhub-market-source-empty">暂无来源链接</span>') + '</div>';
     }
 
@@ -198,14 +203,20 @@
                 const host = dialog.querySelector('.modhub-spell-detail');
                 const fields = [['说明', entry.description], ['语法类型', entry.spell.syntax], ['输入位置', entry.spell.inputLocation],
                     ['使用步骤', entry.spell.instructions], ['参数', entry.spell.parameters], ['前提条件', entry.spell.prerequisites],
-                    ['适配 DoL', entry.spell.gameVersionRange || '未知，请核对原帖'], ['适用模组及版本', entry.spell.modVersions],
-                    ['验证方法', entry.spell.verificationMethod], ['核验说明', entry.spell.submittedEnvironmentVerified === true
+                    ['适配 DoL', entry.spell.gameVersionRange || t('未知，请核对原帖')], ['适用模组及版本', entry.spell.modVersions],
+                    ['验证方法', entry.spell.verificationMethod], ['核验说明', t(entry.spell.submittedEnvironmentVerified === true
                         ? '提交者自述已在所列环境验证；通用适配尚未验证，不代表审核者完成游戏实测。'
-                        : '语法与使用资料已核验，未游戏实测']];
+                        : '语法与使用资料已核验，未游戏实测')]];
                 fields.forEach(([label, value]) => {
                     if (!value) return;
                     const paragraph = document.createElement('p');
-                    paragraph.textContent = `${label}：${Array.isArray(value) ? value.join('\n') : typeof value === 'object' ? JSON.stringify(value) : value}`;
+                    const labelNode = document.createElement('span');
+                    if (window.modHubBindText) window.modHubBindText(labelNode, label); else labelNode.textContent = label;
+                    paragraph.appendChild(labelNode);
+                    const content = document.createElement('span');
+                    content.setAttribute('data-modhub-i18n-ignore', '');
+                    content.textContent = `：${Array.isArray(value) ? value.join('\n') : typeof value === 'object' ? JSON.stringify(value) : value}`;
+                    paragraph.appendChild(content);
                     host.appendChild(paragraph);
                 });
                 const body = document.createElement('pre');
@@ -214,7 +225,7 @@
                 body.textContent = entry.spell.body;
                 host.appendChild(body);
                 const sources = document.createElement('div');
-                sources.innerHTML = acquisitionHtml(entry);
+                sources.innerHTML = modHubHtml(acquisitionHtml(entry));
                 host.appendChild(sources);
             } });
         return confirmed ? copyBody(entry) : false;
@@ -222,20 +233,27 @@
 
     function render(container, { search = '', sort = 'date' } = {}) {
         const entries = filter(search, sort);
-        container.innerHTML = entries.length ? entries.map((entry, index) => `<div class="childItem modhub-market-card modhub-spell-card">`
-            + `<div class="modhub-market-card-header"><span class="modhub-market-title gold">${escapeHtml(entry.name)}</span>`
+        container.innerHTML = modHubHtml(entries.length ? entries.map((entry, index) => `<div class="childItem modhub-market-card modhub-spell-card" data-spell-id="${escapeHtml(entry.id)}">`
+            + `<div class="modhub-market-card-header"><span class="modhub-market-title gold" data-modhub-card-field="name" data-modhub-i18n-ignore>${escapeHtml(window.modHubGetMarketCardText(entry, 'name').text)}</span>`
             + '<span class="modhub-market-badge badge-external">言灵配方</span></div>'
-            + `<div class="modhub-market-meta grey">作者：${escapeHtml(entry.author || '未知作者')} · ${entry.spell.submittedEnvironmentVerified === true ? '提交者环境已验证（自述），通用适配待核验' : '未游戏实测'}</div>`
-            + `<div class="modhub-market-desc">${escapeHtml(entry.description || '暂无说明')}</div>`
-            + `<div class="modhub-market-meta grey">输入位置：${escapeHtml(entry.spell.inputLocation || '请查看详情')}<br>适配 DoL：${escapeHtml(entry.spell.gameVersionRange || '未知，请核对原帖')}</div>`
+            + `<div class="modhub-market-meta grey">${labelHtml('作者')}：<span data-modhub-i18n-ignore>${escapeHtml(entry.author || t('未知作者'))}</span> · <span>${entry.spell.submittedEnvironmentVerified === true ? '提交者环境已验证（自述），通用适配待核验' : '未游戏实测'}</span></div>`
+            + window.modHubMarket.renderCardDescription(entry, escapeHtml)
+            + `<div class="modhub-market-meta grey">${labelHtml('输入位置')}：<span data-modhub-i18n-ignore>${escapeHtml(entry.spell.inputLocation || t('请查看详情'))}</span><br>${labelHtml('适配 DoL')}：<span data-modhub-i18n-ignore>${escapeHtml(entry.spell.gameVersionRange || t('未知，请核对原帖'))}</span></div>`
             + `<div class="modhub-market-actions"><button type="button" class="macro-button modhub-btn-primary modhub-spell-detail-button" data-spell-index="${index}">查看使用说明</button>`
             + `<button type="button" class="macro-button modhub-btn-sub modhub-spell-copy-button" data-spell-index="${index}">复制正文</button></div></div>`).join('')
-            : `<div class="modhub-empty-state grey">${search ? '没有匹配的言灵配方。可清除搜索或刷新市场。' : '当前暂无言灵配方。可刷新市场获取最新目录。'}</div>`;
+            : `<div class="modhub-empty-state grey">${search ? '没有匹配的言灵配方。可清除搜索或刷新市场。' : '当前暂无言灵配方。可刷新市场获取最新目录。'}</div>`);
         container.querySelectorAll('.modhub-spell-detail-button').forEach(button => { button.onclick = () => showDetails(entries[Number(button.dataset.spellIndex)]); });
         container.querySelectorAll('.modhub-spell-copy-button').forEach(button => { button.onclick = () => copyBody(entries[Number(button.dataset.spellIndex)]); });
     }
 
+    function refreshLanguage(root) {
+        root.querySelectorAll('.modhub-spell-card[data-spell-id]').forEach(card => {
+            const entry = spells.find(item => item.id === card.dataset.spellId);
+            if (entry) window.modHubMarket.refreshCardContent(card, entry);
+        });
+    }
+
     window.modHubMarketSpells = { applyIndex, restoreCache, normalizeSpells, normalizeSources, normalizePackages, isVerifiedPackage,
-        acquisitionHtml, getSourceLinks, renderAcquisitionDetails, copyBody, showDetails, render, filter, getSpells: () => spells.slice(),
+        acquisitionHtml, getSourceLinks, renderAcquisitionDetails, copyBody, showDetails, render, refreshLanguage, filter, getSpells: () => spells.slice(),
         getRevision: () => revision, CACHE_KEY: MODHUB_SPELL_CACHE_KEY };
 })();

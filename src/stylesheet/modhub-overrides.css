@@ -304,6 +304,7 @@ button.modhub-button-busy:disabled,
 /* 日志操作统一金色边框与尺寸，用底色和字重保留主次层级。 */
 #modHubLogContainer .modhub-log-header-actions,
 #modHubLogContainer .modhub-diag-actions { align-items: stretch; gap: 8px; }
+#modHubLogContainer .modhub-log-actions-row > div { flex-wrap: wrap; min-width: 0; max-width: 100%; }
 #modHubLogContainer .modhub-log-header-actions button.macro-button,
 #modHubLogContainer .modhub-diag-actions button.macro-button {
     display: inline-flex;
@@ -427,13 +428,16 @@ button.modhub-button-busy:disabled,
     .modhub-compat-dialog .modhub-modal-body { padding: 8px 12px; }
 }
 
-/* 次要工具使用单列浮出菜单，常用操作保持单行。 */
-#modHubModManageContainer .modhub-header-actions { display: flex !important; flex-direction: row !important; flex-wrap: nowrap; align-items: center; gap: 8px; overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; scrollbar-width: thin; padding: 2px 2px 5px; box-sizing: border-box; }
+/* 次要工具使用单列浮出菜单，常用操作按可用宽度换行。 */
+#modHubModManageContainer .modhub-header-actions { display: flex !important; flex-direction: row !important; flex-wrap: wrap; align-items: center; width: 100%; min-width: 0; gap: 8px; padding: 2px 0 5px; box-sizing: border-box; }
 .modhub-sticky-toolbar .modhub-group-header { align-items: flex-start; }
-.modhub-manager-helpbar .modhub-safemode-label { padding-right: 2px; }
-#modHubModManageContainer .modhub-header-actions button { flex: 0 0 auto; white-space: nowrap !important; overflow-wrap: normal; }
-.modhub-manager-tools { flex: 0 0 auto; min-width: 0; }
-.modhub-manager-pinned-tools { display: flex; flex: 0 0 auto; align-items: center; gap: 8px; }
+.modhub-manager-preferences .modhub-safemode-label { padding-right: 2px; }
+#modHubModManageContainer .modhub-header-actions button { flex: 0 0 auto; min-height: 36px; white-space: nowrap !important; overflow-wrap: normal; }
+.modhub-manager-tools { flex: 0 0 auto; min-width: 0; margin-left: auto; }
+.modhub-manager-secondary-actions { display: flex; flex: 0 0 auto; align-items: stretch; gap: 8px; margin-left: auto; }
+#modHubModManageContainer .modhub-manager-refresh { display: inline-flex; align-items: center; justify-content: center; width: 38px !important; min-width: 38px; padding: 6px !important; }
+.modhub-manager-refresh > svg { width: 20px; height: 20px; }
+.modhub-manager-pinned-tools { display: flex; flex: 0 1 auto; flex-wrap: wrap; align-items: center; max-width: 100%; gap: 8px; }
 .modhub-manager-pinned-tools:empty { display: none; }
 #modHubModManageContainer .modhub-manager-tools-toggle { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 36px; border: 1px solid var(--600); border-radius: 3px; background: var(--850); color: var(--100); padding: 6px 10px; }
 .modhub-manager-tools-toggle::after { content: ''; border-left: 4px solid transparent; border-right: 4px solid transparent; border-top: 4px solid currentColor; }
@@ -458,5 +462,86 @@ button.modhub-button-busy:disabled,
     #modHubModManageContainer .modhub-header-actions button { width: auto !important; padding: 6px 8px !important; font-size: clamp(12px, 3.8vw, 15px); line-height: 1.35; }
 }
 
+@media(max-width:768px){#modHubModManageContainer button,#modHubModManageContainer #modHubBatchToggleBtn{min-height:32px!important;height:auto!important}}
+
+/* 紧凑页签导航，关闭按钮固定在横向滚动区外。 */
+#customOverlay[data-overlay="modloader"] { display: flex !important; flex-direction: column !important; overflow: hidden !important; }
+#customOverlay[data-overlay="modloader"] #customOverlayTitle {
+    flex: 0 0 auto; flex-direction: row !important; flex-wrap: nowrap !important; align-items: stretch !important; gap: 0;
+    min-width: 0; width: auto !important; height: auto !important; margin: 0 .5rem !important; padding: 0 !important;
+    border: 1px solid var(--150, #ddd); border-bottom: 0; background: var(--750, #444) !important;
+}
+#customOverlay[data-overlay="modloader"].modhub-overlay-fullscreen #customOverlayTitle {
+    margin-inline: .75rem !important;
+}
+#customOverlay[data-overlay="modloader"] .modhub-overlay-nav {
+    display: flex; flex: 1 1 auto; align-items: stretch; min-width: 0;
+    border-bottom: 1px solid var(--150, #ddd);
+}
+#customOverlay[data-overlay="modloader"] #overlayTabs {
+    display: flex !important; flex-wrap: nowrap !important; flex: 1 1 auto !important; min-width: 0 !important;
+    width: auto !important; padding-right: 0 !important; border: 0 !important; border-radius: 0 !important;
+    overflow-x: auto !important; overflow-y: hidden !important; overscroll-behavior-x: contain;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none; background: var(--750, #444) !important;
+}
+#customOverlay[data-overlay="modloader"] #overlayTabs > .modhub-core-tab {
+    flex: 1 0 auto !important; width: auto !important; min-width: max-content !important; max-width: none !important;
+    margin: 0 !important; min-height: 36px; padding: 9px 12px !important; border: 0 !important;
+    border-right: 1px solid var(--300, #bbb) !important; border-bottom: 2px solid transparent !important;
+    border-radius: 0 !important; background: var(--800, #333) !important; color: var(--300, #bbb) !important;
+}
+#customOverlay[data-overlay="modloader"] #overlayTabs > .modhub-core-tab:last-child { border-right: 0 !important; }
+#customOverlay[data-overlay="modloader"] #overlayTabs > .modhub-core-tab.tab-selected {
+    color: var(--gold, #d6b365) !important; border-bottom-color: var(--gold, #d6b365) !important; background: var(--850, #222) !important;
+}
+/* 原生页签仍按移动关闭选项计数，只隐藏旧入口。 */
+#customOverlay[data-overlay="modloader"] #overlayTabs > .modhub-mobile-close-tab { display: none !important; }
+#customOverlay[data-overlay="modloader"] .customOverlayClose {
+    position: relative !important; flex: 0 0 40px; top: auto !important; right: auto !important;
+    width: 40px !important; min-width: 40px !important; min-height: 40px; height: auto !important; padding: 0 !important;
+    border: 0 !important; border-radius: 2px; background: transparent !important; transform: none !important;
+}
+#customOverlay[data-overlay="modloader"] .customOverlayClose:hover { transform: none !important; }
+#customOverlay[data-overlay="modloader"] .customOverlayClose:focus-visible { outline: 2px solid var(--gold, #d6b365); outline-offset: -2px; }
+#customOverlay[data-overlay="modloader"] .customOverlayClose::before,
+#customOverlay[data-overlay="modloader"] .customOverlayClose::after { top: calc(50% - 11px) !important; left: calc(50% - 1.25px) !important; }
+@media (max-width: 640px) {
+    #customOverlay[data-overlay="modloader"].modhub-overlay-fullscreen #customOverlayTitle { margin-inline: 4px !important; }
+}
+@media (max-width: 768px) {
+    #customOverlay[data-overlay="modloader"] #overlayTabs > .modhub-core-tab {
+        flex: 1 0 auto !important; min-width: 96px !important;
+    }
+}
+#customOverlay[data-overlay="modloader"] #customOverlayContent { flex: 1 1 0%; min-height: 0; min-width: 0; height: auto !important; box-sizing: border-box; }
+#customOverlay[data-overlay="modloader"]:not(.modhub-overlay-fullscreen) #customOverlayContent { overflow-y: auto; }
+/* 游戏侧栏与浮层可使用不同字号，不能用浮层的 em 抵销侧栏宽度。 */
+@media(max-width:870px){#customOverlay[data-overlay="modloader"]:not(.modhub-overlay-fullscreen){left:calc(100% - 100vw)!important}}
+/* 管理操作栏随列表自然滚动，不再覆盖正在查看的模组。 */
+#modHubModManageContainer .modhub-sticky-toolbar { position: static; z-index: auto; }
+
 /* 样式守卫用此标记确认本文件已实际生效。 */
 :root { --modhub-overrides-styles: 1; }
+
+/* 管理页使用统计条，保留原统计值和更新入口。 */
+#modHubModManageContainer .modhub-manager-overview { display: flex !important; flex-wrap: wrap; align-items: center; gap: 4px 16px; min-width: 0; margin: 0 0 10px; padding: 0 0 10px; border-bottom: 1px solid var(--750); }
+#modHubEnvInfo > .modhub-stat-card { display: inline-flex !important; flex-direction: row; flex: 0 1 auto; align-items: center; min-width: 0; min-height: 32px; gap: 6px; margin: 0 !important; padding: 0 !important; border: 0 !important; background: transparent !important; box-shadow: none !important; }
+#modHubEnvInfo .modhub-stat-label { order: -1; margin-top: 0; font-size: .85em; }
+#modHubEnvInfo .modhub-stat-num { font-size: .9em; font-weight: 500; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; overflow: visible; }
+#modHubEnvInfo #modHubEnvInfoCardFourth { margin-left: auto !important; }
+#modHubEnvInfo > .modhub-stat-card:hover { transform: none !important; }
+.modhub-manager-language { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
+#modHubManagerLanguageControl { display: flex; min-width: 0; }
+#modHubModManageContainer .modhub-sticky-toolbar { padding-top: 0; padding-bottom: 0; box-shadow: none; }
+#modHubModManageContainer .modhub-manager-actionbar { margin: 0; padding: 0; border: 0; }
+#modHubModManageContainer .modhub-manager-help { margin-top: 4px; }
+#modHubManagerStatus[hidden] { display: none !important; }
+#modHubManagerStatus:not([hidden]) { margin-bottom: 6px; font-size: .85em; }
+
+/* 选版确认按钮允许长文案换行，避免英文在窄屏覆盖取消按钮。 */
+.modhub-install-dialog.modhub-version-dialog .modhub-modal-footer .macro-button { white-space: normal !important; }
+
+/* 语言偏好收纳为紧凑按钮，救援页同样不独占一行。 */
+#modHubManagerLanguageControl .modhub-language-control,
+.modhub-restore-panel-header .modhub-language-control { flex: 0 0 auto; margin: 0; padding: 0; }
+.modhub-restore-panel-header .modhub-language-toggle { min-height: 32px; }

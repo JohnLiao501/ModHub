@@ -136,6 +136,7 @@ window.modHubRenderBeautyUI = function() {
     if (!container) return;
     if (!window._modHubBeautyState) {
         container.innerHTML = '<div class="mod-empty grey">未检测到 BeautySelectorAddon，暂时无法管理美化图像包。</div>';
+        window.modHubLocalizeOwned?.(container);
         return;
     }
 
@@ -177,7 +178,7 @@ window.modHubRenderBeautyUI = function() {
                         <span class="green modhub-status-tag">[已启用]</span>
                         ${isAuto ? '<span class="gold modhub-status-tag modhub-tag-auto" title="已跟随旁加载模组自动保持启用">[自动启用]</span>' : ''}
                         <div class="modhub-item-main">
-                            <div class="modhub-item-title">${window.modHubEscapeHtml(item.type)}</div>
+                            <div class="modhub-item-title" data-modhub-no-translate>${window.modHubEscapeHtml(item.type)}</div>
                             <div class="grey modhub-item-desc">来自模组：[${window.modHubEscapeHtml(modName)}]</div>
                         </div>
                     </div>
@@ -213,7 +214,7 @@ window.modHubRenderBeautyUI = function() {
                     <div class="modhub-item-info">
                         <span class="grey modhub-status-tag">[已停用]</span>
                         <div class="modhub-item-main">
-                            <div class="modhub-item-title grey">${window.modHubEscapeHtml(item.type)}</div>
+                            <div class="modhub-item-title grey" data-modhub-no-translate>${window.modHubEscapeHtml(item.type)}</div>
                             <div class="grey modhub-item-desc">来自模组：[${window.modHubEscapeHtml(modName)}]</div>
                         </div>
                     </div>
@@ -227,6 +228,7 @@ window.modHubRenderBeautyUI = function() {
     }
 
     container.innerHTML = html;
+    window.modHubLocalizeOwned?.(container);
     container.onclick = event => {
         const button = event.target?.closest?.('[data-beauty-enabled]');
         const beautyType = button?.closest?.('[data-beauty-type]')?.dataset.beautyType;

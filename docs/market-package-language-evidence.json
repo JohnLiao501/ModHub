@@ -1,0 +1,2101 @@
+{
+  "verifiedOn": "2026-10-18",
+  "scope": "记录当前作者源码、明确发布包或作者语言声明；用户于2026-10-18指定按中文处理或原声明未细分简繁的条目按简体中文登记，并以user-policy标明，已有明确繁体中文证据的条目保持繁体中文。不排除其他语言，不代表全部历史版本或完整翻译覆盖。zxx仅表示没有新增玩家文本，界面不显示该标签。",
+  "entries": [
+    {
+      "id": "modhub",
+      "packageLanguages": [
+        "zh-CN",
+        "zh-TW",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "src/javascript/modhub-i18n.js",
+          "detail": "随包 locales 与三语运行字典。"
+        }
+      ]
+    },
+    {
+      "id": "auto-clothes-repair",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/AutoClothesRepair/AutoClothesRepair_js.js",
+          "detail": "实际修衣结果提示。"
+        }
+      ]
+    },
+    {
+      "id": "combat-terminator",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/CombatTerminator%E2%80%8C/boot.json",
+          "detail": "包内注册的新增按钮。"
+        }
+      ]
+    },
+    {
+      "id": "auto-clean",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/AutoClean/boot.json",
+          "detail": "新增链接与提示。"
+        }
+      ]
+    },
+    {
+      "id": "blood-boon",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/BloodBoon/boot.json",
+          "detail": "实际设置项。"
+        }
+      ]
+    },
+    {
+      "id": "fallen-loop",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/FallenLoop/FallenLoop_Widgets.twee",
+          "detail": "实际设置和输出文本。"
+        }
+      ]
+    },
+    {
+      "id": "gwl-rollback",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/GWLRollBack/boot.json",
+          "detail": "插入的剧情文本。"
+        }
+      ]
+    },
+    {
+      "id": "honest-markets",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/HonestMarkets/HonestMarkets_Widgets.twee",
+          "detail": "实际菜单与剧情。"
+        }
+      ]
+    },
+    {
+      "id": "li-longer-combat",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/LongerLisCombat/boot.json",
+          "detail": "新增设置入口。"
+        }
+      ]
+    },
+    {
+      "id": "eden-roll-back",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/EdenRollBack/ERB_Events.twee",
+          "detail": "实际剧情正文。"
+        }
+      ]
+    },
+    {
+      "id": "cummilk",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Lethivia/DoL-mod-cummilk/blob/master/boot.json",
+          "detail": "新增食材说明。"
+        }
+      ]
+    },
+    {
+      "id": "kitchen-plus",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Lethivia/DoL-mod-kitchenplus/blob/master/boot.json",
+          "detail": "筛选界面与结果提示。"
+        }
+      ]
+    },
+    {
+      "id": "dol-tv",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Lethivia/DoL-mod-tv/blob/master/boot.json",
+          "detail": "新增电视入口与描述。"
+        }
+      ]
+    },
+    {
+      "id": "no-bus-harassment",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Ayndpa/NoBusHarassmentMod/blob/main/NoBusHarassmentWidgets.twee",
+          "detail": "实际设置逐项通过 lanSwitch 提供中英文本。"
+        }
+      ]
+    },
+    {
+      "id": "guide-to-me",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Ayndpa/DOL-GuideToMe/blob/main/actions-hands-left.twee",
+          "detail": "新增操作选项。"
+        }
+      ]
+    },
+    {
+      "id": "chimera-blessing",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/zbf0/Chimera-s-Blessing/blob/main/boot.json",
+          "detail": "新增任务入口。"
+        }
+      ]
+    },
+    {
+      "id": "cheat-extended-chris",
+      "packageLanguages": [
+        "zh-CN",
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/Degrees-of-Lewdity_Cheat_Extended/blob/main/scripts/lan_t2s/README.md",
+          "detail": "作者说明繁体原文、简体切换及相应语言模式。"
+        }
+      ]
+    },
+    {
+      "id": "nail-art",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/NailArt-Extension-/blob/main/scripts/nailArt.js",
+          "detail": "实际设置标签与说明。"
+        }
+      ]
+    },
+    {
+      "id": "bailey-rent",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/Degrees-of-Lewdity_Bailey_rent_mod/blob/main/game/Widgets_rent_acc_mode.twee",
+          "detail": "实际状态提示与操作。"
+        }
+      ]
+    },
+    {
+      "id": "strange-garden",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/Degrees-of-Lewdity_strangeGarden/blob/main/twee/strangeGarden.twee",
+          "detail": "实际操作选项。"
+        }
+      ]
+    },
+    {
+      "id": "baby-hawk",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/koooooiCarp/DOL-BabyHawk-Mod/blob/main/game/BabyHawkTwee/BabyHawkWidget.twee",
+          "detail": "实际内容提示、代称与操作。"
+        }
+      ]
+    },
+    {
+      "id": "love-locket-text",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/koooooiCarp/DOL-Love-Locket-Text-Expansion-Mod/blob/main/game/MODLoveLocket.twee",
+          "detail": "实际剧情及换照片链接。"
+        }
+      ]
+    },
+    {
+      "id": "evil-cockroach",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/LooopSpiner/Evil-Cockroach-Mod/blob/main/game/bug_widget.twee",
+          "detail": "实际设置界面。"
+        }
+      ]
+    },
+    {
+      "id": "eden-after-sunset",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/LooopSpiner/In-The-Eden-After-Sunset/blob/main/code/eden_radio.twee",
+          "detail": "实际收音机交互正文。"
+        }
+      ]
+    },
+    {
+      "id": "maplebirch",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchFramework/blob/main/src/assets/translations/EN/Common.yaml",
+          "detail": "CN 与 EN 目录包含实际设置、确认及取消等对照文本。"
+        }
+      ]
+    },
+    {
+      "id": "simple-framework",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/emicoto/SCMLSimpleFramework/blob/main/MainFramework/Modules/language.js",
+          "detail": "实际语言分支与 common.next 中英文本。"
+        }
+      ]
+    },
+    {
+      "id": "doli",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ArsNativa/Degrees-of-Lewdity-Intelligence/blob/main/src/utils/i18n/index.ts",
+          "detail": "注册 zh-CN 和 en 实际界面字典。"
+        }
+      ]
+    },
+    {
+      "id": "deadwood-reblooms",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/MaplebirchLeaf/Deadwood-Reblooms/blob/main/public/translations/EN/Robin.yaml",
+          "detail": "CN 与 EN 目录包含实际剧情特质与成就对照。"
+        }
+      ]
+    },
+    {
+      "id": "fumo-mod",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/HCPTangHY/DOL-FumoMod/blob/main/localization/en-US.js",
+          "detail": "zh-CN.js 与 en-US.js 注册实际界面文本。"
+        }
+      ]
+    },
+    {
+      "id": "npc-social-avatars",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Eudemonism00/DOL-NPC-Avatars-Mod/blob/main/NPC%20Avatars%20Mod.mod/game/base-system/ovelays/mod-options-overlay.twee",
+          "detail": "实际设置含 _isZh 分支及 nameZh/nameEn。"
+        }
+      ]
+    },
+    {
+      "id": "longer-combat-emicoto",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/emicoto/DOLMods/blob/main/LongerCombat/options.twee",
+          "detail": "实际设置用 lanSwitch 提供中英文本。"
+        }
+      ]
+    },
+    {
+      "id": "candy-and-robot",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/emicoto/DOLMods/blob/main/i%20Candy%20and%20Robot/0Scripts/1_database/systemMsg.js",
+          "detail": "实际操作提示有中英数组，经 P.templet 输出。"
+        }
+      ]
+    },
+    {
+      "id": "dol-phone-mod",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/HCPTangHY/DOL-PhoneMod/blob/main/localization/zh-CN/system.yml",
+          "detail": "明确语言目录中的实际手机界面字典。"
+        }
+      ]
+    },
+    {
+      "id": "a-red-secret",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/PrunusSerrulata/ARedSecret/blob/main/localisation/zh-CN.json",
+          "detail": "运行模块读取的语言字典。"
+        }
+      ]
+    },
+    {
+      "id": "dol-optimization",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolOptimization/blob/main/Source/twee/settings.twee",
+          "detail": "实际设置页。"
+        }
+      ]
+    },
+    {
+      "id": "smartphone",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/blob/main/Source/twee/game/overlays/Settings.twee",
+          "detail": "实际手机缩放、边距及重设设置。"
+        }
+      ]
+    },
+    {
+      "id": "little-pc",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolLitterPC/blob/main/Source/settings.twee",
+          "detail": "实际头像位置及缩放设置。"
+        }
+      ]
+    },
+    {
+      "id": "dynamicest",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolDynamicest/blob/main/Source/settings.twee",
+          "detail": "实际全局设置与透明度等界面。"
+        }
+      ]
+    },
+    {
+      "id": "fertility-expansion",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD/blob/main/mods/FertilityExpansion/game/eden-handbook.twee",
+          "detail": "实际手册与返回链接；不采用上游工具的语言文件。"
+        }
+      ]
+    },
+    {
+      "id": "lnn-enemy-stats-display-chs",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/DGCK81LNN/dol-enemy-stats-display-mod/releases/download/v1.1.0/LNN_Enemy_Stats_Display_CHS_v1.1.0.mod.zip",
+          "detail": "既有独立语言身份与已核验简中附件。"
+        }
+      ]
+    },
+    {
+      "id": "lnn-enemy-stats-display-en",
+      "packageLanguages": [
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/DGCK81LNN/dol-enemy-stats-display-mod/releases/download/v1.1.0/LNN_Enemy_Stats_Display_v1.1.0.mod.zip",
+          "detail": "既有独立语言身份与已核验英文附件。"
+        }
+      ]
+    },
+    {
+      "id": "whitney-extra-mod",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/LupusXLass1404/Whitney_Extra_Mod/blob/main/README.md",
+          "detail": "作者明确仅提供中文；未进一步断定简繁。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ],
+      "basis": "user-policy",
+      "note": "作者原声明仅明确中文、未细分简繁；现按用户2026-10-18确认的默认规则登记简体中文，不声称已经额外读取包体。"
+    },
+    {
+      "id": "mod-i18n",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://api.github.com/repos/Lyoko-Jeremie/Degrees-of-Lewdity_Mod_i18nMod/contents/README.md",
+          "detail": "作者明确 CHS I18N，并提供实际中文替换示例。"
+        }
+      ]
+    },
+    {
+      "id": "more-farm-upgrade",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Qsx0391/DOL-More-Farm-Upgrade-Mod/blob/main/src/NewFarmUpgrades.twee",
+          "detail": "实际农场设备购买与升级页。"
+        }
+      ]
+    },
+    {
+      "id": "dom-robin",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ZeroRing233/Degrees-of-Lewdity-RobinMod/blob/main/game/javaScript/robinModSettings.js",
+          "detail": "实际图片上传错误提示。"
+        }
+      ]
+    },
+    {
+      "id": "dol-sims",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/MissedHeart/Degrees-of-Lewdity-DolSims/blob/main/game/base-system/overlays/Setting%20Sims.twee",
+          "detail": "实际模组设置、介绍与提示。"
+        }
+      ]
+    },
+    {
+      "id": "terra-expanding",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Nephthelana/DOL-Terra-Expanding-Modd/blob/main/game/bestiary/bestiary_main_page.twee",
+          "detail": "实际图鉴说明与操作提示。"
+        }
+      ]
+    },
+    {
+      "id": "custom-hair",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/HiddenCirno/DoL-CustomHair/blob/main/CustomHair.twee",
+          "detail": "实际染发正文、色值说明与发型选项。"
+        }
+      ]
+    },
+    {
+      "id": "bunny-transformation",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/sylphiet/Bunny-TransformationCN/blob/main/boot.json",
+          "detail": "实际注入的设置、特质与成就文本。"
+        }
+      ]
+    },
+    {
+      "id": "more-love-interests",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Nephthelana/DoL-More-Love-Interests-Mod/blob/main/game/more_love_interest_main.twee",
+          "detail": "实际恋人界面、说明与操作提示。"
+        }
+      ]
+    },
+    {
+      "id": "character-romance-qol",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/doctor55555-55555/DolMod-/releases/download/1.9.4%E6%B5%8B%E8%AF%95/_v0.1.880.zip",
+          "detail": "内存读取发布包，boot 0.1.880，moduel/adian-chat.twee 含实际剧情。"
+        }
+      ]
+    },
+    {
+      "id": "midsummer-night-dream",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/youmu1818/MND-Hotel/releases/download/V1.1/MND1.1.zip",
+          "detail": "内存读取发布包，boot MidsummerNightDream 1.1，game/mnd.twee 与 mnd-wraith.twee 含实际正文。"
+        }
+      ]
+    },
+    {
+      "id": "smartphone-omega",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-DolSmartPhone/releases/download/v.omega.1.0/SmartPhone-vOmega.1.0.mod.zip",
+          "detail": "内存读取精确登记附件，boot SmartPhone Omega，scripts/smartphone-apps.js 含实际操作。"
+        }
+      ]
+    },
+    {
+      "id": "wraith-reflection",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Water2311/WraithsReflection/releases/download/1.3.4/Wraith.sReflection.mod.zip",
+          "detail": "内存读取 boot 1.3.4，game/WraithsReflectionActions/FishingThought.txt 含实际正文。"
+        }
+      ]
+    },
+    {
+      "id": "sydney-bare-study",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/koooooiCarp/DOL-Sydney-Bare-Study-Mod/releases/download/v1.5/Sydney.Bare.Study.Mod.mod.zip",
+          "detail": "内存读取发布附件，boot 0.1，textshow.twee 与 cheatPort.txt 含实际文本。"
+        }
+      ]
+    },
+    {
+      "id": "time-multi",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Lethivia/DoL-timemulti/blob/master/boot.json",
+          "detail": "全部注入仅数字倍率，没有新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "free-speech-attitudes",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/zbf0/Free-Speech-Attitudes/blob/main/boot.json",
+          "detail": "全部注入仅条件修改，没有新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "ui-bar-background",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/LooopSpiner/DOL-UI-Bar-Background/blob/main/code/background_settings.twee",
+          "detail": "实际背景设置界面。"
+        }
+      ]
+    },
+    {
+      "id": "eden-visuals",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/LooopSpiner/Eden-Visuals-Mod/blob/main/game/eden_widget.twee",
+          "detail": "实际设置区。"
+        }
+      ]
+    },
+    {
+      "id": "special-pose-extension",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/Special-Pose-Extension-/blob/main/scriptEarly/FWdetector.js",
+          "detail": "实际前置检测弹窗。"
+        }
+      ]
+    },
+    {
+      "id": "clothing-trait-compatibility",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/DOL-Compatibility-Mods/blob/main/Clothing%20Trait%20Compatibility/js/clothesTraitFix.js",
+          "detail": "实际追加 desc/details 为简中，不按模组名称推断。"
+        }
+      ]
+    },
+    {
+      "id": "head-mask-compatibility",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/DOL-Compatibility-Mods/blob/main/Legacy%20Head%20Mask%20Compatibility/js/LegacyHeadMaskCompat.js",
+          "detail": "已读完整 boot 与运行脚本，仅渲染逻辑，没有新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "combat-status-display",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/DoL-Lyra/CombatStatusDisplay/blob/main/boot.json",
+          "detail": "已读全部注册的 AP.twee、HP.twee，仅显示数值。"
+        }
+      ]
+    },
+    {
+      "id": "cheat-lyra",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/DoL-Lyra/Cheat/blob/main/boot.json",
+          "detail": "全部注入仅条件与表达式修改。"
+        }
+      ]
+    },
+    {
+      "id": "bes-armcover-fix",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/travellerse/BES-armcover-unofficial-fix/blob/main/boot.json",
+          "detail": "仅注册两张 PNG，无脚本与正文。"
+        }
+      ]
+    },
+    {
+      "id": "neoui-patch",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/RyaraSUKI/dol-neoui-patch/blob/main/boot.json",
+          "detail": "已读完整运行清单 sidebar.js/ui.css，仅样式、事件与图标。"
+        }
+      ]
+    },
+    {
+      "id": "custom-spellbook",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ZeroRing233/DOL-Custom-Spellbook-Mod/blob/master/src/tweeFileList/spellBookWidgets.twee",
+          "detail": "实际法术书管理界面。"
+        }
+      ]
+    },
+    {
+      "id": "eden-fence-rescue",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/MissedHeart/Degrees-of-Lewdity-Eden-Fence-Rescue-Fixed/blob/main/game/overworld-plains/loc-livestock/Eden%20Fence%20Rescue%20Origin.txt",
+          "detail": "实际恢复的提示与链接。"
+        }
+      ]
+    },
+    {
+      "id": "fishing-life",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Future-R/DOLMOD-FishingLife/blob/master/boot.json",
+          "detail": "实际注入的钓鱼入口文本。"
+        }
+      ]
+    },
+    {
+      "id": "eliminate-spaces",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/omvjro/ovoDoLMods/blob/main/mods/eliminateSpaces/preload.js",
+          "detail": "已读 boot 与完整 preload，仅移除空白及调整 silently。"
+        }
+      ]
+    },
+    {
+      "id": "realistic-pain",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Astalsi401/dol-realistic-pain/blob/main/realistic-pain.js",
+          "detail": "已读 boot 与完整脚本，仅运算与条件替换。"
+        }
+      ]
+    },
+    {
+      "id": "angel-halos",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/MagicalAstrogy/AngelHalos/blob/main/replacement.txt",
+          "detail": "replacement.txt 与 replacement2.txt 实际新增简中光环名称。"
+        }
+      ]
+    },
+    {
+      "id": "extra-recipe-study",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/blob/7aa43063b10e71cc2e83f0c06263af1f144a8240/ExtraRecipeStudy/ExtraRecipeStudy_Widgets.twee",
+          "detail": "已读取实际菜谱学习剧情、成功失败说明和继续按钮，均为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "dol-quest-assistant",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/JohnLiao501/DoL-Quest-Assistant/blob/cdf8acdec8fd438c77a48b75bd5ce89d6a600bb8/mod/src/QuestAssistantMod.jsx",
+          "detail": "实际随包界面任务概览、筛选、状态与导出说明使用简体中文；攻略可回退英文来源不作为英文界面支持。"
+        }
+      ]
+    },
+    {
+      "id": "remy-love",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chazi152/Remy_love_mod/blob/f2344c755b0222bb24f3f57024a22ff000f1b968/chachazi/game/overworld-plains/loc-livestock/remymod%20apple.twee",
+          "detail": "已读取实际新增剧情与交互链接，均为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "exhibitionism-expansion",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion/blob/1db685499df523e8b08faee2a32fca702f6426b1/Source/twee/mee_settings.twee",
+          "detail": "实际设置页、按钮与说明使用简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "dol-mod-center",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/102326/DoL-Mod-Center/blob/263485100aba4ac8d48a58b33ac87824421de2a8/frontend/mod-center/src/App.vue",
+          "detail": "运行界面的本地模组、诊断助手、配置保存与错误提示使用简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "dolsoftwetgameui-dol-game-ui",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/102326/DoL-Game-UI/blob/965afcf119260886319f5beb6616362acb306a09/src/floating/Settings.vue",
+          "detail": "实际设置控件的名称、选择项与操作说明使用简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "cheat-extend-hsskyboy",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/HSSkyBoy/DOL-CheatExtend/blob/5d33d6731154945dd65c6f937c292708862ebf9d/%E9%9A%8F%E8%BA%AB%E8%A1%A3%E6%9F%9C.twee",
+          "detail": "实际新增衣柜段落和返回链接使用简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "free-attitudes",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/emicoto/DOLMods/blob/bc4b494e3927326ab71f94e1f9394f9830c75736/free%20attitudes/boot.json",
+          "detail": "实际注入的态度选项使用简体中文，并精确匹配中文版原段落。"
+        }
+      ]
+    },
+    {
+      "id": "lower-sky-box",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/miyakoAki4828/Dol-Miyako-Mods/blob/1a7de9037f37fae34a8c54800e4beda313677675/LowerSkyBox%20ver0.2.0.mod/boot.json",
+          "detail": "仅注册 CSS 图层顺序替换，无脚本、Twee 或新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "whitney-expansion",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Ayusai31/WhitneyExpansion/releases/download/Whitney/WhitneyExpansion.zip",
+          "sha256": "615c4fb53c2b8b7f2227052f316bd49c1e94760d4c69b03215822f19c9be9e10",
+          "detail": "内存读取发布包 0.3，实际 game/LeaveSchool.twee、WhitneySecretBase.twee 与新增链接为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "cattery",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Maomaoi/Degrees-of-Lewdity-Cattery/releases/download/v1.1.8.2/Cattery1.1.8.2.for.dol0.5.10.zip",
+          "sha256": "b08e526e8eda642ff30e3878df428a76781430184eb3842e0c99364c29c20682",
+          "detail": "内存读取发布包，实际 game/cafeShop.twee、game/home/home1.twee 的剧情、商店和交互链接为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "better-cheat-command-management",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Tony70124/BetterCheatCommandManagement-for-DOL/releases/download/v2.1.4/BCCM_v2.1.4.zip",
+          "sha256": "d79fb858d72bb97702c766aff28905280fd0dd1214e5ffec7c549b56a498528a",
+          "detail": "内存读取发布包，game/Bccm/bccmeditor.twee 与 cccheateditor.twee 的场景编写、扩展功能及输入说明为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "eu-clothing-addition",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Eudemonism00/DOL-Eu-ArtMods/releases/download/1.1.2/Eu.Clothing.Addition.mod.zip",
+          "sha256": "a487ba1fafd37f8eb0f8730cf01381f2046eada85f397e48769e7589fe043cb4",
+          "detail": "内存读取发布包，clothes/head.json、lower.json、upper.json 的衣物名称和描述为简体中文；英文内部标识不计为完整英文文案。"
+        }
+      ]
+    },
+    {
+      "id": "little-teachers-pet",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Althea820/Little-Teachers-Pet-DoL/releases/download/LTP-v1.0.1/Little-Teachers-Pet.zip",
+          "sha256": "ec1fd20a7417b4126a354bd9632e00b64efc68e15b5f3f7a087d4c822a614a79",
+          "detail": "内存读取正式发布包，核实 boot.json 注册的 clothes/head.json 实际存在，cn_name_cap 为简体中文跟宠名称。"
+        }
+      ]
+    },
+    {
+      "id": "rw-beautification",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/RWxlYW5vcg/RW-DOL-Image-replacement/releases/download/25.5.23/RWDOL.0.0.5.MLver.zip.zip",
+          "sha256": "6d6f7622fa61357ac628ec6a5d4fae35740469bf697ea39516d5406fe27ac57c",
+          "detail": "内存读取发布包，除 boot.json 外均为替换图像，无脚本、Twee 或新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "inuno-image-pack",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/inuno-233/DOL-inuno-image-pack/releases/download/%E5%8E%9F%E7%89%88%E6%9C%8D%E8%A3%85/inuno.0.0.6.zip",
+          "sha256": "b0309b483db68ab4399608959d8634e2bf6443493e89f65aa30076e0fad54667",
+          "detail": "内存读取原版 0.0.6 包；仅图像、绘制图层脚本和绘制补丁，无新增玩家文本。"
+        },
+        {
+          "source": "https://github.com/inuno-233/DOL-inuno-image-pack/releases/download/%E5%8E%9F%E7%89%88%E6%9C%8D%E8%A3%85/Inuno.0.0.6.DoLP.zip",
+          "sha256": "4e93903a8d52e49f07781ab1a7727d977080d5f346e0c54d65127705039695eb",
+          "detail": "另核对 DoLP 0.0.6 包，资源和图层补丁同样没有新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "dol-arcade-expansion",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/DOLArcadeExpansion/releases/download/3.x/DOLArcadeExpansion_v3.5.2.mod.zip",
+          "sha256": "4b3db61531d0e757d642cd4481cd499d44bf37fbcb32db5b3d28aedc27ec20cd",
+          "detail": "内存读取发布包，实际游戏入口、成就说明、玩法规则与下注提示为繁体中文。"
+        }
+      ]
+    },
+    {
+      "id": "ranch-story",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/dawalizhang/-/releases/download/mod/MuYuNi.zip",
+          "sha256": "2616b52263dffb09122de8b2c1990717a57caa08e121b98694120890bf452774",
+          "detail": "内存读取发布包，实际 game/muchang.twee、BuyChickens.twee、BuyCows.twee 的界面、剧情与按钮均为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "brand-new-spaces",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/lingyu230514/-/releases/download/mod/qxkj.zip",
+          "sha256": "4eaf1bedf0c272e7471d9ba43c6dff6230b5affba62fd45ff3e78c07ebdd2a3e",
+          "detail": "内存读取 1.0.4 发布包，实际修炼界面、新增人物剧情与成就说明使用简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "overfits-slots",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/miyakoAki4828/Dol-Miyako-Mods/releases/download/0.5.3.0/ReOverfits.2.0.mod.zip",
+          "detail": "内存读取 2.0.0 发布包，boot.json 注入头套、外套分类，game/addon-replace 中商店链接为简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "layering-fixes",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/miyakoAki4828/Dol-Miyako-Mods/releases/download/0.5.3.0/LayerFixes.2.0.5.mod.zip",
+          "sha256": "1c06836a0b4b273293b1eb6772604c935a06b64d1343f39b91d541a75246da96",
+          "detail": "内存读取 2.0.5 发布包，仅 boot.json 中画布层级逻辑补丁，无新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "background-foreground-template",
+      "packageLanguages": [
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/miyakoAki4828/Dol-Miyako-Mods/releases/download/test/background.foregroundtemplate.mod.zip",
+          "sha256": "9f92ce5c1200aad8c11fef908038d4818835202c1d4e0ef382d2600781d23093",
+          "detail": "内存读取发布模板，镜子界面新增选项仍为 YourBg1Name、YourFg1Name 等英文占位标签；中文 Readme 不作为中文界面依据。"
+        }
+      ]
+    },
+    {
+      "id": "trauma-appearance",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/a1066160186/BananaMods/releases/download/v0.2.1/NoTraumaClamp_0.2.1.zip",
+          "sha256": "689974e858c5a2a6b856b7076ab8b3cb1d7e52460ae87d29e7905ad96804cedf",
+          "detail": "内存读取发布包，boot.json 包含精确匹配并替换的简体中文段落文本；非仅数值补丁。"
+        }
+      ]
+    },
+    {
+      "id": "defrock-sydney",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/hxdnshx/sugarcube-2-ModLoader/blob/d3b11c21b77e87da3bdbbd93c46d9349d2d453b1/src/insertTools/DefrockMod/boot.json",
+          "detail": "实际注册 zh-CN 与 en-US 两份替换字典，另读取 RemoveChastity.twee 中文剧情及 replace_en_us.json5 英文正文核对。"
+        }
+      ]
+    },
+    {
+      "id": "time-hourglass",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/hxdnshx/sugarcube-2-ModLoader/blob/d3b11c21b77e87da3bdbbd93c46d9349d2d453b1/src/insertTools/TimeHourglass/TimeHourglassResetIntro.twee",
+          "detail": "实际新增剧情和选择链接使用简体中文。"
+        }
+      ]
+    },
+    {
+      "id": "no-auto-rebuy-trash",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/hxdnshx/sugarcube-2-ModLoader/blob/d3b11c21b77e87da3bdbbd93c46d9349d2d453b1/src/insertTools/NoAutoRebuyTrash/boot.json",
+          "detail": "仅注入衣物自动购买条件逻辑，没有新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "id": "universal-combat-beautification",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://api.github.com/repos/site098/mysterious/git/trees/HEAD?recursive=1",
+          "detail": "成功读取，唯一非图像文件为 16 字节的说明书，正文仅为这是说明书。"
+        },
+        {
+          "source": "https://github.com/site098/mysterious/releases/download/%E9%A2%84%E5%8F%91%E5%B8%83/default.zip",
+          "detail": "成功内存读取 4,484,716 字节，SHA-256 8e93d93f6a8ef2a7a59cf9a1f138c14d82a9706dccaf281a1cf4a7d132b49247；boot.json name=通用战斗美化、version=1.6.1，styleFileList/scriptFileList/tweeFileList 均为空，注册 2,921 张图片与图像加载器，没有新增玩家文本。"
+        }
+      ],
+      "note": "作者仓库只保留空白说明书，实际发布包为图像替换资源，无运行文案。"
+    },
+    {
+      "id": "universal-combat-zed-fix",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://api.github.com/repos/Zed660033/mysterious/releases?per_page=5",
+          "detail": "成功读取 9.26 发布说明；作者明确列明对 site098 通用战斗美化的图像修复，选取当前非 outdate 的 1.0.3 包。"
+        },
+        {
+          "source": "https://github.com/Zed660033/mysterious/releases/download/9.26/UCB-zedfix-1.0.3.zip",
+          "detail": "成功内存读取 4,704,025 字节，SHA-256 209572f5aaffdc9c4e9ae4a81c8f01068af76f753fa77cce503c07b0430c384b；boot.json name=通用战斗美化-zed修复、version=1.0.3，styleFileList/scriptFileList/tweeFileList 均为空，仅图像资源与说明，没有新增玩家文本。"
+        }
+      ],
+      "note": "核对修复包自身而非借原包推断，实际只替换图像。"
+    },
+    {
+      "id": "no-anal-ride-neo",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/3naka/DarksOuLs/releases/tag/NARN",
+          "detail": "成功读取作者发布记录，明确适用 5.6.10 以上、旧版另用 NoAnalRide；资产名 NoAnalRideNeo.zip。"
+        },
+        {
+          "source": "https://github.com/3naka/DarksOuLs/releases/download/NARN/NoAnalRideNeo.zip",
+          "detail": "成功内存读取 1,159 字节，SHA-256 dd25456ac486eec2b5f2ca9f29542e5020a5987a930e124a4a5c279f5ad4ce49；boot.json name=NoAnalRideNeo、version=0.1，实际向 Widgets Settings 注入简体中文设置标签启用肛交-主动。"
+        }
+      ],
+      "note": "未借旧 NoAnalRide 或仓库其他子模组。先从全部发布中找到 NARN，再在包内核实准确 NoAnalRideNeo 身份及实际中文设置标签。"
+    },
+    {
+      "id": "community-ba74fb20-ce11-450e-a1d6-8e27a16553c8",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://api.github.com/repos/mirrormirroronwall/stowedbarhistorycontrol/releases/tags/1.0.3",
+          "detail": "成功读取作者 1.0.3 发布记录，两个正式资产名、大小及 GitHub 给出的 SHA-256 摘要均与本次内存下载计算结果一致。作者说明适配 0.5.12，并说明页面位置调整。"
+        },
+        {
+          "source": "https://github.com/mirrormirroronwall/stowedbarhistorycontrol/releases/download/1.0.3/stowedbarhistorycontrol.zip",
+          "sha256": "a18083e5151f3a2ab365a03c2017a920a4bf66a9c7d04f34b60d2f5f564cf834",
+          "detail": "成功内存读取完整包 2,372 字节；boot.json 的 name 为边栏回溯+页面调整，version 为 1.0.3，TweeReplacer 将 game/mobilestats.txt 替换入 mobileStats。实际按钮 title 分别为后退、前进；已完整读取包内 CSS、JS、TXT、boot.json。"
+        },
+        {
+          "source": "https://github.com/mirrormirroronwall/stowedbarhistorycontrol/releases/download/1.0.3/stowedbarhistorycontrol-only.zip",
+          "sha256": "b6a3c7fbee2e00da610cd02b739db2a8742107315750fa48e61a9d0985ce8552",
+          "detail": "成功内存读取仅回溯包 2,304 字节；身份和版本与完整包相同，game/mobilestats.txt 仍有同样的简体中文按钮提示。区别仅为 CSS 不含宽度分段的 story 左边距调整。"
+        }
+      ],
+      "note": "两个包都由 boot.json 注册 game/mobilestats.txt；该文件新增回溯按钮的 title 提示后退和前进，为简体中文。因此虽然按钮主体为图标，仍有新增玩家文字，不能标 zxx。两包的该文本与 JavaScript 相同，完整包额外包含页面边距 CSS。"
+    },
+    {
+      "id": "factory-flower-sales",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/8870017658?see_lz=1",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "id": "lurker-capture",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/8865149883?see_lz=1",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "id": "rainbow-bridge",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/8943970447?see_lz=1",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "id": "au-beautification",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/AOKIUTAGE/UTAGEsDOL3.0/releases/download/mod/AUfemale.model_v0.9.3.zip",
+          "detail": "实际内存读取54519851字节，SHA-256 6c20236bc300d794ef2e77027d0d816d3ef4f2460282a5cac43aacbecc4206a0。ZIP10519条目，全部CRC校验通过；非图片文件只有boot.json，其styleFileList/scriptFileList/tweeFileList均为空，仅以additionDir注册AUfemale图片目录和BeautySelectorAddon类型。没有把注册技术名当作自然语言。"
+        },
+        {
+          "source": "https://api.github.com/repos/AOKIUTAGE/UTAGEsDOL3.0/git/trees/24301fbcdc290afd9302ab3f4cc432cdbea05649?recursive=1",
+          "detail": "作者当前完整公开源码树只有README.md与AU美化更新日志.txt；发布说明提供中英文安装介绍，没有把这些说明文语言当作图片包语言。"
+        },
+        {
+          "source": "https://github.com/AOKIUTAGE/UTAGEsDOL3.0/releases/download/mod/AUmale.model_v0.4.2.zip",
+          "detail": "实际完整内存读取46875870字节，SHA-256 c46389de100c2b6c681846aa28e054fd09053e3b55d03988b25c7fe93259efae。ZIP9824条目，全部CRC校验通过；非图片文件只有boot.json，styleFileList/scriptFileList/tweeFileList均为空，仅注册AUmale图片目录和BeautySelectorAddon类型。另以HTTP Range独立复核完整ZIP目录及boot，结果一致。"
+        },
+        {
+          "source": "https://github.com/AOKIUTAGE/UTAGEsDOL3.0/releases/download/mod/AUandrogynous.model_v0.1.1.zip",
+          "detail": "实际完整内存读取52734714字节，SHA-256 e93c82e20fbb8e809d2bc05365209ebb4aafc47fefd50038fcc982454a335cd9。ZIP9807条目，全部CRC校验通过；非图片文件只有boot.json，styleFileList/scriptFileList/tweeFileList均为空，仅注册AUandrogynous图片目录和BeautySelectorAddon类型。另以HTTP Range独立复核完整ZIP目录及boot，结果一致。"
+        }
+      ],
+      "note": "三个当前模型均为图片资源和技术注册清单，没有新增的运行文本、界面选项或剧情正文，按本轮内部数据约定登记zxx；这不是简体中文、繁体中文或英语界面支持声明，也不证明跨游戏版本兼容。用户取消的无新增文本显示标签不应因此重新出现。"
+    },
+    {
+      "id": "au-facial-expansion",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/AOKIUTAGE/UTAGEsDOL3.0/releases/download/facemod/AUsDoL.facial.expansion.mod.zip",
+          "detail": "实际内存读取1623474字节，SHA-256 8f2c1b66f0104e51e4f1c91f8f3a4873db517997a390c1037f4de811d387ecf6。实际包装器公开const fixedPassword字面常量；按其CryptoTool算法认证解码，Poly1305认证及内部8条目ZIP CRC全部通过，内部ZIP SHA-256 0d7ac16b70d5d71a0ac6ff3241cf5fc9f5b974988169ff6114cda3ade7aa3987。已读内部addon/setting.twee和脚本，实际玩家选项包括更容易脸红、强制半睁眼、强制创伤表情、高潮时流泪、开启独立高潮表情、开启AU面纹染色、应用等简体中文。"
+        },
+        {
+          "source": "https://github.com/user-attachments/assets/675a0a23-61c4-46d3-bc0d-5718d8f7ce87",
+          "detail": "已实际查看作者facemod发布页截图，模组自有AU面部扩展面板及AU独立嘴部仪态、选择面纹等为简体中文，与已读正文相互印证。"
+        }
+      ],
+      "note": "确认简体中文来自真实注册选项和Twee正文；不是根据README中文或通用解密加载器中文推断，没有声称完整繁体或英语界面。"
+    },
+    {
+      "id": "paperdoll-plus",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/HCPTangHY/DOL-PaperdollPlus/releases/download/1.3/PaperdollPlus-1.3.0.mod.zip",
+          "detail": "实际内存读取1730235字节，SHA-256 f0659a761eb5298e94f15f6328b49155027ec3f7d165de41526fed26a7eae5c5。实际编译包装器公开const inputP字面常量（附带source map仍为未修改旧源，核验使用实际编译正文）；按公开算法认证解码，Poly1305认证及内部124条目ZIP CRC全部通过，内部ZIP SHA-256 ebaeb67c38d50050b62f022268b2d303d8ee8c80e99f3f2bbafbfa4a7b6c7ee0。已读内部boot.json、mirror.twee、paperdoll+.js和CSS。boot补丁实际根据是否存在ModI18N将_highlightsText设为简体中文挑染或英语Highlights，提供明确双语运行文本分支。"
+        }
+      ],
+      "note": "可确认简体中文和英语显示文本分支；没有依据中文README指定语言，也不将语言文本分支等同于完整游戏兼容性实测。"
+    },
+    {
+      "id": "ray-beautification",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_light_ZH.mod.zip",
+          "detail": "实际读取当前中文轻量包 33897127 字节，计算 SHA-256 为 0abb2eda750dc504eb2270d5564ad309fb84a84c82852ef3205f59e21914f9ee，与作者 API 公布值一致。包内 boot.json 名称 Ray美化、版本 1.6.0，实际新增 replace 文案包含中性、偏男性、更换脸型后先点应用、恶魔牛角、显示及隐藏；game/canvasmodel-ray.js 有简体中文颜色显示名。因此不是纯图片无文本包。"
+        },
+        {
+          "source": "https://api.github.com/repos/Ray-ray2345/Ray-Art-Mod-Released/releases/tags/1.6.0",
+          "detail": "作者当前 1.6.0 正式发布同时提供 _ZH、_EN、DoLP 和对应轻量版本，包含 Ray.Art.Mod1.6.0_light_EN.mod.zip 与 Ray.Art.Mod1.6.0_EN.mod.zip。英语结论的依据层级为作者明确命名的发行语言变体，不将英文技术标识当作译文。"
+        },
+        {
+          "source": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_light_EN.mod.zip",
+          "detail": "已只读下载该英语轻量包，摘要输出中段被工具截断，未把未完整回读的运行文本或散列计算值当作核验结果。作者 API 公布摘要为 151b92bd4026a6a4d110b056b1a4ce8a611a0fac9d50bb8dbfae4ff0028844b4；此处仅记录作者公布值，不声称完整英语翻译覆盖。"
+        }
+      ],
+      "note": "作者分别发布中文与英语版本，不能表述为同一包内可自由切换语言。当前中文包的玩家文案已直接核对；加密 mapping.zip.crypt 未找到公开口令常量，没有解密，其内容未用于语言结论。旧仓库 boot 的 Ray美化1.2.0 / 1.1.0 包装器不代表当前正式包。"
+    },
+    {
+      "id": "ray-extra-clothes",
+      "packageLanguages": [],
+      "basis": "current-package-language-unconfirmed",
+      "evidence": [
+        {
+          "source": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.extra.clothes.zip",
+          "detail": "当前正式附件位于 Release 1.6.0，根 boot 版本为1.5.3，SHA-256 b3c579b3f25fe1b31490d7f7ad072f8887522918248ea2929b7b6d8df805dc57。最新完整结构核验明确包体语言未知，未将旧1.3.0的中文证据提升为新版语言声明；当前身份、文档与随包资料均保留空数组。"
+        }
+      ],
+      "historicalPackages": [
+        {
+          "version": "1.3.0",
+          "packageLanguages": [
+            "zh-CN"
+          ],
+          "sha256": "4a9eb94c76711de5a660fc441a8da1b5526973e21da1c03b451b24e3f7ee2b97",
+          "evidence": [
+            {
+              "source": "https://raw.githubusercontent.com/Ray-ray2345/Ray-Art-Mod-Released/69861b731fd880724350de538c7578743ad3cc24/Ray%20extra%20clothes.zip",
+              "detail": "已回读本轮先前完成的包体文本报告：7926076 字节，SHA-256 4a9eb94c76711de5a660fc441a8da1b5526973e21da1c03b451b24e3f7ee2b97；boot 名称 Ray额外服装，版本 1.3.0。clothes/face.json、upper.json 等包含实际 cn_name_cap 和简体中文服装 description，hair.json 包含混乱刘海、右侧麻花辫、散发小马尾等简体中文显示名，并非仅中文文件名。"
+            },
+            {
+              "source": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.3.0/Ray.extra.clothes.zip",
+              "detail": "作者 1.3.0 发布的额外服装包与上述仓库公开包具有相同大小和作者公布 SHA-256，可确认该证据属于作者正式发布的额外服装包。"
+            }
+          ]
+        }
+      ],
+      "priorLimitedTextEvidence": [
+        {
+          "source": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.extra.clothes.zip",
+          "detail": "本轮也实际读取当前包中的服装 JSON、game/hair.json、game/Irisdeco.twee 与 game/Clothing Shop Widgets.txt，包含简体中文服装描述、发型名、商店链接和美瞳提示。输出中段截断，未将未完整回读的 boot addon 数据或计算摘要作为结论；作者 API 公布该附件 SHA-256 为 b3c579b3f25fe1b31490d7f7ad072f8887522918248ea2929b7b6d8df805dc57。"
+        }
+      ],
+      "note": "当前空数组表示尚未确认已核验新版的包体语言，不表示无文本，也不否定旧1.3.0已直接核对的简体中文证据。此前有限文本读取及其输出截断限制单独保留，不作为新版完整语言能力声明；英文 name/name_cap 等技术或名称字段同样不足以证明完整英语版本。历史包语言不自动传播到当前身份。"
+    },
+    {
+      "id": "sydney-dialogue-events",
+      "name": "悉尼对话&剧情拓展",
+      "sourceUrl": "https://github.com/aliya2333/Sena-s-Sydney-Dialogue-Events-Expansion",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://github.com/aliya2333/Sena-s-Sydney-Dialogue-Events-Expansion/releases/download/v1.7/Sydney.Dialogue.Expansion.Mod.mod.zip",
+          "detail": "当前作者发布资产1740105字节，SHA-256 2fffb4f66fb565ba8ca2c185b354e310c22d466aaed19d262e9d3586adf35673。只读检查实际SimpleCryptWrapper.js编译正文（排除source map）发现const inputP = await this.inputPassword(passwordHint)，未发现公开const inputP/fixedPassword字面口令；只读解码器拒绝继续。没有读取密文中的剧情正文。"
+        },
+        {
+          "source": "https://github.com/aliya2333/Sena-s-Sydney-Dialogue-Events-Expansion/releases/download/v1.3/Sydney.Dialogue.Expansion.mod.zip",
+          "detail": "旧作者发布资产1729664字节，SHA-256 835dc1489e438614f2241e4605b83b699c45ec6defa16915a805d28f0dc20b6a。同样只存在调用用户输入的const inputP = await this.inputPassword(passwordHint)，未发现公开固定字面口令，没有尝试猜测或解码密文正文。"
+        },
+        {
+          "source": "用户指令（2026-10-18）",
+          "detail": "用户明确指定：“剩下这三个也都按中文处理吧”。本条按用户指定规则标注，保留此前核验不足的记录，不声称 GitHub 或包体正文已确认语言。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ],
+      "note": "历史核验不足（保留原记录）：补查没有获得实际剧情明文；作者README的简体中文不足以证明包体剧情语言，因此保持未知。 该限制仍保留；本条现按用户于2026-10-18明确指定的规则登记简体中文，未新增包体语言核验证据。"
+    },
+    {
+      "id": "au-hair-optimization",
+      "name": "AU染发优化",
+      "sourceUrl": "https://github.com/AOKIUTAGE/UTAGEsDOL3.0/",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://api.github.com/repos/AOKIUTAGE/UTAGEsDOL3.0/releases/tags/hairmod",
+          "detail": "实际读取作者当前发布API，该版本标题标明不适配新版，assets数组为空，没有可读取的当前发布包。发布正文说明发色渐变优化及图片目录适配方式，没有具体语言支持声明。"
+        },
+        {
+          "source": "https://api.github.com/repos/AOKIUTAGE/UTAGEsDOL3.0/git/trees/9361930167c5859aa6b24c649662554807104c9e?recursive=1",
+          "detail": "hairmod标签完整源码树仅有15字节README.md，没有运行源码或包体。"
+        },
+        {
+          "source": "https://github.com/user-attachments/assets/f50a2b42-5b5b-4f9c-9f7c-d95ebe3e59a2",
+          "detail": "已实际查看作者hairmod发布页公开效果图，显示人物发色效果，没有模组设置文字可用于判定语言。"
+        },
+        {
+          "source": "用户指令（2026-10-18）",
+          "detail": "用户明确指定：“剩下这三个也都按中文处理吧”。本条按用户指定规则标注，保留此前核验不足的记录，不声称 GitHub 或包体正文已确认语言。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ],
+      "note": "历史核验不足（保留原记录）：当前GitHub发布包已不可读，公开截图只有图像效果，不能仅凭中文发布说明指定包体语言。 该限制仍保留；本条现按用户于2026-10-18明确指定的规则登记简体中文，未新增包体语言核验证据。"
+    },
+    {
+      "id": "decorations-zh-fix",
+      "name": "decorations中文修复",
+      "sourceUrl": "https://discord.com/channels/1103864219620884560/1276552033138245632/1287826388237160449",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://dol.alseece.top/release-index.json",
+          "detail": "本轮成功读取 HTTP 200，索引 336,328 字节。精确 id=decorations-zh-fix：bootNames 仅 decorations_zh_fix；githubUrl/repo/verifiedReleaseAsset 均为 null，githubUrls/repositoryKeys 为空；autoInstall=false。packageRecords 记录 1.0.0、2.0.0、3.0.0 的原始 Discord 消息、文件名及 SHA-256，但无原包下载 URL，也没有语言字段。"
+        },
+        {
+          "source": "https://dolmod-release-index.johnliao381658675.workers.dev/release-index.json",
+          "detail": "本轮成功读取 HTTP 200，索引同为 336,328 字节，对应条目与主域一致。既往包校验声明不等于本轮已读取语言正文。"
+        },
+        {
+          "source": "https://discord.com/channels/1103864219620884560/1276552033138245632/1287826388237160449",
+          "detail": "本轮仅无身份请求读取公开链接，HTTP 200 返回 75,904 字符应用 HTML；未含 decorations_zh_fix 文件名或 cdn.discordapp.com/attachments/ 链接。没有登录、授权、发消息或请求私有 Discord API。"
+        },
+        {
+          "source": "资料/wiki_page.html",
+          "detail": "本地 Wiki 快照只找到背景前景模板需要 decorations_zh 的说明，没有 decorations_zh_fix 对应作者附件，不能混用模板或旧 decorations 身份。"
+        },
+        {
+          "source": "dolmod-site/.sites-runtime/",
+          "detail": "只读检索 release-index-current.json、release-index-restored.json、release-index-v6-backup.json、wiki-mod-list.json 及该目录其他 JSON；没有找到此条目的附件 URL 或原始包正文。"
+        },
+        {
+          "source": "用户指令（2026-10-18）",
+          "detail": "用户明确指定：“剩下这三个也都按中文处理吧”。本条按用户指定规则标注，保留此前核验不足的记录，不声称 GitHub 或包体正文已确认语言。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ],
+      "note": "历史核验不足（保留原记录）：确认该条目没有 GitHub 登记；主、备在线索引都只提供三条 Discord 永久消息、文件名和既往校验哈希，没有 downloadUrl 或 CDN 附件 URL。直接打开原始 Discord 链接只得到应用 HTML，未取得消息正文或附件。本轮不能读取准确 decorations_zh_fix 身份包中的玩家文本，因此继续保留未知，不按中文名称猜测。 该限制仍保留；本条现按用户于2026-10-18明确指定的规则登记简体中文，未新增包体语言核验证据。"
+    },
+    {
+      "id": "degrees-immersion",
+      "packageLanguages": [
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/whelm027/Degrees-of-Inmersion/releases/download/1.2.2/DegreesImmersion-1.2.2.fixedfrfr.zip",
+          "detail": "官方附件已完整静态核验，实际boot为 Degrees of Inmersion 1.2.2。包内英文UI或英文说明文字已直接核对：Reset Position / Reset Size / Reset Offset / Reset Opacity / Export Theme / Import Theme。混淆文本仅静态读取常量数据，未执行包内解码器或初始化代码。"
+        }
+      ],
+      "note": "语言证据仅对应该精确发行附件中的模组界面和说明，不是由英文目录、作者网名或英文技术名推断；未验证游戏中所有分支或手机布局。"
+    },
+    {
+      "id": "combat-ui-rework",
+      "packageLanguages": [
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/LeafGithub/D4Mods-Releases/releases/download/v20261004.100940-cc92637/dol-combat-ui-rework-mod.zip",
+          "detail": "官方附件已完整静态核验，实际boot为 DOL Combat UI Rework 2.2.1。包内英文UI或英文说明文字已直接核对：Split-view combat layout; Passage width control; Compact mode; Settings; Layout; settings; select id=; umn layout。混淆文本仅静态读取常量数据，未执行包内解码器或初始化代码。"
+        }
+      ],
+      "note": "语言证据仅对应该精确发行附件中的模组界面和说明，不是由英文目录、作者网名或英文技术名推断；未验证游戏中所有分支或手机布局。"
+    },
+    {
+      "id": "outfit-transfer",
+      "packageLanguages": [
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/LeafGithub/D4Mods-Releases/releases/download/v20261004.142506-bbdb652/dol-outfit-transfer-mod.zip",
+          "detail": "官方附件已完整静态核验，实际boot为 DOL Outfit Transfer 0.1.0。包内英文UI或英文说明文字已直接核对：Wardrobe transfer; Export all / Export selected; Import; Delete selected; Undo; Select all; Cancel; Import。混淆文本仅静态读取常量数据，未执行包内解码器或初始化代码。"
+        }
+      ],
+      "note": "语言证据仅对应该精确发行附件中的模组界面和说明，不是由英文目录、作者网名或英文技术名推断；未验证游戏中所有分支或手机布局。"
+    }
+  ],
+  "sourceEntries": [
+    {
+      "name": "ModHub模组管理中心",
+      "sourceUrl": "https://github.com/JohnLiao501/ModHub/releases",
+      "packageLanguages": [
+        "zh-CN",
+        "zh-TW",
+        "en"
+      ],
+      "evidence": [
+        {
+          "source": "src/javascript/modhub-i18n.js",
+          "detail": "ModHub 随包语言字典和语言选择器提供简体中文、繁体中文、英语；仅匹配该完整目录原名与原始来源。"
+        }
+      ]
+    },
+    {
+      "name": "clothesicon · 状态栏服装图标",
+      "sourceUrl": "https://github.com/KonoLLo/DoL-Clothesicon",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/KonoLLo/DoL-Clothesicon/blob/e1f2ec1d799e9d3b3e850c709c948af338026fdc/framework.js",
+          "detail": "实际衣柜、衣物部位、脱下、关闭与换装失败提示为简体中文。"
+        }
+      ]
+    },
+    {
+      "name": "小小PC修复增强",
+      "sourceUrl": "https://github.com/KonoLLo/Litter-PC-Fix-Enhance",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/KonoLLo/Litter-PC-Fix-Enhance/blob/79557b13df13f2357b7d3d53e737513b0eb33f20/settings.twee",
+          "detail": "实际模型开关、位置、缩放与透明度设置及说明为简体中文。"
+        }
+      ]
+    },
+    {
+      "name": "NPC社交栏头像5.11.9兼容",
+      "sourceUrl": "https://github.com/102326/DoL-NPC-Avatars-Compat",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/102326/DoL-NPC-Avatars-Compat/blob/31574f18301b8b7120e1f3d12f462cc0105175b3/src/game/base-system/ovelays/bsa-check.twee",
+          "detail": "实际图像启用提示和图像说明为简体中文。"
+        }
+      ]
+    },
+    {
+      "name": "美化修正",
+      "sourceUrl": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-BeautyFixer",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-BeautyFixer/blob/c9e4bf3308ea3c46a4d3f2de2f7ff60ccd10ab02/Source/javascript/beauty-fixer.js",
+          "detail": "实际搜索框、修正码导入、修正导出与显示服装按钮为简体中文。"
+        }
+      ]
+    },
+    {
+      "name": "艾弗里孤儿院便签",
+      "sourceUrl": "https://github.com/Daseinfool/DOL-AveryOrphanageNote",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Daseinfool/DOL-AveryOrphanageNote/blob/3e3c4020fc3ce67ee27066a6947c126b3163e838/main.js",
+          "detail": "实际新增给贝利留便签的两个选择链接为简体中文。"
+        }
+      ]
+    },
+    {
+      "name": "神殿祈祷室神圣事件去随机化",
+      "sourceUrl": "https://github.com/Daseinfool/DOL-TemplePendantGuarantee",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/Daseinfool/DOL-TemplePendantGuarantee/blob/8ce596bca5acab76126b01e0a606b8b54af51628/main.js",
+          "detail": "已完整读取运行脚本，仅改变祈祷事件条件和随机值，无新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "name": "BSA 美化切換",
+      "sourceUrl": "https://github.com/chris81605/DoL-BSA-Beauty-Switcher",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/DoL-BSA-Beauty-Switcher/blob/04a3471921070ee0037957b313da5fece864a53d/bsaBeautySwitcher.js",
+          "detail": "实际美化包设置、切换按钮与附属包说明为繁体中文。"
+        }
+      ]
+    },
+    {
+      "name": "孤儿院大厅海报",
+      "sourceUrl": "https://github.com/ZeroRing233/DOL-Orphanage-Poster-Mod",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ZeroRing233/DOL-Orphanage-Poster-Mod/blob/b280084c2e693c209bc35802e940b0dd360f10e0/game/optionsOverlay.txt",
+          "detail": "实际设置及新剧情为简体中文；设置可选英文图片海报，但不将其算作完整英文界面。"
+        }
+      ]
+    },
+    {
+      "name": "露出拓展",
+      "sourceUrl": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://github.com/ANLINSTUDIO/Degrees-of-Lewdity-MyExhibitionismExpansion/blob/1db685499df523e8b08faee2a32fca702f6426b1/Source/twee/mee_settings.twee",
+          "detail": "实际设置页、按钮与说明使用简体中文。"
+        }
+      ]
+    },
+    {
+      "name": "作弊模组",
+      "sourceUrl": "https://github.com/cphxj123/Dol-BJX-Mods",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://raw.githubusercontent.com/cphxj123/Dol-BJX-Mods/cdecb8f6cdb1f640d83a6970f4036439d48f93d3/%E4%BD%9C%E5%BC%8A%E6%A8%A1%E7%BB%841.1.0.zip",
+          "sha256": "66554316a771a3a6b831ad41558baf172caaea689af25dfb5341a11fcab42f7f",
+          "detail": "内存读取作者仓库所附模组包。仅修改侧边栏作弊入口条件，不新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "name": "血量显示",
+      "sourceUrl": "https://github.com/cphxj123/Dol-BJX-Mods",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://raw.githubusercontent.com/cphxj123/Dol-BJX-Mods/cdecb8f6cdb1f640d83a6970f4036439d48f93d3/%E8%A1%80%E9%87%8F%E6%98%BE%E7%A4%BA.zip",
+          "sha256": "f218d96e419324a4a5dc18130e3b96311a940af2e9d1ab1bb9d9fd264d099aca",
+          "detail": "内存读取作者仓库所附模组包。实际注入血量文字和角色中文名称映射。"
+        }
+      ]
+    },
+    {
+      "name": "言灵解放",
+      "sourceUrl": "https://github.com/cphxj123/Dol-BJX-Mods",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "evidence": [
+        {
+          "source": "https://raw.githubusercontent.com/cphxj123/Dol-BJX-Mods/cdecb8f6cdb1f640d83a6970f4036439d48f93d3/%E8%A8%80%E7%81%B5%E8%A7%A3%E6%94%BE1.1.0.zip",
+          "sha256": "498249cd73c07e641723041eb1b7e0b135f4ba0247d0005832420e33efbe8fbe",
+          "detail": "内存读取作者仓库所附模组包。仅修改自定义文字的转义处理，无新增玩家文本。"
+        }
+      ]
+    },
+    {
+      "name": "随身言灵",
+      "sourceUrl": "https://github.com/cphxj123/Dol-BJX-Mods",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "evidence": [
+        {
+          "source": "https://raw.githubusercontent.com/cphxj123/Dol-BJX-Mods/cdecb8f6cdb1f640d83a6970f4036439d48f93d3/%E9%9A%8F%E8%BA%AB%E8%A8%80%E7%81%B51.1.0.zip",
+          "sha256": "08a7afd0b254287132bfa26a6bb8f224157f1964ab316834cc7b37cdb69532f4",
+          "detail": "内存读取作者仓库所附模组包。实际注入言灵集、添加、查看选中与清除全部等简体中文按钮。"
+        }
+      ]
+    },
+    {
+      "name": "NPC侧边栏头像",
+      "sourceUrl": "https://github.com/Maenoko/Mae-s-Picvary-NPC-mod/tree/DOL",
+      "packageLanguages": [
+        "zxx"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://api.github.com/repos/Maenoko/Mae-s-Picvary-NPC-mod/git/trees/DOL?recursive=1",
+          "detail": "成功读取 DOL 分支；除图像只有 README.md 与 boot.json，不能仅凭仓库残缺源码判定运行文本。"
+        },
+        {
+          "source": "https://github.com/Maenoko/Mae-s-Picvary-NPC-mod/releases/download/DOL/Mea.s.Picvary.NPC.all.mod.1.3.2.zip",
+          "detail": "成功内存读取 6,605,080 字节，SHA-256 43137b34a902cc1287a52f286292d093d96e18c8d3bc6e6cacbfea58a86c2efb；boot.json name=Mea's Picvary NPC all mod、version=1.3.2；game/npcpic.twee 全为条件和图像标签，game/bailey office.twee 仅设置两个变量，modules/skyboxfornpc.css 仅位置规则，无新增玩家文本。"
+        }
+      ],
+      "note": "DOL 分支源码缺少 boot.json 所指的 game/widgets.twee；因此另外实际读取 1.3.2 正式发布包，确认仅注册头像条件绘制、无玩家文案，不能根据英语 README 标成英语。"
+    },
+    {
+      "name": "寿里美化",
+      "sourceUrl": "https://github.com/sakuramifushika/closeup/",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/sakuramifushika/closeup/blob/0d9dac481d1addcd6d02cc3b34dc5bc547974050/readme.md",
+          "detail": "成功读取作者说明；susato-model ZH 与 susato-model EN 两节分别明确中文汉化前置与英文版用途。"
+        },
+        {
+          "source": "https://api.github.com/repos/sakuramifushika/closeup/git/trees/HEAD?recursive=1",
+          "detail": "成功读取仓库清单，实际存在 susato-model ZH ver1.0.0.mod.zip、susato-model EN ver1.0.0.mod.zip、susato-model ZH ver1.4.1.mod.zip；本轮不声称读取这些 20 MB 级模型包正文。"
+        },
+        {
+          "source": "https://api.github.com/repos/sakuramifushika/closeup/releases?per_page=5",
+          "detail": "成功读取，Releases 集合为空；作者模组文件直接放在源码仓库中。"
+        }
+      ],
+      "note": "作者明确说明 ZH 人模依赖 MODi18n，EN 人模供英文版使用且与 MODi18n 不兼容。语言集表示仓库提供的不同分包，不表示一个包同时支持两种语言；不是仅根据中文 README 猜测。"
+    },
+    {
+      "name": "默示录：归途之书",
+      "sourceUrl": "https://github.com/MaplebirchLeaf/Revelation-The-Book-of-Return",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/MaplebirchLeaf/Revelation-The-Book-of-Return/blob/4534428e2626e8e3029e5278ef6a44e7e0ec3bf5/README.md",
+          "detail": "成功读取，作者明确写明支持中文与英文、面向中英文原版 DoL。"
+        },
+        {
+          "source": "https://github.com/MaplebirchLeaf/Revelation-The-Book-of-Return/blob/4534428e2626e8e3029e5278ef6a44e7e0ec3bf5/src/twee/TempleChoir/TempleChoir.twee",
+          "detail": "成功读取实际唱诗班运行段落；EN/CN 选项块分别提供完整英文及简体中文剧情，入口与返回按钮也有两种语言。"
+        },
+        {
+          "source": "https://github.com/MaplebirchLeaf/Revelation-The-Book-of-Return/releases/tag/v1.3.5",
+          "detail": "成功读取当前发布说明，明确统一中英文人物称呼、提示和段落排版；本轮以源码和作者声明为依据，不声称解读受保护 modpack。"
+        }
+      ],
+      "note": "作者明确支持中英文，实际 Twee 有 EN/CN 双语正文、lanLink 双语按钮与 lanSwitch 双语名称，不是仅有中英文 README。"
+    },
+    {
+      "name": "更有用的食物",
+      "sourceUrl": "https://github.com/chris81605/More-Useful-Foodstuff-/releases/latest",
+      "packageLanguages": [
+        "zh-TW"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/chris81605/More-Useful-Foodstuff-/blob/b2ceb4c60d4657ae79a68ac3e4942a86faec9f4b/food-effects.js",
+          "detail": "实际运行标签包含海鮮、肉類、點心、一般飲料、恢復疲勞、緩解壓力和多段繁体中文帮助提示；并非仅 README 使用繁体中文。"
+        },
+        {
+          "source": "https://github.com/chris81605/More-Useful-Foodstuff-/releases/download/v0.2.59/More-Useful-Foodstuff-v0.2.59.mod.zip",
+          "detail": "内存读取当前发布包 36323 字节，SHA-256 36aeccdabe3f91616c4ff75a9c16896aedc257858dca95f7f5350e4c4dbfa206；包内 food-effects.js 与 FoodEffects.twee 可读，运行界面为繁体中文。"
+        }
+      ],
+      "note": "当前 v0.2.59 的实际运行文案确认为繁体中文；boot 中英文别名不是英语界面声明。"
+    },
+    {
+      "name": "PC的面包坊",
+      "sourceUrl": "https://github.com/Liliths-Legacy/DOL-PCbakery-MOD/releases/tag/v1.0.0",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/Liliths-Legacy/DOL-PCbakery-MOD/blob/v1.0.0/game/hunting.twee",
+          "detail": "已读目录所指 v1.0.0 标签下实际新增剧情，包含向伊甸询问猎枪、打猎和处理猎物的简体中文正文，以及等待时机、返回小屋、继续前进等简体中文选择链接。"
+        },
+        {
+          "source": "https://github.com/Liliths-Legacy/DOL-PCbakery-MOD/blob/12f78ec186eb47ffb0a4060496a14940e1468f46/README.md",
+          "detail": "作者说明 PC 面包坊、厨房交互、打猎与种植扩展；与 v1.0.0 运行剧情相互印证。"
+        }
+      ],
+      "note": "按本地目录指定的 v1.0.0 读取实际玩家正文，确认为简体中文，没有从显示名称推断。"
+    },
+    {
+      "name": "基本需求",
+      "sourceUrl": "https://github.com/YanYeQi/Degrees-of-Lewdity-BasicNeeds/releases/latest",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/YanYeQi/Degrees-of-Lewdity-BasicNeeds/releases/download/0.2.5/BasicNeeds.mod.zip",
+          "detail": "作者源码树只有 README 和 boot.json，因此另在内存读取当前发布包 23186 字节，SHA-256 7749b0d354d9798ccfa547a37cfa26f9d641ae5d42d565a7820c05c8deac5bf5。包内 scripts/main.js 可读，实际状态栏为饥饿、口渴、小便、大便，并有你吃得饱饱的、你的肚子咕咕叫等简体中文玩家提示。"
+        },
+        {
+          "source": "https://github.com/YanYeQi/Degrees-of-Lewdity-BasicNeeds/releases/tag/0.2.0",
+          "detail": "作者发行说明要求在 I18N 汉化模组及 ModLoader 之后加载；此条仅作运行环境旁证，语言结论来自当前 0.2.5 实际包内文本。"
+        }
+      ],
+      "note": "当前 0.2.5 包内实际界面和玩家提示确认为简体中文；未把英文技术名或别名当作语言支持。"
+    },
+    {
+      "name": "npc-Robert",
+      "sourceUrl": "https://github.com/LukeM44444/Degrees-of-Lewdity-Chinese-Localization-Robert/releases/latest",
+      "packageLanguages": [
+        "zh-CN",
+        "en"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/LukeM44444/Degrees-of-Lewdity-Chinese-Localization-Robert/blob/0367a6b4d56a0bd79e1127d7fc26c22161f8f3d3/%E6%96%B0mod-Robert/boot.json",
+          "detail": "实际 maplebirchAddon.params.language 注册 CN:translations/CN.json 和 EN:translations/EN.json；已分别读取两份字典，包含简体中文和英语 NPC 简介、状态、初遇及出租车提示。"
+        },
+        {
+          "source": "https://github.com/LukeM44444/Degrees-of-Lewdity-Chinese-Localization-Robert/blob/0367a6b4d56a0bd79e1127d7fc26c22161f8f3d3/%E6%96%B0mod-Robert/README_%E6%B1%89%E5%8C%96%E8%AF%B4%E6%98%8E.md",
+          "detail": "作者明确说明中文位于 CN.json、英文位于 EN.json，由框架语言管理器选择，代码使用 RobertNPC.t 取词典文本。"
+        },
+        {
+          "source": "https://github.com/LukeM44444/Degrees-of-Lewdity-Chinese-Localization-Robert/releases/download/0.1/RobertNPC.zip",
+          "detail": "另在内存读取当前发布包 183021 字节，SHA-256 b6dbbc9ae53473b9f0858dfff33682f95ee80c78e109b0fd65457b3a1a51267e；包内 boot.json 同样注册 CN/EN，且两份翻译字典实际存在并已读。"
+        },
+        {
+          "source": "https://github.com/LukeM44444/Degrees-of-Lewdity-Chinese-Localization-Robert/blob/0367a6b4d56a0bd79e1127d7fc26c22161f8f3d3/%E6%96%B0mod-Robert/robert-ride-event.twee",
+          "detail": "同时核对到 Robert Ride 1 等新增剧情直接包含简体中文正文；源码还明确说明正文中文代词手写。因此英语词典支持确实存在，但不能表述为所有新增剧情已有完整英译。"
+        }
+      ],
+      "note": "可确认包内简体中文与英语显示字典及注册机制。需要保留限制：部分剧情为简体中文硬编码，双语标记不代表完整英语剧情覆盖，也不证明英语本体兼容。"
+    },
+    {
+      "name": "MapleBirchCE剧情条件解锁面板",
+      "sourceUrl": "https://github.com/TXF182/MapleBirchCE/releases/latest",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "author-source-or-package",
+      "evidence": [
+        {
+          "source": "https://github.com/TXF182/MapleBirchCE/blob/1a807ad5c1bf624e5d27d14402ad45429e3dd13b/README.md",
+          "detail": "作者 v1.8.2 README 明确标明界面全中文、特质全中文映射，并说明角色、条件和面板文案中文化。"
+        },
+        {
+          "source": "https://github.com/TXF182/MapleBirchCE/blob/1a807ad5c1bf624e5d27d14402ad45429e3dd13b/javascript/maplebirchce.js",
+          "detail": "实际运行显示层定义爱意、情欲、支配、服从、信任、警戒、嫉妒等简体中文标签及简体中文角色/状态映射。"
+        },
+        {
+          "source": "https://github.com/TXF182/MapleBirchCE/blob/1a807ad5c1bf624e5d27d14402ad45429e3dd13b/twee/maplebirchce-widget.twee",
+          "detail": "已读实际入口 widget，显示剧情条件解锁面板、打开 / 关闭等简体中文玩家文案。"
+        }
+      ],
+      "note": "当前作者声明及运行源码一致为简体中文；技术名称、日志或发行说明中的英语不作为英语界面支持。"
+    },
+    {
+      "name": "伊甸事件拓展",
+      "sourceUrl": "https://tieba.baidu.com/p/8651634982?see_lz=1",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/8651634982?see_lz=1",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "name": "快捷键绑定",
+      "sourceUrl": "https://tieba.baidu.com/p/9192223044?see_lz=1",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/9192223044?see_lz=1",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "name": "奥雅之光Goose服装与鞋子美化",
+      "sourceUrl": "https://tieba.baidu.com/p/11036847250",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/11036847250",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "name": "DoLChat",
+      "sourceUrl": "https://tieba.baidu.com/p/11012599145",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/11012599145",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "name": "G模改脸美化整合",
+      "sourceUrl": "https://tieba.baidu.com/p/11044288528",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/11044288528",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "name": "O0O战斗美化 B3",
+      "sourceUrl": "https://tieba.baidu.com/p/11068644986",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/11068644986",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    },
+    {
+      "name": "Snowy G原版补齐美化",
+      "sourceUrl": "https://tieba.baidu.com/p/11047225830",
+      "packageLanguages": [
+        "zh-CN"
+      ],
+      "basis": "user-policy",
+      "evidence": [
+        {
+          "source": "https://tieba.baidu.com/p/11047225830",
+          "detail": "用户于2026-10-18指定剩余贴吧来源条目按中文处理，并进一步确认除明确繁体中文外均登记简体中文；本条按用户规则标为简体中文，不声称已读取包内文本。"
+        },
+        {
+          "source": "用户确认（2026-10-18）",
+          "detail": "用户补充确认：“除非明确是繁体中文，否则写为简体中文哈”。本条按该规则登记简体中文（zh-CN），不是新增的包体语言核验结论。"
+        }
+      ]
+    }
+  ],
+  "unresolved": []
+}
