@@ -2768,9 +2768,12 @@
         "authorClaim": "未认领；不得将论坛署名当作已认证维护权限",
         "readyForLocalPrereleaseStage": false,
         "marketEntryId": "community-f0b8da6e-3385-4509-9171-5b41e51201e4",
-        "publicationStatus": "active",
+        "publicationStatus": "withdrawn",
         "publicationCatalogRevision": 200,
-        "publishedSourceUrl": "https://discord.com/channels/675158131688603721/1476007910789222442"
+        "publishedSourceUrl": "https://discord.com/channels/675158131688603721/1476007910789222442",
+        "withdrawnOn": "2026-10-20",
+        "withdrawnCatalogRevision": 207,
+        "withdrawalReason": "按作者Nova的明确请求撤回：功能已并入新版DoLP，旧ModLoader包仅用于旧版兼容，不再收录为独立市场项目。"
       }
     },
     {

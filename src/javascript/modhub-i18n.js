@@ -220,10 +220,6 @@
     window.modHubRefreshLanguageSelectors = function () {
         const busy = window.modHubIsLanguageBusy();
         for (const control of document.querySelectorAll?.('[data-modhub-language-control]') || []) refreshLanguageControl(control, busy);
-        for (const option of document.querySelectorAll?.('[data-modhub-market-content-language]') || []) {
-            option.disabled = busy;
-            option.title = busy ? window.modHubT('当前操作尚未完成。请等待操作完成或取消后再切换语言。') : window.modHubT('希望显示哪些语言的模组');
-        }
     };
     window.modHubSetLanguage = function (next) {
         if (!locales.includes(next)) return false;

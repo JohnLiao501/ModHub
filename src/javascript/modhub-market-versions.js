@@ -23,8 +23,24 @@
         return parts.every(Number.isSafeInteger) ? parts.join('.') : '';
     }
 
+    function getGameIdentity() {
+        const rawVersion = typeof window.StartConfig?.version === 'string' ? window.StartConfig.version : '';
+        const dolp = rawVersion.trim().match(/^v?(\d+(?:\.\d+)*)\s+DoLP\s+(?:v\s*)?(\d+(?:\.\d+)*)(?:[-+].*)?$/i);
+        const version = normalizeGameVersion(dolp ? dolp[1] : rawVersion);
+        const branchVersion = dolp ? normalizeGameVersion(dolp[2]) : '';
+        const branch = dolp && version && branchVersion ? 'dolp'
+            : version && !/(?:^|[^a-z0-9])(?:dolp|dol[\s_-]*plus)(?=$|[^a-z0-9])/i.test(rawVersion) ? 'dol' : 'unknown';
+        return { branch, version: branch === 'unknown' ? '' : version, branchVersion, rawVersion };
+    }
+
     function getGameVersion() {
-        return normalizeGameVersion(window.StartConfig?.version);
+        return getGameIdentity().version;
+    }
+
+    function getGameVersionLabel() {
+        const identity = getGameIdentity();
+        return identity.branch === 'dolp' ? `DoLP ${identity.branchVersion}（DoL ${identity.version}）`
+            : identity.version ? `DoL ${identity.version}` : '';
     }
 
     function isNativeRangeSyntaxSupported(range) {
@@ -98,6 +114,7 @@
         const unknown = reason => ({ status: 'unknown', reason });
         const version = normalizeGameVersion(gameVersion);
         if (!version) return unknown('当前游戏版本未能识别，请按作者说明选择安装包');
+        if (getGameIdentity().branch === 'dolp') return { ...unknown('当前为 DoLP，作者的 DoL 版本范围不能证明 DoLP 适配，请查看作者说明。'), branchUnverified: true };
         if (typeof range !== 'string' || !range.trim()) return unknown('支持的游戏版本将在下载后检查');
         if (!isNativeRangeSyntaxSupported(range)) return unknown('暂不能识别作者的游戏版本说明，请查看发布说明');
         const result = assessVersionRange(version, range, true);
@@ -540,19 +557,33 @@
     }
 
     function candidateCompatibility(asset, release, gameVersion) {
+        const identity = getGameIdentity();
+        const dolpAsset = /(?:^|[^a-z0-9])(?:dolp|dol[\s_-]*plus)(?=$|[^a-z0-9])/i.test(asset.name);
+        if (dolpAsset && identity.branch === 'dol') return {
+            status: 'unknown', evidence: 'filename', gameVersion, gameBranch: 'dolp', branchMismatch: true, referenceMismatch: true,
+            reason: '安装包名称标注适用于 DoLP，当前游戏为 DoL，请按作者说明选择安装包。'
+        };
         const declaration = asset.compatibility?.gameVersionRange ? asset.compatibility : release.compatibility;
         if (declaration?.gameVersionRange) return { ...assessCompatibility(declaration.gameVersionRange, gameVersion),
-            gameVersion, evidence: 'declaration', gameVersionRange: declaration.gameVersionRange, evidenceUrl: declaration.evidenceUrl || '' };
+            gameVersion, gameBranch: identity.branch, evidence: 'declaration', gameVersionRange: declaration.gameVersionRange, evidenceUrl: declaration.evidenceUrl || '' };
         const target = normalizeGameVersion(asset.targetGameVersion || window.modHubMarket.getAssetGameVersion(asset.name));
         if (target) {
             const matches = Boolean(gameVersion && window.modHubMarket.compareVersions(target, gameVersion) === 0);
+            if (identity.branch === 'dolp' && !dolpAsset) return {
+                status: 'unknown', evidence: 'filename', gameVersion, gameBranch: 'dol', branchUnverified: true,
+                targetGameVersion: target, reason: '安装包名称仅标注 DoL 版本，尚未确认 DoLP 适配，请查看作者说明。'
+            };
+            const gameName = dolpAsset ? 'DoLP 的 DoL 基线' : 'DoL';
             return { status: 'unknown', evidence: 'filename', referenceMismatch: Boolean(gameVersion && !matches), gameVersion,
+                gameBranch: dolpAsset ? 'dolp' : 'dol',
                 targetGameVersion: target, reason: !gameVersion
-                    ? `安装包名称标注适用于 DoL ${target}。当前游戏版本未能识别`
-                    : matches ? `安装包名称标注适用于当前 DoL ${target}`
-                        : `安装包名称标注适用于 DoL ${target}，当前游戏为 DoL ${gameVersion}` };
+                    ? `安装包名称标注适用于 ${gameName} ${target}。当前游戏版本未能识别`
+                    : matches ? `安装包名称标注适用于当前 ${gameName} ${target}`
+                        : `安装包名称标注适用于 ${gameName} ${target}，当前游戏为 ${getGameVersionLabel()}` };
         }
-        return { status: 'unknown', evidence: 'unknown', gameVersion, reason: gameVersion
+        return { status: 'unknown', evidence: 'unknown', gameVersion, gameBranch: dolpAsset ? 'dolp' : identity.branch,
+            ...(identity.branch === 'dolp' && !dolpAsset ? { branchUnverified: true } : {}), reason: identity.branch === 'dolp'
+                ? '当前为 DoLP，模组是否适用于此分支尚未确认，请查看作者说明。' : gameVersion
             ? '支持的游戏版本将在下载后检查'
             : '当前游戏版本未能识别，请查看作者说明' };
     }
@@ -560,7 +591,11 @@
     function getCandidateStatus(candidate, { recommended = false } = {}) {
         const info = candidate.compatibility || {};
         let label = '适配待核对', tone = 'grey';
-        if (info.status === 'incompatible') {
+        if (info.branchMismatch) {
+            label = '名称标注其他游戏分支';
+        } else if (info.branchUnverified) {
+            label = 'DoLP 适配待核对';
+        } else if (info.status === 'incompatible') {
             label = '作者支持范围不符';
             tone = 'red';
         } else if (info.status === 'compatible' && info.evidence === 'declaration') {
@@ -796,7 +831,7 @@
 
     function matchesCurrentGame(candidate, gameVersion) {
         const info = candidate.compatibility || {};
-        return Boolean(gameVersion && !info.referenceMismatch && info.status !== 'incompatible'
+        return Boolean(gameVersion && !info.referenceMismatch && !info.branchMismatch && !info.branchUnverified && info.status !== 'incompatible'
             && (info.evidence === 'declaration' && info.status === 'compatible'
                 || info.evidence === 'filename' && info.targetGameVersion
                     && window.modHubMarket.compareVersions(info.targetGameVersion, gameVersion) === 0));
@@ -889,7 +924,8 @@
         if (candidates.some(candidate => matchesCurrentGame(candidate, gameVersion))) return getLatestGameCandidate(mod, candidates);
         return latestUnambiguousCandidate(candidates.filter(candidate => {
             const info = candidate.compatibility || {};
-            return info.status !== 'incompatible' && !info.referenceMismatch && (!info.evidence || info.evidence === 'unknown');
+            return info.status !== 'incompatible' && !info.referenceMismatch && !info.branchMismatch && !info.branchUnverified
+                && (!info.evidence || info.evidence === 'unknown');
         }), mod);
     }
 
@@ -944,7 +980,8 @@
         const matching = candidates.filter(candidate => matchesCurrentGame(candidate, gameVersion));
         const matched = getLatestGameCandidate(mod, candidates, localProfile);
         const latest = matching.length ? matched : latestUnambiguousCandidate(
-            candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'), mod);
+            candidates.filter(candidate => candidate.compatibility?.status !== 'incompatible'
+                && !candidate.compatibility?.branchMismatch && !candidate.compatibility?.branchUnverified), mod);
         if (!latest || localVersion && (!normalizeGameVersion(market.normalizeModVersion(mod, latest.version)) || !normalizeGameVersion(market.normalizeModVersion(mod, localVersion))
                 || market.compareVersions(latest.version, localVersion, mod) < 0)
             || updateOnly && !isDefaultUpdate(mod, latest, localVersion, localProfile)) return empty;
@@ -999,5 +1036,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameVersion, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameIdentity, getGameVersion, getGameVersionLabel, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

@@ -867,16 +867,15 @@ window.modHubUpdateMarketTabBadge = function(count = window._modHubUpdatableCoun
         .filter(btn => window.modHubGetTabId(btn) === 'market');
     buttons.push(...document.querySelectorAll('.modhub-sidebar-entry > button:not(.modhub-assist-entry-badge)'));
     for (const btn of buttons) {
-        const visibleCount = window.modHubGetTabId(btn) === 'market' && ['en', 'none'].includes(window.modHubMarket?.getEffectiveContentLanguage?.()) ? 0 : count;
         let badge = btn.querySelector('.modhub-tab-badge');
-        if (visibleCount > 0) {
+        if (count > 0) {
             if (!badge) {
                 badge = document.createElement('span');
                 badge.className = 'modhub-tab-badge';
                 btn.appendChild(badge);
             }
-            badge.textContent = visibleCount;
-            badge.title = window.modHubT?.('{count} 个模组有新版本可用', { count: visibleCount }) || `${visibleCount} 个模组有新版本可用`;
+            badge.textContent = count;
+            badge.title = window.modHubT?.('{count} 个模组有新版本可用', { count }) || `${count} 个模组有新版本可用`;
             badge.setAttribute('aria-label', badge.title);
         } else if (badge) {
             badge.remove();
@@ -2270,7 +2269,7 @@ window.modHubRenderModManageUI = function() {
             const descParts = [];
             if (isRecovery) descParts.push('<span class="gold">为确保时间点还原正常运行，不可调整顺序</span>');
             if (isEnabled) {
-                if (versionText) descParts.push(versionText);
+                if (versionText) descParts.push(window.modHubEscapeHtml(versionText));
                 if (subText) descParts.push(`<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>`);
             } else {
                 descParts.push('<span>已禁用</span>');
@@ -2324,7 +2323,7 @@ window.modHubRenderModManageUI = function() {
             const version = modInfo?.bootJson?.version || '';
             const subText = window.modHubGetModSubtext(modName, modInfo, true);
             const versionText = version ? (window.modHubFormatVersion ? window.modHubFormatVersion(version) : (/^v/i.test(version.trim()) ? version.trim() : 'v' + version.trim())) : '';
-            const descHtml = [versionText, subText ? `<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>` : '']
+            const descHtml = [window.modHubEscapeHtml(versionText), subText ? `<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>` : '']
                 .filter(Boolean)
                 .join(' | ') || '系统核心组件';
             content += `

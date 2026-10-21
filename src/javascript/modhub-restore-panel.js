@@ -175,8 +175,6 @@
         const next = element('button', '下一步', 'modhub-restore-primary', 'modHubRestorePanelNext');
         const cancel = element('button', rescue ? '继续等待或启动' : '取消', undefined, 'modHubRestorePanelCancel');
         header.appendChild(title);
-        const languageSelector = window.modHubCreateLanguageSelector?.();
-        if (languageSelector) header.appendChild(languageSelector);
         header.appendChild(close);
         footer.appendChild(back); footer.appendChild(next); footer.appendChild(cancel);
         dialog.appendChild(header); dialog.appendChild(body); dialog.appendChild(footer); overlay.appendChild(dialog);
@@ -220,7 +218,6 @@
             cancel.hidden = step === 'changes';
             cancel.textContent = rescue ? '继续等待或启动' : '取消';
             [next, back, cancel].forEach(node => window.modHubBindText?.(node, node.textContent));
-            if (languageSelector) languageSelector.querySelectorAll('select').forEach(node => { node.disabled = working; });
             window.modHubRefreshLanguageSelectors?.();
         }
 

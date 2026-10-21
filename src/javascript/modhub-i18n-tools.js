@@ -2277,3 +2277,35 @@ window.modHubRegisterTranslations?.({
         "Error details: The actual restored state did not match when read back. The recovery record has been kept."
     ]
 });
+
+// 安全读取与市场来源状态。
+window.modHubRegisterTranslations?.({
+    "该来源已停止市场支持，请使用模组管理处理已安装包": [
+        "此來源已停止市場支援，請使用模組管理處理已安裝套件",
+        "Market support for this source has ended. Use Mod Management to manage installed packages."
+    ],
+    "安装包来源无法核验，已停止自动安装": [
+        "無法核驗安裝套件來源，已停止自動安裝",
+        "The package source could not be verified. Automatic installation has stopped."
+    ],
+    "该附件缺少可信摘要，正在使用官方源下载": [
+        "此附件缺少可信摘要，正在從官方來源下載",
+        "This asset has no trusted digest. Downloading from the official source."
+    ],
+    "自动安装已停止": [
+        "自動安裝已停止",
+        "Automatic installation stopped"
+    ],
+    "当前加载器不支持安全读取说明资源，请更新 ModLoader 后重试。": [
+        "目前載入器不支援安全讀取說明資源，請更新 ModLoader 後重試。",
+        "The current loader cannot read documentation resources safely. Update ModLoader and try again."
+    ],
+    "说明资源超过读取大小限制。": [
+        "說明資源超過讀取大小限制。",
+        "The documentation resource exceeds the read size limit."
+    ],
+    "说明资源返回了无效的数据块。": [
+        "說明資源傳回無效的資料區塊。",
+        "The documentation resource returned an invalid data chunk."
+    ]
+});

@@ -155,6 +155,11 @@ window.modHubRenderMarkdown = function(md, options = {}) {
     if (!md) return '';
 
     const placeholders = [];
+    const protect = html => {
+        const idx = placeholders.length;
+        placeholders.push(html);
+        return `%%DOL_HOLDER_${idx}%%`;
+    };
     const emptyImage = 'data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=';
     const resolveRemoteUrl = (value, baseUrl) => {
         const raw = String(value || '').trim();
@@ -231,11 +236,6 @@ window.modHubRenderMarkdown = function(md, options = {}) {
         return `%%DOL_HOLDER_${idx}%%`;
     });
 
-    // 远程 README 属于不可信输入，只保留上面已净化的图片标签。
-    if (options.escapeRawHtml) {
-        text = text.replace(/<[^>]*>/g, tag => window.modHubEscapeHtml(tag));
-    }
-
     // 4. 复合超链接图片解析：[![alt](imgUrl)](linkUrl)
     text = text.replace(/\[\s*!\[([^\]]*)\]\(([^)]+)\)\s*\]\(([^)]+)\)/g, (match, alt, imgUrl, linkUrl) => {
         const cleanImgUrl = imgUrl.trim();
@@ -244,12 +244,12 @@ window.modHubRenderMarkdown = function(md, options = {}) {
         const image = renderImage(cleanImgUrl, alt);
         if (!image) return '';
 
-        return `<a class="modhub-readme-link modhub-readme-badge-link" href="${window.modHubEscapeHtml(isSafeLink ? cleanLinkUrl : '#')}" target="_blank" rel="noopener noreferrer">${image}</a>`;
+        return protect(`<a class="modhub-readme-link modhub-readme-badge-link" href="${window.modHubEscapeHtml(isSafeLink ? cleanLinkUrl : '#')}" target="_blank" rel="noopener noreferrer">${image}</a>`);
     });
 
     // 5. 独立图片解析：![alt](imgUrl)
     text = text.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, (match, alt, imgUrl) => {
-        return renderImage(imgUrl.trim(), alt);
+        return protect(renderImage(imgUrl.trim(), alt));
     });
 
     // 6. 独立超链接解析：[text](url)
@@ -259,14 +259,12 @@ window.modHubRenderMarkdown = function(md, options = {}) {
         if (!isSafe) {
             return window.modHubEscapeHtml(label);
         }
-        return `<a class="modhub-readme-link" href="${window.modHubEscapeHtml(cleanLink)}" target="_blank" rel="noopener noreferrer">${window.modHubEscapeHtml(label)}</a>`;
+        return protect(`<a class="modhub-readme-link" href="${window.modHubEscapeHtml(cleanLink)}" target="_blank" rel="noopener noreferrer">`) +
+            window.modHubEscapeHtml(label) + protect('</a>');
     });
 
-    // 7. 聚合连续的徽章超链接（横向流式排列，避免被换行规则垂直切断）
-    text = text.replace(/(?:<a class="modhub-readme-link modhub-readme-badge-link"[\s\S]*?<\/a>\s*){2,}/g, match => {
-        const compacted = match.replace(/\r?\n\s*/g, ' ');
-        return `<div class="modhub-readme-badge-row">${compacted}</div>\n`;
-    });
+    // 7. 本地与远程说明均不信任原始 HTML，包括未闭合的标签。
+    text = text.replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
     // 8. 标题解析
     text = text.replace(/^### (.*$)/gim, '<h4 class="modhub-h4 gold">$1</h4>');
@@ -297,6 +295,9 @@ window.modHubRenderMarkdown = function(md, options = {}) {
         return placeholders[Number(idx)] || '';
     });
 
+    // 聚合已净化的徽章链接，保留跨行横向排列。
+    text = text.replace(/(?:<a class="modhub-readme-link modhub-readme-badge-link"[\s\S]*?<\/a>(?:\s|<br>)*){2,}/g, match =>
+        `<div class="modhub-readme-badge-row">${match.replace(/<br>|\r?\n\s*/g, ' ')}</div>`);
     return text;
 };
 
@@ -321,6 +322,65 @@ function modHubGetReadmeZip(modName) {
     return typeof reader?.getZipFile === 'function' ? reader.getZipFile() : reader?.zip;
 }
 
+const MODHUB_README_MAX_BYTES = 1024 * 1024;
+const MODHUB_README_IMAGE_MAX_BYTES = 8 * 1024 * 1024;
+const MODHUB_README_IMAGES_MAX_BYTES = 32 * 1024 * 1024;
+
+// 按真实输出计量；声明大小只用于提前拒绝，不能替代流式校验。
+function modHubReadZipBytes(entry, maxBytes, budget) {
+    return new Promise((resolve, reject) => {
+        let stream, settled = false, total = 0;
+        const chunks = [];
+        const fail = error => {
+            if (settled) return;
+            settled = true;
+            chunks.length = 0;
+            // pause 只阻止后续输入；当前输入仍可能产生迟到块。
+            try { stream?.pause(); } catch (_) {}
+            reject(error);
+        };
+        try {
+            if (typeof entry?.internalStream !== 'function') throw new Error(window.modHubT?.('当前加载器不支持安全读取说明资源，请更新 ModLoader 后重试。') || '当前加载器不支持安全读取说明资源，请更新 ModLoader 后重试。');
+            const declared = entry._data?.uncompressedSize;
+            if (typeof declared === 'number' && (declared > maxBytes || (budget && declared > budget.remaining))) {
+                throw new Error(window.modHubT?.('说明资源超过读取大小限制。') || '说明资源超过读取大小限制。');
+            }
+            stream = entry.internalStream('uint8array');
+            stream.on('data', chunk => {
+                if (settled) return;
+                try {
+                    const size = chunk?.byteLength;
+                    if (!Number.isSafeInteger(size) || size < 0) {
+                        fail(new Error(window.modHubT?.('说明资源返回了无效的数据块。') || '说明资源返回了无效的数据块。'));
+                        return;
+                    }
+                    const overBudget = budget && size > budget.remaining;
+                    if (budget) budget.remaining = Math.max(0, budget.remaining - size);
+                    if (size > maxBytes - total || overBudget) {
+                        fail(new Error(window.modHubT?.('说明资源超过读取大小限制。') || '说明资源超过读取大小限制。'));
+                        return;
+                    }
+                    total += size;
+                    chunks.push(chunk);
+                } catch (error) { fail(error); }
+            });
+            stream.on('error', fail);
+            stream.on('end', () => {
+                if (settled) return;
+                try {
+                    const bytes = new Uint8Array(total);
+                    let offset = 0;
+                    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+                    settled = true;
+                    chunks.length = 0;
+                    resolve(bytes);
+                } catch (error) { fail(error); }
+            });
+            stream.resume();
+        } catch (error) { fail(error); }
+    });
+}
+
 window.modHubReadLocalReadme = async function(modName) {
     const mod = window.modHubGetModInfo(modName);
     const files = mod?.bootJson?.additionFile;
@@ -330,7 +390,9 @@ window.modHubReadLocalReadme = async function(modName) {
     const zip = modHubGetReadmeZip(modName);
     if (typeof zip?.file === 'function') {
         const file = zip.file(readmePath);
-        return file && !file.dir && typeof file.async === 'function' ? file.async('string') : null;
+        if (!file || file.dir) return null;
+        const bytes = await modHubReadZipBytes(file, MODHUB_README_MAX_BYTES);
+        return new TextDecoder('utf-8').decode(bytes);
     }
     return null;
 };
@@ -517,7 +579,7 @@ window.modHubFindZipImageEntry = function(zip, rawPath) {
 window.modHubSetupReadmeImages = async function(container, modName, isCurrent = () => true) {
     if (!container || typeof container.querySelectorAll !== 'function') return;
 
-    const replaceWithFallback = img => {
+    const replaceWithFallback = (img, reason = '') => {
         if (!img || img.dataset.hasFailed) return;
         img.dataset.hasFailed = 'true';
 
@@ -536,7 +598,7 @@ window.modHubSetupReadmeImages = async function(container, modName, isCurrent = 
             <span class="fallback-icon">[图片]</span>
             <span class="fallback-content">
                 <strong class="fallback-title" ${alt ? 'data-modhub-no-translate' : ''}>${window.modHubEscapeHtml(alt || '网络图片未能加载')}</strong>
-                <span class="fallback-tip grey">（可能受限于当前网络环境）</span>
+                <span class="fallback-tip grey"${reason ? ' data-modhub-no-translate' : ''}>（${reason ? window.modHubEscapeHtml(reason) : '可能受限于当前网络环境'}）</span>
                 ${origSrc && /^https?:\/\//i.test(origSrc) ? `
                     <a class="fallback-link gold" href="${window.modHubEscapeHtml(origSrc)}" target="_blank" rel="noopener noreferrer">在新窗口中打开原图</a>
                 ` : ''}
@@ -556,6 +618,19 @@ window.modHubSetupReadmeImages = async function(container, modName, isCurrent = 
     }
 
     const zip = modHubGetReadmeZip(modName);
+    const imageBudget = { remaining: MODHUB_README_IMAGES_MAX_BYTES };
+    const imageReads = new Map();
+    const readImage = (entry, path) => {
+        if (!imageReads.has(entry)) imageReads.set(entry, (async () => {
+            const bytes = await modHubReadZipBytes(entry, MODHUB_README_IMAGE_MAX_BYTES, imageBudget);
+            let binary = '';
+            for (let offset = 0; offset < bytes.length; offset += 32768) {
+                binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+            }
+            return `data:${window.modHubGetMimeTypeByExt(path)};base64,${btoa(binary)}`;
+        })());
+        return imageReads.get(entry);
+    };
 
     // 1. 解析模组内置相对路径图片（转为合规 data: Base64 URL 彻底消除 CSP 与 404 限制）
     const localImgs = container.querySelectorAll('img[data-local-mod-path]');
@@ -568,26 +643,9 @@ window.modHubSetupReadmeImages = async function(container, modName, isCurrent = 
                 if (!rawPath) continue;
 
                 const found = window.modHubFindZipImageEntry(zip, rawPath);
-                if (found && found.entry && typeof found.entry.async === 'function') {
+                if (found && found.entry) {
                     try {
-                        let dataUrl = '';
-                        const mime = window.modHubGetMimeTypeByExt(found.path || rawPath);
-                        try {
-                            const base64 = await found.entry.async('base64');
-                            if (base64) dataUrl = `data:${mime};base64,${base64}`;
-                        } catch (_) {}
-
-                        if (!dataUrl) {
-                            const blob = await found.entry.async('blob');
-                            if (blob && typeof FileReader !== 'undefined') {
-                                dataUrl = await new Promise((resolve, reject) => {
-                                    const reader = new FileReader();
-                                    reader.onload = () => resolve(reader.result);
-                                    reader.onerror = () => reject(reader.error || new Error('图片转码失败'));
-                                    reader.readAsDataURL(blob);
-                                });
-                            }
-                        }
+                        const dataUrl = await readImage(found.entry, found.path || rawPath);
 
                         if (!isCurrent()) return;
                         if (dataUrl) {
@@ -599,7 +657,7 @@ window.modHubSetupReadmeImages = async function(container, modName, isCurrent = 
                     } catch (err) {
                         if (!isCurrent()) return;
                         console.warn('[ModHub] 解码模组内置图片失败:', rawPath, err);
-                        replaceWithFallback(img);
+                        replaceWithFallback(img, err.message);
                     }
                 } else {
                     replaceWithFallback(img);
@@ -620,13 +678,12 @@ window.modHubSetupReadmeImages = async function(container, modName, isCurrent = 
             // 2.1 检查本地 Zip 是否自带同名资源（秒开且免疫外网断联）
             if (zip && originalSrc) {
                 const localMatch = window.modHubFindZipImageEntry(zip, originalSrc);
-                if (localMatch && localMatch.entry && typeof localMatch.entry.async === 'function') {
+                if (localMatch && localMatch.entry) {
                     try {
-                        const mime = window.modHubGetMimeTypeByExt(localMatch.path || originalSrc);
-                        const base64 = await localMatch.entry.async('base64');
+                        const dataUrl = await readImage(localMatch.entry, localMatch.path || originalSrc);
                         if (!isCurrent()) return;
-                        if (base64) {
-                            img.src = `data:${mime};base64,${base64}`;
+                        if (dataUrl) {
+                            img.src = dataUrl;
                             img.removeAttribute('data-remote-image-url');
                             continue;
                         }
@@ -681,10 +738,12 @@ window.modHubLoadReadme = async function(modName) {
     try {
         let readme = null;
         let readmeUnavailable = false;
+        const readmeErrors = [];
         try {
             readme = await window.modHubReadLocalReadme(modName);
         } catch (error) {
             readmeUnavailable = true;
+            readmeErrors.push(error.message);
             console.warn('[ModHub] 本地说明读取失败，尝试在线说明:', modName, error);
         }
         if (!isCurrent()) return;
@@ -714,6 +773,7 @@ window.modHubLoadReadme = async function(modName) {
                 githubReadme = await window.modHubMarket.fetchGithubReadme(repositoryUrl);
             } catch (err) {
                 readmeUnavailable = true;
+                readmeErrors.push(err.message);
                 console.warn('[ModHub] GitHub README 获取失败:', err);
             }
         }
@@ -754,8 +814,7 @@ window.modHubLoadReadme = async function(modName) {
                 modName,
                 repositoryUrl,
                 remoteImageBaseUrl: githubReadme?.downloadUrl || '',
-                remoteLinkBaseUrl: githubReadme?.sourceUrl || '',
-                escapeRawHtml: Boolean(githubReadme)
+                remoteLinkBaseUrl: githubReadme?.sourceUrl || ''
             })}</div>`;
             if ((boot.dependenceInfo && boot.dependenceInfo.length) || (boot.addonPlugin && boot.addonPlugin.length)) {
                 contentHtml += `
@@ -786,6 +845,7 @@ window.modHubLoadReadme = async function(modName) {
             contentHtml += `
                 <div class="modhub-meta-view">
                     <p class="modhub-readme-empty">${readmeUnavailable ? '说明文档暂时无法读取，请检查网络后重新选择此模组重试。' : '此模组没有说明文档。'}</p>
+                    ${readmeErrors.length ? `<p class="grey" data-modhub-no-translate>${readmeErrors.map(error => window.modHubEscapeHtml(error)).join('<br>')}</p>` : ''}
                     ${!marketHtml ? '<p class="grey">当前仅能显示模组自身的 boot.json 信息。</p>' : ''}
                     <div class="modhub-meta-grid">
                         <div class="childItem meta-item">

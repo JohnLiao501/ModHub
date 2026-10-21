@@ -238,8 +238,14 @@
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
+    scrollbar-width: none;
     overflow-wrap: anywhere;
+}
+
+.modhub-market-more-content::-webkit-scrollbar {
+    display: none;
+    width: 0;
+    height: 0;
 }
 
 .modhub-market-more-content > .modhub-market-source {
@@ -448,15 +454,75 @@
     color: var(--200, #ccc);
     cursor: pointer;
     font-size: 0.9em;
-    justify-content: center;
-    flex-wrap: wrap;
+    justify-content: flex-start;
+    flex-wrap: nowrap;
+    border-width: 1px;
+    border-style: solid;
+    border-color: var(--600, #555);
+    background: var(--800, #222);
 }
+
+.modhub-market-batch-toolbar .modhub-batch-progress-toggle[data-task-state="busy"] {
+    border-color: var(--gold, #d4af37) !important;
+    color: var(--gold, #d4af37) !important;
+}
+
+.modhub-market-batch-toolbar .modhub-batch-progress-toggle[data-task-state="success"] {
+    border-color: var(--green, #8b8) !important;
+    color: var(--green, #8b8) !important;
+}
+
+.modhub-market-batch-toolbar .modhub-batch-progress-toggle[data-task-state="error"] {
+    border-color: var(--red, #c77) !important;
+    color: var(--red, #c77) !important;
+}
+
+.modhub-batch-task-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 20px;
+    width: 20px;
+    height: 20px;
+}
+
+.modhub-batch-task-icon > svg,
+.modhub-batch-task-icon > .modhub-progress-ring {
+    width: 20px;
+    height: 20px;
+}
+
+.modhub-batch-task-content {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    text-align: left;
+}
+
+.modhub-batch-task-heading {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+    font-weight: 600;
+}
+
+.modhub-batch-task-state { font-size: 0.85em; }
 
 .modhub-batch-task-counts {
     display: inline-flex;
     flex-wrap: wrap;
     gap: 4px 8px;
     font-size: 0.85em;
+    color: var(--200, #ccc);
+}
+
+.modhub-batch-task-counts > span {
+    padding: 1px 5px;
+    border: 1px solid var(--600, #555);
+    border-radius: 3px;
+    background: var(--850, #181818);
+    line-height: 1.4;
 }
 
 .modhub-batch-progress-toggle[aria-expanded="true"] { border-color: var(--gold, #d4af37); }
@@ -640,6 +706,53 @@
     gap: 8px;
 }
 
+.modhub-market-search-field {
+    position: relative;
+    min-width: 0;
+}
+
+#modHubMarketSearchClear {
+    position: absolute;
+    top: 50%;
+    right: 3px;
+    transform: translateY(-50%);
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 32px !important;
+    min-width: 32px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    box-sizing: border-box;
+    margin: 0 !important;
+    padding: 6px !important;
+    background: transparent !important;
+    border: 1px solid transparent !important;
+    border-radius: 3px;
+    color: var(--300, #bbb) !important;
+    cursor: pointer;
+}
+
+#modHubMarketSearchClear[hidden] {
+    display: none !important;
+}
+
+#modHubMarketSearchClear:hover,
+#modHubMarketSearchClear:focus-visible {
+    border-color: var(--600, #555) !important;
+    color: var(--gold, #d4af37) !important;
+    outline: 1px solid var(--gold, #d4af37);
+}
+
+#modHubMarketSearchClear svg {
+    width: 18px;
+    height: 18px;
+}
+
+.modhub-market-search-field .modhub-search-input::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+}
+
 .modhub-market-search-row > button {
     flex: 0 0 auto;
     display: inline-flex;
@@ -672,7 +785,7 @@
     min-width: 0;
     min-height: var(--modhub-market-control-height);
     box-sizing: border-box;
-    padding: 6px 10px;
+    padding: 6px 40px 6px 10px;
     background-color: var(--900, #111);
     border: 1px solid var(--600, #555);
     color: #fff;
@@ -1026,6 +1139,21 @@
 }
 
 .modhub-market-meta > span { min-width: 0; }
+
+.modhub-market-addon-summary {
+    margin: 12px 0;
+    padding-top: 10px;
+    border-top: 1px solid var(--600, #555);
+}
+
+.modhub-market-addon-item {
+    overflow-wrap: anywhere;
+}
+
+.modhub-market-addon-summary .btn-market-addons {
+    min-height: 32px;
+    flex-shrink: 0;
+}
 
 /* 模组简介描述 */
 .modhub-market-desc {
@@ -2495,114 +2623,6 @@
 .modhub-install-error-advice { font-size: 0.9em; }
 
 .modhub-install-dialog .modhub-modal-close { min-width: 32px; min-height: 32px; flex-shrink: 0; }
-
-/* 内容偏好收在栏目行的小菜单，展开时才显示完整选项。 */
-#modHubModMarketContainer .modhub-market-content-preference {
-    position: relative;
-    flex: 0 1 auto;
-    min-width: 0;
-    max-width: 100%;
-    margin: 0 0 0 auto;
-    overflow: visible;
-}
-
-#modHubModMarketContainer .modhub-market-content-preference > summary {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    box-sizing: border-box;
-    max-width: 100%;
-    min-height: 32px;
-    padding: 4px 8px;
-    margin: 0;
-    border: 1px solid transparent;
-    border-radius: 3px;
-    background: transparent;
-    color: var(--300, #aaa);
-    font-size: 0.82em;
-    line-height: 1.4;
-    white-space: normal;
-    list-style: none;
-    cursor: pointer;
-}
-
-#modHubModMarketContainer .modhub-market-content-preference > summary::-webkit-details-marker { display: none; }
-
-#modHubModMarketContainer .modhub-market-content-preference > summary::after {
-    content: '';
-    flex: 0 0 auto;
-    border: 4px solid transparent;
-    border-top-color: currentColor;
-    transform: translateY(2px);
-}
-
-#modHubModMarketContainer .modhub-market-content-preference > summary:hover,
-#modHubModMarketContainer .modhub-market-content-preference[open] > summary,
-#modHubModMarketContainer .modhub-market-content-preference > summary:focus-visible {
-    border-color: var(--600, #555);
-    background: var(--800, #222);
-    color: var(--100, #ddd);
-}
-
-#modHubModMarketContainer .modhub-market-content-preference > summary:focus-visible {
-    outline: 1px solid var(--gold, #d4af37);
-    outline-offset: 2px;
-}
-
-#modHubModMarketContainer .modhub-market-content-preference > summary[aria-disabled="true"] {
-    opacity: 0.6;
-    cursor: wait;
-}
-
-#modHubModMarketContainer .modhub-market-content-preference-panel {
-    position: absolute;
-    z-index: 40;
-    top: calc(100% + 6px);
-    right: 0;
-    display: grid;
-    gap: 8px;
-    box-sizing: border-box;
-    width: 280px;
-    max-width: calc(100vw - 64px);
-    padding: 12px;
-    border: 1px solid var(--600, #555);
-    border-radius: 3px;
-    background: var(--850, #1a1a1a);
-    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.6);
-}
-
-#modHubModMarketContainer .modhub-market-content-preference-title {
-    font-size: 0.85em;
-    color: var(--200, #ccc);
-    line-height: 1.5;
-}
-
-#modHubModMarketContainer .modhub-market-content-language-option {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    box-sizing: border-box;
-    min-width: 0;
-    min-height: 36px;
-    margin: 0;
-    padding: 4px 6px;
-    font-size: 0.9em;
-    line-height: 1.5;
-    color: var(--100, #ddd);
-    cursor: pointer;
-}
-
-#modHubModMarketContainer .modhub-market-content-language-option:hover {
-    background: var(--800, #222);
-}
-
-#modHubModMarketContainer .modhub-market-content-language-option > input {
-    flex: 0 0 auto;
-    width: 16px;
-    height: 16px;
-    margin: 0;
-    accent-color: var(--gold, #d4af37);
-}
 
 @media (max-width: 768px) {
     .modhub-market-sections { gap: 8px 16px; }
