@@ -12,6 +12,7 @@ process.on('beforeExit', () => {
 });
 
 (async () => {
+    require('../tests/text-decoding.test')();
     require('../tests/wiki-title-core.test.cjs');
     await require('../tests/style.test')();
     await require('../tests/i18n.test')();
@@ -51,7 +52,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.8.1 全部测试通过');
+    console.log('ModHub v1.8.2 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

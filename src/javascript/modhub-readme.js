@@ -28,6 +28,17 @@ const MODHUB_SHIELDS_COLORS = {
     inactive: '#9f9f9f'
 };
 
+function modHubParseShieldsUrl(url) {
+    if (typeof url !== 'string') return null;
+    try {
+        const parsed = new URL(url);
+        return parsed.protocol === 'https:' && parsed.hostname === 'img.shields.io' &&
+            !parsed.username && !parsed.password && !parsed.port ? parsed : null;
+    } catch (_) {
+        return null;
+    }
+}
+
 // 预估字符渲染宽度（Verdana / 类似系统无衬线字体，字号 11px）
 window.modHubEstimateBadgeTextWidth = function(text) {
     if (!text) return 0;
@@ -55,8 +66,9 @@ window.modHubBuildShieldsSvgDataUrl = function(label, message, colorKey) {
     const rawLabel = String(label || '').trim();
     const rawMsg = String(message || '').trim();
     const cleanColor = String(colorKey || 'blue').toLowerCase().trim();
-    const colorHex = MODHUB_SHIELDS_COLORS[cleanColor] ||
-        (/^[0-9a-f]{3,6}$/i.test(cleanColor) ? '#' + cleanColor : (cleanColor.startsWith('#') ? cleanColor : '#007ec6'));
+    const colorHex = Object.prototype.hasOwnProperty.call(MODHUB_SHIELDS_COLORS, cleanColor)
+        ? MODHUB_SHIELDS_COLORS[cleanColor]
+        : (/^#?(?:[0-9a-f]{3}|[0-9a-f]{6})$/i.test(cleanColor) ? '#' + cleanColor.replace(/^#/, '') : '#007ec6');
 
     const labelW = rawLabel ? Math.max(16, window.modHubEstimateBadgeTextWidth(rawLabel) + 12) : 0;
     const msgW = Math.max(16, window.modHubEstimateBadgeTextWidth(rawMsg) + 12);
@@ -91,11 +103,11 @@ window.modHubBuildShieldsSvgDataUrl = function(label, message, colorKey) {
 
 // 解析 Shields.io 静态 Badge 链接并生成本地 SVG Data URL
 window.modHubGenerateShieldsSvg = function(url, fallbackAlt) {
-    if (typeof url !== 'string' || !url.includes('img.shields.io/badge/')) return null;
+    const parsed = modHubParseShieldsUrl(url);
+    if (!parsed || !parsed.pathname.startsWith('/badge/')) return null;
 
     try {
-        const cleanUrl = url.split('?')[0];
-        const match = cleanUrl.match(/img\.shields\.io\/badge\/([^/?#]+)/i);
+        const match = parsed.pathname.match(/^\/badge\/([^/]+)/);
         if (!match) return null;
 
         let badgeStr = match[1];
@@ -175,15 +187,11 @@ window.modHubRenderMarkdown = function(md, options = {}) {
         if (!originalSrc || /^javascript:/i.test(originalSrc)) return '';
 
         let renderedSrc = originalSrc;
-        let isBadge = false;
-        if (originalSrc.includes('img.shields.io/badge/')) {
+        const shieldsUrl = modHubParseShieldsUrl(originalSrc);
+        const isBadge = !!shieldsUrl;
+        if (shieldsUrl?.pathname.startsWith('/badge/')) {
             const svg = window.modHubGenerateShieldsSvg(originalSrc, alt);
-            if (svg) {
-                renderedSrc = svg;
-                isBadge = true;
-            }
-        } else if (originalSrc.includes('img.shields.io/')) {
-            isBadge = true;
+            if (svg) renderedSrc = svg;
         }
 
         const proxyUrl = /^https?:\/\//i.test(originalSrc)

@@ -17,8 +17,8 @@
   const developmentSource = 'anlinstudio/degrees-of-lewdity-myexhibitionismexpansion';
 
   function cleanLegacy(value) {
-    return String(value || '').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"')
-      .replace(/&#39;|&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+    const entities = { amp: '&', quot: '"', '#39': "'", apos: "'", lt: '<', gt: '>' };
+    return String(value || '').replace(/&(amp|quot|#39|apos|lt|gt);/gi, (_match, entity) => entities[entity.toLowerCase()])
       .replace(/\s+/g, ' ').trim();
   }
 

@@ -1514,12 +1514,9 @@
     // ==================== 工具函数 ====================
 
     function cleanText(text) {
+        const entities = { amp: '&', quot: '"', '#39': "'", apos: "'", lt: '<', gt: '>' };
         return String(text || '')
-            .replace(/&amp;/gi, '&')
-            .replace(/&quot;/gi, '"')
-            .replace(/&#39;|&apos;/gi, "'")
-            .replace(/&lt;/gi, '<')
-            .replace(/&gt;/gi, '>')
+            .replace(/&(amp|quot|#39|apos|lt|gt);/gi, (_match, entity) => entities[entity.toLowerCase()])
             .replace(/\s+/g, ' ')
             .trim();
     }
