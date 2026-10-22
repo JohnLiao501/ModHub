@@ -199,7 +199,7 @@ git restore --source=f6b9b1b --worktree -- tests/
 
 ## 开发协作
 
-本项目使用 OpenAI Codex（C哥）辅助代码实现、问题排查、安全审查、测试验证与文档整理。
+本项目使用 OpenAI Codex 辅助代码实现、问题排查、安全审查、测试验证与文档整理。
 
 ## 许可证
 
