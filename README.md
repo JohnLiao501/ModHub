@@ -197,6 +197,10 @@ git restore --source=f6b9b1b --worktree -- tests/
 
 正式安装包只生成到 `release/ModHub-v<版本号>.zip`；本地保留最近三个版本，GitHub Releases 历史永久保留。打包不自动升版、提交源码或更新远端 Release。
 
+## 开发协作
+
+本项目使用 OpenAI Codex（C哥）辅助代码实现、问题排查、安全审查、测试验证与文档整理。
+
 ## 许可证
 
 本项目采用 [MIT 许可证](LICENSE)。第三方数据与资源遵循各自许可，详见 [第三方许可声明](THIRD_PARTY_NOTICES.md)。
