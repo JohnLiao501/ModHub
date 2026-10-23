@@ -104,6 +104,36 @@ async function main() {
     '旧 Wiki 名称与作者名称须统一到作者的正式中文名称');
   assert.deepEqual(knownPackages[0].dependencies, [{ id: 'maplebirch', version: '' }]);
   assert.deepEqual(knownPackages[2].dependencies, [{ id: 'maplebirch', version: '' }]);
+  const clothesiconId = 'clothesicon状态栏服装图标-dol-clothesicon';
+  const clothesicon = catalog.mods.find(mod => mod.id === clothesiconId);
+  assert.deepEqual(clothesicon.bootNames, ['clothesicon'], '衣柜身份必须使用包内技术名');
+  assert.deepEqual(clothesicon.repositoryKeys, ['KonoLLo/DoL-Clothesicon'], '衣柜身份必须登记完整作者仓库');
+  const clothesiconSources = mergeModIdentities([
+    { name: 'clothesicon · 状态栏服装图标', githubUrl: 'https://github.com/KonoLLo/DoL-Clothesicon' },
+    { name: 'clothesicon' },
+    { name: 'Clothes Icon Bar', githubUrl: 'https://github.com/KonoLLo/DoL-Clothesicon' },
+    { name: 'clothesicon · 状态栏服装图标', githubUrl: 'https://github.com/Another/DoL-Clothesicon' },
+    { name: 'clothesicon音频包', githubUrl: 'https://github.com/KonoLLo/DoL-Clothesicon' },
+  ], catalog);
+  assert.deepEqual(clothesiconSources.map(mod => mod.identityId), [clothesiconId, clothesiconId, clothesiconId, null, null],
+    '衣柜的展示名与技术名须关联同一身份，错误仓库及同仓库其他产品须隔离');
+  assert.ok(clothesiconSources.slice(0, 3).every(mod => mod.bootNames.length === 1 && mod.bootNames[0] === 'clothesicon'));
+  const fertility = catalog.mods.find(mod => mod.id === 'fertility-expansion');
+  assert.deepEqual(fertility.bootNames, ['FertilityExpansion']);
+  assert.ok(fertility.aliases.includes('生育拓展（FertilityExpansion）'), '完整 Wiki 标题须登记为同一身份的显示别名');
+  const fertilitySources = mergeModIdentities([
+    ...['生育扩展', '生育拓展（FertilityExpansion）', '生育拓展(FertilityExpansion)', '生育拓展（FertilityExpansion)']
+      .map(name => ({ name, githubUrl: 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD' })),
+    { name: '生育拓展（FertilityExpansion）', githubUrl: 'https://github.com/Another/DOL-FertilityExpansion-MOD' },
+    { name: '生育拓展（FertilityExpansion）音频包', githubUrl: 'https://github.com/Liliths-Legacy/DOL-FertilityExpansion-MOD' },
+  ], catalog);
+  assert.deepEqual(fertilitySources.map(mod => mod.identityId), ['fertility-expansion', 'fertility-expansion',
+    'fertility-expansion', 'fertility-expansion', null, null], '全角半角及混合括号标题须精确关联，错误仓库与其他产品仍隔离');
+  for (const mod of fertilitySources.slice(0, 4)) {
+    assert.deepEqual(mod.bootNames, ['FertilityExpansion']);
+    assert.deepEqual(mod.packageEditions, fertility.packageEditions, 'Wiki 身份合并保留图像版与轻量版的各自完整核验资料');
+    assert.deepEqual(mod.verifiedReleaseAssets, fertility.verifiedReleaseAssets, '历史包审批证据不能被标题迁移覆盖');
+  }
   const registeredIds = ['dol-mod-center', 'whitney-extra-mod', 'lnn-enemy-stats-display-chs', 'lnn-enemy-stats-display-en',
     'paperdoll-plus', 'realistic-pain', 'little-teachers-pet', 'fumo-mod', 'rw-beautification', 'eu-clothing-addition',
     'layering-fixes', 'ray-beautification', 'ray-extra-clothes', 'decorations-zh-fix'];

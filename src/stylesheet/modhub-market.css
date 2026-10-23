@@ -536,7 +536,7 @@
     flex-direction: column;
     gap: 8px;
     box-sizing: border-box;
-    width: min(440px, calc(100% - 32px));
+    width: min(440px, calc(100vw - 32px));
     max-height: calc(100vh - var(--modhub-task-panel-top, 72px) - 72px - env(safe-area-inset-bottom));
     max-height: calc(100dvh - var(--modhub-task-panel-top, 72px) - 72px - env(safe-area-inset-bottom));
     min-width: 0;
@@ -559,7 +559,14 @@
 }
 
 .modhub-batch-task-panel-header > strong { min-width: 0; overflow-wrap: anywhere; }
-.modhub-market-batch-toolbar .modhub-batch-task-close { flex: 0 0 auto; }
+.modhub-market-batch-toolbar .modhub-batch-task-close {
+    flex: 0 0 auto;
+    min-width: 32px;
+    min-height: 32px;
+    padding: 0;
+    font-size: 1.4em;
+    line-height: 1;
+}
 .modhub-batch-task-panel > .modhub-batch-status { flex: 0 0 auto; }
 .modhub-batch-task-panel > #modHubBatchStop { align-self: flex-end; }
 .modhub-batch-task-counts > [hidden] { display: none !important; }

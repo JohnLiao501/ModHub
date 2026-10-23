@@ -513,7 +513,8 @@ button.modhub-button-busy:disabled,
         flex: 1 0 auto !important; min-width: 96px !important;
     }
 }
-#customOverlay[data-overlay="modloader"] #customOverlayContent { flex: 1 1 0%; min-height: 0; min-width: 0; height: auto !important; box-sizing: border-box; }
+/* 解除原生正文的独立层叠上下文，让下载浮窗能够覆盖导航关闭按钮。 */
+#customOverlay[data-overlay="modloader"] #customOverlayContent { flex: 1 1 0%; min-height: 0; min-width: 0; height: auto !important; box-sizing: border-box; z-index: auto; }
 #customOverlay[data-overlay="modloader"]:not(.modhub-overlay-fullscreen) #customOverlayContent { overflow-y: auto; }
 /* 游戏侧栏与浮层可使用不同字号，不能用浮层的 em 抵销侧栏宽度。 */
 @media(max-width:870px){#customOverlay[data-overlay="modloader"]:not(.modhub-overlay-fullscreen){left:calc(100% - 100vw)!important}}

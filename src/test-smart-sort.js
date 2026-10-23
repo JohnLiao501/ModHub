@@ -52,7 +52,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.8.2 全部测试通过');
+    console.log('ModHub v1.8.3 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

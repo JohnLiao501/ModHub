@@ -2730,6 +2730,23 @@ button.modhub-btn-primary:active,
     color: #ddd;
 }
 
+.modhub-delete-intro {
+    margin: 0 0 14px;
+}
+
+.modhub-delete-target {
+    font-size: 1.1em;
+    overflow-wrap: anywhere;
+}
+
+.modhub-delete-warning {
+    margin: 14px 0 0;
+    padding: 10px 12px;
+    border-left: 3px solid var(--red, #ed7878);
+    background: var(--900, #111);
+    font-weight: 600;
+}
+
 /* 自身禁用与卸载按影响、保留和恢复方式分段，长内容只滚动正文。 */
 .modhub-modal-backdrop:has(> .modhub-self-removal-dialog) {
     height: 100dvh;
@@ -2765,7 +2782,6 @@ button.modhub-btn-primary:active,
 }
 
 .modhub-self-removal-notice p { margin: 0; }
-.modhub-self-removal-intro { margin: 0 0 14px; }
 .modhub-self-removal-dialog .red { color: var(--red, #ed7878); }
 .modhub-self-removal-dialog .green { color: var(--green, #88bd86); }
 .modhub-self-removal-dialog .gold { color: var(--gold, #d6b365); }

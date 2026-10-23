@@ -3376,7 +3376,7 @@ window.modHubDeleteSideMod = async function(modName) {
         const affectedListText = affectedMods.map(m => `· ${m.name}${m.version ? ` (${m.version})` : ''}${m.isEnabled ? '' : ' [已禁用]'}`).join('\n');
 
         const trustedMessageHtml = `
-            <div class="modhub-modal-conflict-intro">确定要彻底删除模组【<span class="gold" data-modhub-no-translate>${window.modHubEscapeHtml(modDisplayName)}</span>】吗？</div>
+            <div class="modhub-delete-intro">确定要彻底删除模组【<strong class="gold modhub-delete-target" data-modhub-no-translate>${window.modHubEscapeHtml(modDisplayName)}</strong>】吗？</div>
             <div class="modhub-modal-conflict-alert-box" style="margin: 12px 0; padding: 10px 14px; background: rgba(220, 53, 69, 0.12); border: 1px solid rgba(220, 53, 69, 0.35); border-radius: 4px;">
                 <div style="font-weight: bold; color: var(--red, #ff5555); margin-bottom: 6px;">
                     警告：检测到以下模组依赖于该模组/框架，删除后可能会受到严重影响或无法正常运行：
@@ -3386,7 +3386,7 @@ window.modHubDeleteSideMod = async function(modName) {
                 </div>
             </div>
             ${selfNoticeHtml}
-            <div class="grey" style="font-size: 0.9em; margin-top: 8px;">删除后该模组将从浏览器存储中彻底移除。是否仍要删除？</div>
+            <div class="red modhub-delete-warning">删除后该模组将从浏览器存储中彻底移除。是否仍要删除？</div>
         `;
 
         confirmed = await window.modHubConfirm({
@@ -3403,7 +3403,7 @@ window.modHubDeleteSideMod = async function(modName) {
         confirmed = await window.modHubConfirm({
             title: isModHub ? '确认卸载 ModHub' : '确认删除模组',
             message: `确定要删除模组【${modName}】吗？\n${selfNotice || '删除后该模组将从浏览器存储中彻底移除，不可恢复。'}`,
-            trustedMessageHtml: isModHub ? `<p class="modhub-self-removal-intro">确定要删除模组【<strong class="gold" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${selfNoticeHtml}` : '',
+            trustedMessageHtml: `<p class="modhub-delete-intro">确定要删除模组【<strong class="gold modhub-delete-target" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${isModHub ? selfNoticeHtml : '<p class="red modhub-delete-warning">删除后该模组将从浏览器存储中彻底移除，不可恢复。</p>'}`,
             dialogClass: isModHub ? 'modhub-self-removal-dialog' : '',
             confirmText: isModHub ? '确认卸载' : '确认删除',
             cancelText: '取消',

@@ -88,6 +88,7 @@
     // 仅标记本次读取产生的标准化资料，不缓存身份匹配或安装状态。
     const normalizedLocalProfiles = new WeakSet();
     const downloadedPackageDigests = new Map();
+    const officialPackageRevisions = new Map();
     let officialPackageMetadataQueue = Promise.resolve();
 
     function loadInstalledPackageRecordsFromStorage() {
@@ -1021,10 +1022,13 @@
     }
     function startBatchInstallProgress(targets, updateOnly = false) {
         const state = batchInstallState;
+        const openPanel = !state.running && !state.preparing;
+        if (openPanel) state.progressExpanded = true;
         Object.assign(state, { running: true, preparing: false, stopRequested: false, progressPhase: 'preparing', current: '读取可选版本', completed: 0, total: targets.length });
         state.items = new Map(targets.map(mod => [mod.name, { name: mod.name, key: getMarketModKey(mod), type: updateOnly ? 'update' : 'install', role: '目标模组', state: 'preparing', text: '正在读取可选版本', percent: null }]));
         targets.forEach(mod => resetDownloadProgress(mod.name));
         renderBatchInstallToolbar();
+        if (openPanel) setBatchTaskPanelExpanded(true);
     }
 
     function trackBatchInstallMod(mod, role = '前置模组', type = '') {
@@ -1476,7 +1480,7 @@
         toolbar.classList.toggle('is-expanded', selecting || state.preparing);
         if (visibleProgressItems.length || state.running || state.preparing) {
             const taskCounts = batchTaskCounts();
-            toolbar.innerHTML += modHubHtml(`<div id="modHubBatchProgressDetails" class="modhub-batch-progress-details">${batchTaskToggleHtml(taskCounts)}<section id="modHubBatchProgressContent" class="modhub-batch-task-panel" role="dialog" aria-modal="false" aria-labelledby="modHubBatchTaskPanelTitle"${state.progressExpanded ? '' : ' hidden'}><div class="modhub-batch-task-panel-header"><strong id="modHubBatchTaskPanelTitle" class="gold">${modHubLabelHtml('下载与安装任务')}</strong><button id="modHubBatchProgressClose" type="button" class="macro-button modhub-btn-secondary modhub-batch-task-close" aria-label="收起任务面板" title="收起面板不会停止任务。">${modHubLabelHtml('收起')}</button></div><div class="modhub-batch-status" role="status" aria-live="polite"><strong id="modHubBatchProgressTitle" class="gold">${state.preparing && !state.running ? '正在准备批量安装' : state.running ? `批量安装 ${counts.finished}/${counts.total}` : `查看上次结果（完成 ${counts.success} 项）`}</strong>${state.running ? `<span id="modHubBatchProgressCurrent">${state.current ? escapeHtml(modHubT('正在处理：{name}', { name: batchDisplayName(state.current) })) : '正在准备安装计划'}</span>` : ''}</div>${state.running ? `<button id="modHubBatchStop" type="button" class="macro-button modhub-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>` : state.preparing ? '' : `<div class="modhub-batch-result-actions"><span class="grey">成功 ${counts.success} 项，未完成 ${counts.failed} 项，跳过或取消 ${counts.skipped} 项</span><button id="modHubBatchResultsClear" type="button" class="macro-button modhub-btn-secondary">清除全部记录</button></div>`}<div id="modHubBatchProgressList" class="modhub-batch-progress-list" role="region" aria-label="各模组安装进度，可上下滚动" tabindex="0">${visibleProgressItems.map(item => `<div class="modhub-batch-item" data-mod-name="${batchEscape(item.name)}">${batchItemHtml(item)}</div>`).join('')}</div></section></div>`);
+            toolbar.innerHTML += modHubHtml(`<div id="modHubBatchProgressDetails" class="modhub-batch-progress-details">${batchTaskToggleHtml(taskCounts)}<section id="modHubBatchProgressContent" class="modhub-batch-task-panel" role="dialog" aria-modal="false" aria-labelledby="modHubBatchTaskPanelTitle"${state.progressExpanded ? '' : ' hidden'}><div class="modhub-batch-task-panel-header"><strong id="modHubBatchTaskPanelTitle" class="gold">${modHubLabelHtml('下载与安装任务')}</strong><button id="modHubBatchProgressClose" type="button" class="macro-button modhub-btn-secondary modhub-batch-task-close" aria-label="${escapeHtml(modHubT('收起任务面板'))}" title="${escapeHtml(modHubT('收起面板不会停止任务。'))}"><span aria-hidden="true">&times;</span></button></div><div class="modhub-batch-status" role="status" aria-live="polite"><strong id="modHubBatchProgressTitle" class="gold">${state.preparing && !state.running ? '正在准备批量安装' : state.running ? `批量安装 ${counts.finished}/${counts.total}` : `查看上次结果（完成 ${counts.success} 项）`}</strong>${state.running ? `<span id="modHubBatchProgressCurrent">${state.current ? escapeHtml(modHubT('正在处理：{name}', { name: batchDisplayName(state.current) })) : '正在准备安装计划'}</span>` : ''}</div>${state.running ? `<button id="modHubBatchStop" type="button" class="macro-button modhub-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>` : state.preparing ? '' : `<div class="modhub-batch-result-actions"><span class="grey">成功 ${counts.success} 项，未完成 ${counts.failed} 项，跳过或取消 ${counts.skipped} 项</span><button id="modHubBatchResultsClear" type="button" class="macro-button modhub-btn-secondary">清除全部记录</button></div>`}<div id="modHubBatchProgressList" class="modhub-batch-progress-list" role="region" aria-label="各模组安装进度，可上下滚动" tabindex="0">${visibleProgressItems.map(item => `<div class="modhub-batch-item" data-mod-name="${batchEscape(item.name)}">${batchItemHtml(item)}</div>`).join('')}</div></section></div>`);
             const list = document.getElementById('modHubBatchProgressList');
             if (list && state.progressExpanded) list.scrollTop = state.progressScrollTop;
             fitBatchTaskPanel();
@@ -2794,6 +2798,9 @@
 
     // 已核对作者包内技术名；用于旧索引及身份服务不可用时的精确识别。
     const MODHUB_VERIFIED_MARKET_IDENTITIES = [
+        { id: 'clothesicon状态栏服装图标-dol-clothesicon', name: 'clothesicon · 状态栏服装图标', bootNames: ['clothesicon'],
+            aliases: ['状态栏服装图标', 'Clothes Icon Bar'], repositories: ['DoL-Clothesicon'],
+            repositoryKeys: ['KonoLLo/DoL-Clothesicon'], category: '外观与资源', tags: ['地图', '服装'] },
         { id: 'character-romance-qol', name: '人物附加与生活质量提升', bootNames: ['人物附加与生活质量提升'],
             aliases: ['人物恋爱扩展与生活质量提升'], repositories: ['DolMod-'],
             repositoryKeys: ['doctor55555-55555/DolMod-'], category: '剧情与角色', tags: ['剧情', 'NPC', '恋爱'] },
@@ -4415,7 +4422,14 @@
             }
         }
 
-        const visibleMods = activeMods.filter(isMarketSourceVisible);
+        let visibleMods = activeMods.filter(isMarketSourceVisible);
+        // 完整登记条目存在时，移除同一官方仓库遗留的重复 Wiki 条目。
+        if (visibleMods.some(mod => mod.id === 'fertility-expansion' && mod.identityId === 'fertility-expansion'
+            && mod.catalogSource === 'community' && extractRepoKey(mod.githubUrl) === 'liliths-legacy/dol-fertilityexpansion-mod')) {
+            visibleMods = visibleMods.filter(mod => !(mod.id === '生育拓展fertilityexpansion-dol-fertilityexpansion-mod'
+                && mod.catalogSource !== 'community' && (!mod.identityId || mod.identityId === 'fertility-expansion')
+                && extractRepoKey(mod.githubUrl) === 'liliths-legacy/dol-fertilityexpansion-mod'));
+        }
         // 模组同名防御安全网：同仓库或不同条目间绝不允许产生完全重名的卡片
         const seenDisplayNames = new Map();
         for (const mod of visibleMods) {
@@ -5559,6 +5573,9 @@
         const prepareButton = options.batchPreparation ? document.getElementById('modHubBatchInstall') : null;
         if (options.batchPreparation) {
             batchInstallState.preparing = true;
+            batchInstallState.progressExpanded = true;
+            renderBatchInstallToolbar();
+            setBatchTaskPanelExpanded(true);
             document.getElementById('modHubMarketBatchToolbar')?.querySelectorAll('button').forEach(button => { if (!['modHubBatchProgressToggle', 'modHubBatchProgressClose'].includes(button.id)) button.disabled = true; });
             window.modHubSetButtonBusy(prepareButton, true);
             if (prepareButton) {
@@ -5748,6 +5765,8 @@
                         await window.modHubLoadModManageState?.(true);
                         const plan = getPlan();
                         const approvedActions = new Set(plan.actions.map(action => `${action.key}:${action.type}`));
+                        batchInstallState.progressPhase = 'downloading';
+                        setBatchTaskPanelExpanded(true);
                         outcome = await executeBatchInstallPlan(plan, {
                             restoreContext,
                             releaseInfos,
@@ -6121,7 +6140,7 @@
     function getPreparedPackageSource(mod, releaseInfo) {
         return JSON.stringify([getMarketModKey(mod), mod.githubUrl, releaseInfo?.tagName || '', mod.packageEditions, mod.optionalResources,
             releaseInfo?.packageEdition, mod._selectedPackageEdition,
-            getReleaseInstallAssets(releaseInfo).map(asset => [asset.name, asset.downloadUrl, asset.size || 0, asset.digest || '', Boolean(asset.optional), asset.bootName || '', asset.packageRole || '', asset.version || ''])]);
+            getReleaseInstallAssets(releaseInfo).map(asset => [asset.name, asset.downloadUrl, asset.size || 0, asset.digest || '', Boolean(asset.optional), asset.bootName || '', asset.packageRole || '', asset.version || '', officialPackageRevisions.get(asset.downloadUrl) || null])]);
     }
 
     function getPreparedDependencySnapshot(boots) {
@@ -6333,6 +6352,10 @@
         if (selectedMirror.browserOnly && !preparedPackage) return (options.batchMode || options.prepareOnly)
             ? failBatch('当前线路只能手动下载') : startBrowserDownload();
 
+        if (batchInstallState.running && batchInstallState.progressPhase === 'preparing') {
+            batchInstallState.progressPhase = 'downloading';
+            setBatchTaskPanelExpanded(true);
+        }
         window.modHubShowToast(`正在获取【${mod.name}】的 ${installAssets.length} 个安装包...`, 'warning');
 
         const controller = typeof AbortController === 'function' ? new AbortController() : null;
@@ -6347,6 +6370,7 @@
 
         try {
             const fileObjects = preparedSnapshot ? preparedSnapshot.files.slice() : [];
+            let reusedResources = Boolean(preparedSnapshot?.reusedResources);
             const preparedLimit = options.maxPreparedBytes === undefined ? MAX_DOWNLOAD_BYTES
                 : Math.min(MAX_DOWNLOAD_BYTES, Number(options.maxPreparedBytes));
             if (!(preparedLimit >= 0) || (preparedSnapshot && preparedPackage.bytes > preparedLimit)) throw createFileTooLargeError();
@@ -6359,15 +6383,72 @@
                         (edition.verifiedAssets || []).map(record => ({ ...record, bootName: edition.bootName })))];
                 const evidence = records.find(record => record.sourceUrl === asset.downloadUrl
                     && (mod.bootNames || []).includes(record.bootName) && /^[a-f0-9]{64}$/i.test(record.sha256 || ''));
-                const expectedDigest = evidence ? `sha256:${evidence.sha256.toLowerCase()}` : '';
+                const resourceEvidence = (window.modHubMarketVariants?.normalizeOptionalResources(mod.optionalResources) || []).find(record => record.sha256
+                    && (record.sourceUrl ? record.sourceUrl === asset.downloadUrl
+                        : record.bootName === asset.bootName || getAssetSeries(record.assetSeries) === getAssetSeries(asset.name)));
+                const expectedDigest = evidence ? `sha256:${evidence.sha256.toLowerCase()}`
+                    : resourceEvidence ? `sha256:${resourceEvidence.sha256.toLowerCase()}` : '';
                 if (expectedDigest && asset.digest && String(asset.digest).toLowerCase() !== expectedDigest
-                    || evidence?.size && asset.size && Number(evidence.size) !== Number(asset.size)) {
+                    || (evidence?.size || resourceEvidence?.size) && asset.size && Number(evidence?.size || resourceEvidence?.size) !== Number(asset.size)) {
                     throw Object.assign(new Error(`安装包【${fileName}】与登记的摘要或大小不一致，已停止安装`), { code: 'DIGEST_MISMATCH' });
                 }
-                const assetSize = Number(evidence?.size || asset.size) || 0;
-                const assetDigest = expectedDigest || asset.digest || '';
-                const trustedDigest = /^sha256:[a-f0-9]{64}$/i.test(assetDigest);
+                const fixedDigest = records.some(record => record.sourceUrl === asset.downloadUrl && /^[a-f0-9]{64}$/i.test(record.sha256 || ''))
+                    || Boolean(resourceEvidence);
+                const knownRevision = officialPackageRevisions.get(asset.downloadUrl);
+                const declaredDigest = String(asset.digest || '').toLowerCase();
+                let revision = !fixedDigest && knownRevision?.supersededDigests.includes(declaredDigest) ? knownRevision : null;
+                let assetSize = Number(evidence?.size || resourceEvidence?.size || revision?.size || asset.size) || 0;
+                let assetDigest = expectedDigest || revision?.digest || asset.digest || '';
+                let officialAssetCheck;
+                const readOfficialAsset = () => officialAssetCheck ||= Promise.resolve().then(() =>
+                    window.modHubMarketVersions.fetchOfficialReleaseAsset(officialSource, { signal: controller?.signal }));
+                const verifyDownloadedAsset = async blob => {
+                    if (assetSize && blob.size !== assetSize) {
+                        const expectedSize = formatAssetSize(assetSize, true), actualSize = formatAssetSize(blob.size, true);
+                        const difference = expectedSize === actualSize ? `，差异 ${formatAssetSize(Math.abs(assetSize - blob.size), true)}` : '';
+                        throw Object.assign(new Error(`安装包大小不完整（预期 ${expectedSize}，实际 ${actualSize}${difference}）`), { code: 'DOWNLOAD_INCOMPLETE' });
+                    }
+                    await verifyAssetDigest(blob, assetDigest);
+                };
                 const officialSource = getOfficialGithubAssetSource(mod, releaseInfo, asset);
+                const remainingBytes = preparedLimit - fileObjects.reduce((sum, file) => sum + file.size, 0);
+                if (remainingBytes <= 0) throw createFileTooLargeError();
+                let blob = null;
+                if (asset.optional && asset.bootName && ['audio', 'resource'].includes(asset.packageRole)
+                    && typeof window.modHubReadInstalledModPackage === 'function') {
+                    reportProgress(null, `${modHubT('正在核对已安装文件')}：${fileName}`, 'checking');
+                    try {
+                        const installed = await window.modHubReadInstalledModPackage(asset.bootName);
+                        if (!installed?.error && !installed?.missing && installed?.data
+                            && installed.bootJson?.name === asset.bootName) {
+                            if (controller?.signal.aborted) throw Object.assign(new Error('已取消下载'), { name: 'AbortError' });
+                            if (!fixedDigest && officialSource && window.modHubMarketVersions?.fetchOfficialReleaseAsset) {
+                                const currentAsset = await readOfficialAsset();
+                                assetSize = currentAsset.size;
+                                assetDigest = currentAsset.digest;
+                                revision = currentAsset;
+                            }
+                            // 普通附件必须使用本次官方证据；固定资源仅按批准摘要复用。
+                            if ((fixedDigest || revision && officialAssetCheck) && /^sha256:[a-f0-9]{64}$/i.test(assetDigest)) {
+                                const data = installed.data;
+                                if (typeof data === 'string' && data.length > Math.ceil(remainingBytes / 3) * 4) throw createFileTooLargeError();
+                                const localBlob = new Blob([typeof data === 'string'
+                                    ? Uint8Array.from(window.atob(data), char => char.charCodeAt(0)) : data]);
+                                if (localBlob.size > remainingBytes) throw createFileTooLargeError();
+                                await verifyDownloadedAsset(localBlob);
+                                if (controller?.signal.aborted) throw Object.assign(new Error('已取消下载'), { name: 'AbortError' });
+                                blob = localBlob;
+                                reusedResources = true;
+                                reportProgress(100, `${modHubT('已复用已安装文件')}：${fileName}`, 'checking');
+                            }
+                        }
+                    } catch (error) {
+                        if (controller?.signal.aborted || error?.name === 'AbortError') throw error;
+                    }
+                }
+                if (controller?.signal.aborted) throw Object.assign(new Error('已取消下载'), { name: 'AbortError' });
+                if (assetSize > remainingBytes) throw createFileTooLargeError();
+                const trustedDigest = /^sha256:[a-f0-9]{64}$/i.test(assetDigest);
                 if (!trustedDigest && !officialSource) {
                     throw Object.assign(new Error('安装包来源无法核验，已停止自动安装'), { code: 'DOWNLOAD_SOURCE_INVALID' });
                 }
@@ -6384,14 +6465,10 @@
                     seenRoutes.add(route);
                     return true;
                 }).slice(0, 3);
-                const remainingBytes = preparedLimit - fileObjects.reduce((sum, file) => sum + file.size, 0);
-                if (remainingBytes <= 0 || assetSize > remainingBytes) throw createFileTooLargeError();
-
-                let blob = null;
                 let lastError = null;
                 const failures = [];
 
-                for (let cIdx = 0; cIdx < availableMirrors.length; cIdx++) {
+                for (let cIdx = 0; !blob && cIdx < availableMirrors.length; cIdx++) {
                     const currentCandidate = availableMirrors[cIdx];
                     failedMirror = currentCandidate;
                     const fetchUrl = getDownloadUrl(asset.downloadUrl, currentCandidate.id, currentCandidate.workerBackup);
@@ -6430,8 +6507,8 @@
                             : null;
 
                         try {
-                            const fetchOptions = connectTimeoutController ? { signal: connectTimeoutController.signal }
-                                : (controller ? { signal: controller.signal } : {});
+                            const fetchOptions = { cache: 'no-store', ...(connectTimeoutController ? { signal: connectTimeoutController.signal }
+                                : (controller ? { signal: controller.signal } : {})) };
                             if (currentCandidate.direct) Object.assign(fetchOptions, { mode: 'cors', credentials: 'omit' });
                             const response = await fetch(fetchUrl, fetchOptions);
                             if (timeoutId !== null) clearTimeout(timeoutId);
@@ -6453,17 +6530,25 @@
                                 );
                             }, remainingBytes, assetSize, connectTimeoutController?.signal || controller?.signal);
 
-                            if (assetSize && blob.size !== assetSize) {
-                                const expectedSize = formatAssetSize(assetSize, true), actualSize = formatAssetSize(blob.size, true);
-                                const difference = expectedSize === actualSize ? `，差异 ${formatAssetSize(Math.abs(assetSize - blob.size), true)}` : '';
-                                const error = new Error(`安装包大小不完整（预期 ${expectedSize}，实际 ${actualSize}${difference}）`);
-                                error.code = 'DOWNLOAD_INCOMPLETE';
-                                throw error;
+                            try {
+                                await verifyDownloadedAsset(blob);
+                            } catch (error) {
+                                if (!['DIGEST_MISMATCH', 'DOWNLOAD_INCOMPLETE'].includes(error.code) || fixedDigest || !officialSource
+                                    || officialAssetCheck || !window.modHubMarketVersions?.fetchOfficialReleaseAsset) throw error;
+                                // 作者可替换同名附件；只信任精确官方发布的现行证据，不以收到的包体修订预期摘要。
+                                let currentAsset;
+                                try {
+                                    currentAsset = await readOfficialAsset();
+                                } catch (refreshError) {
+                                    if (controller?.signal.aborted) throw refreshError;
+                                    error.message += `；GitHub 附件复核失败：${refreshError.message || refreshError}`;
+                                    throw error;
+                                }
+                                assetSize = currentAsset.size;
+                                assetDigest = currentAsset.digest;
+                                revision = currentAsset;
+                                await verifyDownloadedAsset(blob);
                             }
-
-                            await verifyAssetDigest(blob, assetDigest);
-                            const digest = await getPackageDigest(blob);
-                            if (digest) downloadedPackageDigests.set(asset.downloadUrl, digest);
                             success = true;
                         } catch (err) {
                             if (timeoutId !== null) clearTimeout(timeoutId);
@@ -6498,6 +6583,15 @@
                     throw error;
                 }
 
+                if ((revision || !fixedDigest && knownRevision) && /^sha256:[a-f0-9]{64}$/i.test(assetDigest)) {
+                    const supersededDigests = [...new Set([...(knownRevision?.supersededDigests || []), knownRevision?.digest, declaredDigest]
+                        .filter(digest => /^sha256:[a-f0-9]{64}$/i.test(digest || '') && digest !== assetDigest))];
+                    officialPackageRevisions.set(asset.downloadUrl, { size: assetSize, digest: assetDigest, supersededDigests });
+                    Object.assign(asset, { size: assetSize, digest: assetDigest });
+                    if (assetIndex === 0) Object.assign(releaseInfo, { assetSize, assetDigest });
+                }
+                const digest = await getPackageDigest(blob);
+                if (digest) downloadedPackageDigests.set(asset.downloadUrl, digest);
                 const contentType = /\.modpack(?:\.crypt)?$/i.test(fileName) ? 'application/octet-stream' : 'application/zip';
                 try {
                     fileObjects.push(new File([blob], fileName, { type: contentType }));
@@ -6584,7 +6678,7 @@
                     bytes: fileObjects.reduce((sum, file) => sum + file.size, 0),
                     modKey: getMarketModKey(mod), sourceFingerprint: getPreparedPackageSource(mod, releaseInfo) };
                 preparedMarketPackages.set(prepared, { source: prepared.sourceFingerprint, files: fileObjects.slice(),
-                    sameComponents, dependencies: getPreparedDependencySnapshot(boots), localComponents: checkedLocalComponents });
+                    sameComponents, reusedResources, dependencies: getPreparedDependencySnapshot(boots), localComponents: checkedLocalComponents });
                 clearActiveDownload();
                 reportProgress(100, '包体已核验，等待确认安装计划', 'prepared');
                 return prepared;
@@ -6617,7 +6711,7 @@
                     return failBatch('已取消游戏兼容性风险确认');
                 }
             }
-            reportProgress(100, installAssets.length === 1 ? '下载完成，正在安装...' : `${installAssets.length} 个安装包下载完成，正在安装...`, 'installing');
+            reportProgress(100, '安装文件已准备好，正在安装...', 'installing');
 
             const filesToImport = fileObjects.filter((file, index) => !sameComponent(boots[index]));
 
@@ -6679,6 +6773,13 @@
                 await validateRequiredDependencies();
                 await options.beforeImport?.();
                 if (isWithdrawn(mod)) throw Object.assign(new Error('该来源已停止市场支持，请使用模组管理处理已安装包'), { code: 'DOWNLOAD_NOT_AUTHORIZED' });
+                if (reusedResources) {
+                    await refreshLocalPackageProfiles(boots.map(boot => boot.name));
+                    if (controller?.signal.aborted) throw Object.assign(new Error('已取消安装'), { name: 'AbortError' });
+                    if (checkedLocalComponents !== getPreparedLocalComponentSnapshot(boots)) {
+                        throw Object.assign(new Error('等待写入时本地组件状态已变化，请重新生成安装计划'), { code: 'INSTALL_PACKAGE_INVALID' });
+                    }
+                }
                 const atomic = options.atomicPackageChanges;
                 if (!atomic) return;
                 const optionalNames = installAssets.filter(asset => asset.optional && asset.bootName).map(asset => asset.bootName.toLowerCase());
@@ -7176,12 +7277,20 @@
         'angel-halos', 'eu-clothing-addition', 'fumo-mod', 'npc-social-avatars', 'ray-beautification', 'ray-extra-clothes'
     ]);
 
+    function hideModHubLanguageTag(mod) {
+        const identityId = mod.identityId === null ? '' : mod.identityId || mod.id;
+        return identityId === 'modhub' || !mod.identityId && ['ModHub', 'ModHub模组管理中心'].includes(mod.name)
+            && [mod.githubUrl, mod.sourceUrl, ...(mod.githubUrls || [])]
+                .some(url => extractRepoKey(url) === 'johnliao501/modhub');
+    }
+
     function renderCardClassificationTags(mod, escapeHtml) {
         const hideTranslationTag = mod.name === '美化修正' && [mod.githubUrl, mod.sourceUrl, ...(mod.githubUrls || [])]
             .some(url => extractRepoKey(url) === 'anlinstudio/degrees-of-lewdity-beautyfixer');
+        const hideLanguageTag = hideModHubLanguageTag(mod);
         return [
             `<span class="modhub-market-tag modhub-market-category" data-modhub-card-tag="${escapeHtml(mod.category || '待分类')}" data-modhub-i18n-ignore>${escapeHtml(window.modHubGetMarketCardText({ name: mod.category || '待分类' }, 'name').text)}</span>`,
-            ...(mod.tags || []).filter(tag => !hideTranslationTag || tag !== '翻译').map(tag => `<span class="modhub-market-tag" data-modhub-card-tag="${escapeHtml(tag)}" data-modhub-i18n-ignore>${escapeHtml(window.modHubGetMarketCardText({ name: tag }, 'name').text)}</span>`)
+            ...(mod.tags || []).filter(tag => (!hideTranslationTag || tag !== '翻译') && (!hideLanguageTag || tag !== '繁体中文')).map(tag => `<span class="modhub-market-tag" data-modhub-card-tag="${escapeHtml(tag)}" data-modhub-i18n-ignore>${escapeHtml(window.modHubGetMarketCardText({ name: tag }, 'name').text)}</span>`)
         ].join('');
     }
 
@@ -7200,7 +7309,7 @@
     function renderCardLanguageTags(mod, escapeHtml) {
         const members = (mod.isLanguageGroup ? mod.variants : [mod]).filter(member => {
             const identityId = member.identityId === null ? '' : member.identityId || member.id;
-            if (identityId === 'modhub') return false;
+            if (hideModHubLanguageTag(member)) return false;
             if (window.modHubMarketVariants?.normalizeVariant(member.variant)?.type === 'language') return true;
             return member.contentType === 'spell' || !MODHUB_VISUAL_LANGUAGE_BADGE_HIDDEN_IDS.has(identityId);
         });

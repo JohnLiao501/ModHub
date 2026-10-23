@@ -2,6 +2,31 @@
   "schemaVersion": 1,
   "mods": [
     {
+      "id": "clothesicon状态栏服装图标-dol-clothesicon",
+      "name": "clothesicon · 状态栏服装图标",
+      "bootNames": [
+        "clothesicon"
+      ],
+      "aliases": [
+        "状态栏服装图标",
+        "Clothes Icon Bar"
+      ],
+      "repositories": [
+        "DoL-Clothesicon"
+      ],
+      "repositoryKeys": [
+        "KonoLLo/DoL-Clothesicon"
+      ],
+      "category": "外观与资源",
+      "tags": [
+        "地图",
+        "服装"
+      ],
+      "packageLanguages": [
+        "zh-CN"
+      ]
+    },
+    {
       "id": "modhub",
       "name": "ModHub模组管理中心",
       "bootNames": [
@@ -2827,7 +2852,8 @@
       ],
       "aliases": [
         "生育扩展",
-        "生育拓展"
+        "生育拓展",
+        "生育拓展（FertilityExpansion）"
       ],
       "repositories": [
         "DOL-FertilityExpansion-MOD"

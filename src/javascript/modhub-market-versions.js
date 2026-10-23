@@ -265,7 +265,7 @@
         });
     }
 
-    async function requestHistoryJson(url, { signal, headers, timeoutMs = MODHUB_HISTORY_TIMEOUT, service = '历史发布服务' } = {}) {
+    async function requestHistoryJson(url, { signal, headers, cache, timeoutMs = MODHUB_HISTORY_TIMEOUT, service = '历史发布服务' } = {}) {
         if (signal?.aborted) throw Object.assign(historyError('已取消获取历史版本', 'ABORT_ERR'), { name: 'AbortError' });
         const controller = typeof AbortController === 'function' ? new AbortController() : null;
         let rejectRequest;
@@ -285,7 +285,7 @@
         try {
             // 等待上限覆盖响应体；旧浏览器或迟到的请求也不能持续等待或写入缓存。
             return await Promise.race([stopped, (async () => {
-                const response = await fetch(String(url), { signal: controller?.signal || signal, ...(headers ? { headers } : {}) });
+                const response = await fetch(String(url), { signal: controller?.signal || signal, ...(headers ? { headers } : {}), ...(cache ? { cache } : {}) });
                 if (!response.ok) responseStatus = response.status;
                 if (!response.ok) {
                     let failure = null;
@@ -301,6 +301,19 @@
             clearTimeout(timeout);
             signal?.removeEventListener?.('abort', abort);
         }
+    }
+
+    async function fetchOfficialReleaseAsset(downloadUrl, { signal } = {}) {
+        const source = getReleaseSource(downloadUrl);
+        if (!source?.tag || !source.assetName) throw historyError('无法识别待复核的 GitHub 附件', 'RELEASE_SOURCE_CHANGED');
+        const { data } = await requestHistoryJson(`https://api.github.com/repos/${source.key}/releases/tags/${encodeURIComponent(source.tag)}`,
+            { signal, headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store', timeoutMs: 10000, service: 'GitHub 附件复核服务' });
+        const asset = data?.tag_name === source.tag && !data.draft && !data.prerelease && Array.isArray(data.assets)
+            ? data.assets.find(item => item.name === source.assetName && item.browser_download_url === downloadUrl) : null;
+        if (!asset || !Number.isSafeInteger(asset.size) || asset.size <= 0 || !/^sha256:[a-f0-9]{64}$/i.test(asset.digest || '')) {
+            throw historyError('GitHub 当前发布没有可核验的同名附件，请刷新版本列表后重试', 'RELEASE_SOURCE_CHANGED');
+        }
+        return { size: asset.size, digest: asset.digest.toLowerCase() };
     }
 
     async function fetchGithubHistory(mod, source, page, signal, communityRevision) {
@@ -1036,5 +1049,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameIdentity, getGameVersion, getGameVersionLabel, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameIdentity, getGameVersion, getGameVersionLabel, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchOfficialReleaseAsset, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();
