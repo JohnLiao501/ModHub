@@ -19,9 +19,49 @@
     const keyOf = mod => market().getMarketModKey(mod);
     const stopped = () => Boolean(market().batchInstallState?.stopRequested);
     const localBoot = profile => profile?.bootJson || window.modHubGetModInfo?.(profile?.name)?.bootJson || profile;
-    const bootSnapshot = boot => boot ? JSON.stringify([boot.name, boot.version, boot.edition || '', boot.alias || [], boot.dependenceInfo || []]) : '';
+    const bootSnapshot = boot => boot ? JSON.stringify([boot.name, boot.version, boot.edition || '', boot.alias || [], boot.dependenceInfo || []],
+        (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+            ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value) : '';
     const isDisabled = name => (window._modHubModState?.sideDisabled || []).some(item => normalize(item) === normalize(name))
         || (window._modHubModState?.sideMods || []).some(item => normalize(item.name) === normalize(name) && item.enabled === false);
+
+    function readMigrationDefaults(targets, defaults) {
+        if (defaults === undefined) return null;
+        if (!defaults || typeof defaults !== 'object' || Array.isArray(defaults)) throw new Error('迁移安装选项格式无效。');
+        const result = Object.create(null), catalog = market().getMarketMods();
+        for (const [key, value] of Object.entries(defaults)) {
+            const matches = catalog.filter(mod => keyOf(mod) === key);
+            if (matches.length !== 1 || !targets.some(mod => keyOf(mod) === key)) throw new Error('迁移模组身份已改变，请重新核对清单。');
+            const mod = matches[0], editions = packageEditions(mod);
+            const allowed = new Set([...(mod.bootNames || []), ...editions.map(item => item.bootName),
+                ...(window.modHubMarketVariants?.normalizeOptionalResources?.(mod.optionalResources) || []).map(item => item.bootName)].map(normalize));
+            if (!value || typeof value !== 'object' || Array.isArray(value) || typeof value.enabled !== 'boolean'
+                || typeof value.packageEditionId !== 'string' || value.packageEditionId && !editions.some(item => item.id === value.packageEditionId)
+                || !Array.isArray(value.optionalBootNames) || value.optionalBootNames.some(name => typeof name !== 'string' || !allowed.has(normalize(name)))
+                || !value.componentEnabled || typeof value.componentEnabled !== 'object' || Array.isArray(value.componentEnabled)
+                || Object.entries(value.componentEnabled).some(([name, enabled]) => !allowed.has(normalize(name)) || typeof enabled !== 'boolean')) {
+                throw new Error('迁移包型或附属包身份与当前目录不一致，请重新选择。');
+            }
+            result[key] = { enabled: value.enabled, packageEditionId: value.packageEditionId,
+                optionalBootNames: value.optionalBootNames.map(normalize), componentEnabled: Object.fromEntries(Object.entries(value.componentEnabled).map(([name, enabled]) => [normalize(name), enabled])) };
+        }
+        return result;
+    }
+
+    function migrationEnabled(node, name) {
+        const defaults = node?.migration;
+        if (!defaults) return undefined;
+        const key = normalize(name);
+        if (Object.hasOwn(defaults.componentEnabled, key)) return defaults.componentEnabled[key];
+        if ((node.mod.bootNames || []).some(item => normalize(item) === key)
+            || packageEditions(node.mod).some(item => normalize(item.bootName) === key)) return defaults.enabled;
+        return undefined;
+    }
+
+    const desiredPackageStates = action => Object.fromEntries(actionBoots(action).flatMap(boot => {
+        const enabled = migrationEnabled(action, boot.name);
+        return typeof enabled === 'boolean' ? [[boot.name, enabled]] : [];
+    }));
 
     const historyFailure = error => versions().getHistoryErrorInfo?.(error) || {
         message: error?.message || '版本列表读取失败，请稍后重试或查看作者主页',
@@ -130,7 +170,8 @@
     }
 
     const needsSwitch = group => Boolean(group && (group.disabledNames.length || group.snapshot.some(item => normalize(item.name) === normalize(group.targetName) && !item.enabled)));
-    const releaseNeedsAction = (mod, release, local) => !releaseInstalled(release, local) || needsSwitch(switchGroup(mod, release));
+    const releaseNeedsAction = (mod, release, local, migration) => !releaseInstalled(release, local)
+        || Boolean(migration && local) || migration?.enabled !== false && needsSwitch(switchGroup(mod, release));
 
     function checkExclusiveSelections(selections) {
         const groups = new Map();
@@ -224,14 +265,16 @@
         defaultRisk: candidate.candidateKey === defaults.defaultKey && Boolean(defaults.defaultRisk) });
     const assetSizeText = asset => Number(asset?.size) ? asset.size < 104858 ? t('小于 0.1 MB') : `${(asset.size / 1048576).toFixed(1)} MB` : t('大小未知');
     const roleText = asset => asset.label || t((asset.packageRole || market().getAssetRole?.(asset.name)) === 'audio' ? '音频扩展包' : asset.packageRole === 'resource' ? '附属资源包' : '主包');
-    const assetsHtml = (candidate, note = '') => candidate?.assets?.length ? `<details class="modhub-version-package-details" data-detail-key="packages:${escape(candidate.candidateKey || candidate.version || '')}"><summary>${label('安装包')}${candidate.assets.length > 1 ? ` (${label('{count} 个', { count: candidate.assets.length })})` : ''}</summary>${note ? `<span class="modhub-version-description grey">${escape(t(note))}</span>` : ''}${candidate.assets.map(asset => `<span class="modhub-version-asset-name grey"><span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${escape(asset.version || candidate.version || t('版本未知'))} · ${escape(assetSizeText(asset))}</span></span>`).join('')}</details>` : '';
+    const assetsHtml = candidate => candidate?.assets?.length ? `<div class="modhub-version-package-details">${candidate.assets.map(asset => `<span class="modhub-version-asset-name grey"><span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${asset.version && asset.version !== candidate.version ? `${escape(asset.version)} · ` : ''}${escape(assetSizeText(asset))}</span></span>`).join('')}</div>` : '';
     const optionalHtml = (candidate, selected, enabled, key) => (candidate?.optionalAssets || []).map(asset => {
         const installed = optionalInstalled(asset, candidate.version), local = componentLocal(asset);
-        return `<div class="modhub-version-optional"><label class="modhub-version-optional-label"><input type="checkbox" class="modhub-version-optional-input" data-key="${escape(key)}" data-url="${escape(asset.downloadUrl)}" ${selected.has(asset.downloadUrl) ? 'checked' : ''} ${!enabled ? 'disabled' : ''}><span><strong class="purple"><span data-modhub-i18n-ignore>${escape(roleText(asset))}</span>${installed ? ` · ${label('已安装')}` : ''}${local && isDisabled(local.name) ? ` · ${label('保持禁用')}` : ''}</strong></span></label><details class="modhub-version-package-details" data-detail-key="optional:${escape(key)}:${escape(asset.downloadUrl)}"><summary>${label('安装包详情')}</summary><span class="modhub-version-asset-name grey" data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta grey">${label('当前')}：${escape(local?.version || t('未安装'))} · ${label('所选')}：${escape(asset.version || candidate.version || t('版本未知'))} · ${escape(assetSizeText(asset))}</span></details></div>`;
+        return `<div class="modhub-version-optional"><label class="modhub-version-optional-label"><input type="checkbox" class="modhub-version-optional-input" data-key="${escape(key)}" data-url="${escape(asset.downloadUrl)}" ${selected.has(asset.downloadUrl) ? 'checked' : ''} ${!enabled ? 'disabled' : ''}><span><strong class="purple"><span data-modhub-i18n-ignore>${escape(roleText(asset))}</span>${installed ? ` · ${label('已安装')}` : ''}${local && isDisabled(local.name) ? ` · ${label('保持禁用')}` : ''}</strong></span></label><div class="modhub-version-package-details"><span class="modhub-version-asset-name grey"><span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${label('当前')}：${escape(local?.version || t('未安装'))} · ${label('所选')}：${escape(asset.version || candidate.version || t('版本未知'))} · ${escape(assetSizeText(asset))}</span></span></div></div>`;
     }).join('');
 
-    function candidateLabel(candidate) {
-        return `${candidate.version || candidate.tagName || t('版本未知')} · ${candidate.assetName || candidate.assets?.[0]?.name || t('安装包')}`;
+    function candidateLabel(candidate, candidates) {
+        const version = candidate.version || candidate.tagName || t('版本未知');
+        return candidates.filter(item => (item.version || item.tagName || t('版本未知')) === version).length > 1
+            ? `${version} · ${candidate.assetName || candidate.assets?.[0]?.name || t('安装包')}` : version;
     }
 
     function groupCandidates(candidates, gameVersion, recommendedKey = '') {
@@ -308,15 +351,15 @@
             return `<div class="modhub-version-option ${candidate.candidateKey === selectedKey ? 'modhub-version-selected' : ''}">
                 <input type="radio" name="modHubMarketVersion" aria-label="选择版本 ${escape(candidate.version || candidate.tagName)}" value="${escape(candidate.candidateKey)}" ${candidate.candidateKey === selectedKey ? 'checked' : ''}>
                 <span class="modhub-version-content"><span class="modhub-version-heading"><strong class="modhub-version-number gold">${escape(candidate.version || candidate.tagName || '版本未知')}</strong><span class="modhub-version-badge ${status.tone}">${escape(status.label)}</span>${matchesLocalVersion(candidate, localVersion) ? '<span class="modhub-version-badge gold">与已安装版本号相同</span>' : ''}</span>
-                    <span class="modhub-version-meta grey">${escape(candidate.updateDate || t('发布日期未知'))} · ${Number(candidate.assetSize) ? escape(assetSizeText({ size: candidate.assetSize })) : escape(t('包体大小未知'))}</span>
+                    <span class="modhub-version-meta grey">${escape(candidate.updateDate || t('发布日期未知'))}${candidate.assets?.length ? '' : ` · ${Number(candidate.assetSize) ? escape(assetSizeText({ size: candidate.assetSize })) : escape(t('包体大小未知'))}`}</span>
                     <span class="modhub-version-description">${escape(t(status.reason))}</span>
-                    ${candidate.candidateKey === selectedKey && candidate.candidateKey === defaults.defaultKey && defaults.defaultReason ? `<span class="modhub-version-description ${defaults.defaultRisk ? 'gold' : 'grey'}">${escape(t(defaults.defaultReason))}</span>` : ''}
+                    ${candidate.candidateKey === selectedKey && candidate.candidateKey === defaults.defaultKey && defaults.defaultReason && defaults.defaultRisk ? `<span class="modhub-version-description gold">${escape(t(defaults.defaultReason))}</span>` : ''}
                     ${assetsHtml(candidate)}
                     ${optionalHtml(candidate, selectedOptional, candidate.candidateKey === selectedKey, candidate.candidateKey)}
                     ${sourceLink(candidate.htmlUrl, '发布说明')}
                 </span></div>`;
         };
-        const listHtml = () => `<div class="modhub-version-context"><strong class="gold" data-modhub-i18n-ignore>${escape(mod.name)}</strong><span class="grey">${label('当前游戏版本')}：<strong class="gold">${gameVersionLabel() ? escape(gameVersionLabel()) : label('未识别')}</strong></span><span class="grey">${label('当前已安装模组版本')}：<strong class="gold">${escape(localVersion || t(local ? '未识别' : '未安装'))}</strong></span></div>
+        const listHtml = () => `<div class="modhub-version-context"><span class="grey">${label('当前游戏版本')}：<strong class="gold">${gameVersionLabel() ? escape(gameVersionLabel()) : label('未识别')}</strong></span><span class="grey">${label('当前已安装模组版本')}：<strong class="gold">${escape(localVersion || t(local ? '未识别' : '未安装'))}</strong></span></div>
             ${requires.length ? `<p class="modhub-install-plan-warning"><strong class="gold">${label('需要前置版本')}：${escape(requires.map(requirementText).join('；'))}。</strong></p>` : ''}
             <p class="grey">请选择适合当前游戏的模组版本。${sourceLink(mod.githubUrl, '作者主页')}</p>
             ${localContext}
@@ -461,13 +504,21 @@
         } finally { closed = true; controller.abort(); clearTimeout(slowTimer); }
     }
 
-    async function selectBatch(targets, updateOnly, { single = false, addonsOnly = false } = {}) {
+    async function selectBatch(targets, updateOnly, { single = false, addonsOnly = false, migrationDefaults = null } = {}) {
         const controller = new AbortController();
         const optionalKeys = new Set((market().getMarketMods?.() || targets)
             .flatMap(mod => market().getOptionalAddonMods?.(mod) || []).map(keyOf));
         const hasSource = mod => mod.autoInstall !== false && (market().hasInstallSource?.(mod)
             ?? Boolean(mod.githubUrl && (mod.catalogSource !== 'community' || market().hasCommunityReleaseSource?.(mod))));
-        const makeRow = (mod, root = false) => ({ mod, root, active: true, local: getLocal(mod), candidates: [], selectedKey: '', defaultKey: '', recommendedKey: '', selectedOptional: new Set(), optionalOverrides: new Map(), manualSource: !hasSource(mod), loading: hasSource(mod), requirements: [] });
+        const makeRow = (mod, root = false) => {
+            const migration = migrationDefaults?.[keyOf(mod)];
+            if (migration?.packageEditionId) mod = { ...mod, _selectedPackageEdition: migration.packageEditionId, _packageEditionUpdateOnly: true };
+            const row = { mod, migration, root, active: true, local: getLocal(mod), candidates: [], selectedKey: '', defaultKey: '', recommendedKey: '', selectedOptional: new Set(), optionalOverrides: new Map(), manualSource: !hasSource(mod), loading: hasSource(mod), requirements: [] };
+            if (migration) for (const resource of window.modHubMarketVariants?.normalizeOptionalResources?.(mod.optionalResources) || []) {
+                row.optionalOverrides.set(normalize(resource.bootName), migration.optionalBootNames.includes(normalize(resource.bootName)));
+            }
+            return row;
+        };
         const rows = targets.map(mod => makeRow(mod, true));
         const targetKeys = new Set(targets.map(keyOf));
         for (const parent of rows.slice()) {
@@ -502,10 +553,10 @@
             let release = selectedRelease(row.candidates.find(candidate => candidate.candidateKey === row.selectedKey), row.selectedOptional, row);
             if (release && (row.addon || optionalKeys.has(keyOf(row.mod))) && row.local && isDisabled(row.local.name)) release = { ...release,
                 assets: release.assets.map((asset, index) => index ? asset : { ...asset, optional: true, bootName: row.local.name }) };
-            return { mod: row.mod, release, manual: Boolean(row.manual || row.mod._packageEditionManual || row.selectedKey !== row.defaultKey) };
+            return { mod: row.mod, release, migration: row.migration, manual: Boolean(row.manual || row.mod._packageEditionManual || row.selectedKey !== row.defaultKey) };
         };
         const canSelect = row => Boolean(row.selectedKey) && row.candidates.some(candidate => candidate.candidateKey === row.selectedKey
-            && releaseNeedsAction(row.mod, selectedRelease(candidate, row.selectedOptional), row.local));
+            && releaseNeedsAction(row.mod, selectedRelease(candidate, row.selectedOptional), row.local, row.migration));
         const addonHostReady = row => {
             const parent = rows.find(item => keyOf(item.mod) === row.parentKey);
             return Boolean(parent && (parent.local || !parent.manualSource && !parent.hostOnly && canSelect(parent)));
@@ -519,11 +570,16 @@
             const eligible = row.requirements.length ? versions().rankCandidates(row.mod, choices.candidates.filter(candidate => row.requirements.every(requirement =>
                 !requirement.bootVersions && satisfiesRange(candidate.version, requirement.version || '*'))), { updateOnly: row.root && updateOnly, localVersion: row.local?.version || '', localProfile: row.local }) : choices;
             Object.assign(row, { defaultKey: eligible.defaultKey ?? eligible.recommendedKey ?? '', defaultReason: eligible.defaultReason || '', defaultRisk: Boolean(eligible.defaultRisk) });
-            if (!row.manual) row.selectedKey = row.defaultKey || (row.addon && row.local
+            if (row.migration && row.defaultRisk) {
+                row.defaultKey = '';
+                row.defaultReason = '当前游戏适配尚未确认，请手动选择安装版本。';
+            }
+            if (!row.manual) row.selectedKey = row.defaultKey || (!row.migration && row.addon && row.local
                 ? row.candidates.find(candidate => releaseInstalled(candidate, row.local))?.candidateKey || '' : '');
             selectOptionalDefaults(row.candidates.find(candidate => candidate.candidateKey === row.selectedKey), row.selectedOptional, row.optionalOverrides);
         };
         const rowHtml = row => {
+            const showName = !row.addon && !(single && row.root);
             const optionalStart = row.addon ? `<div class="modhub-version-optional" data-addon-key="${escape(keyOf(row.mod))}"><label class="modhub-version-optional-label"><input type="checkbox" class="modhub-version-addon-input" data-key="${escape(keyOf(row.mod))}" ${row.checked ? 'checked' : ''} ${checkingLocal || row.manualSource ? 'disabled' : ''}><strong class="purple" data-modhub-i18n-ignore>${escape(row.mod.name)}${row.local ? ` · ${escape(t('已安装'))}` : ''}${row.local && isDisabled(row.local.name) ? ` · ${escape(t('保持禁用'))}` : ''}</strong></label>${row.checked && !addonHostReady(row) ? `<p class="gold">${label('请先安装主模组，或在本窗口选择主模组版本。')}</p>` : ''}` : '';
             const optionalEnd = row.addon ? '</div>' : '';
             if (row.addon && !row.checked && !row.manualSource) return optionalStart + optionalEnd;
@@ -531,19 +587,21 @@
             if (row.manualSource || row.hostOnly) {
                 const explanation = row.manualSource ? row.addon ? '此附加内容需按作者说明手动获取，不会自动安装。'
                     : '此主模组需按作者说明手动获取，不会自动安装。' : '仅处理所选附加内容，不会重新安装主模组。';
-                return `${optionalStart}<div class="modhub-version-batch-row" data-key="${escape(keyOf(row.mod))}">${!row.addon ? `<strong class="gold" data-modhub-i18n-ignore>${escape(row.mod.name)}</strong>` : ''}<p class="grey">${label(explanation)}</p>${row.mod.description ? `<p class="modhub-version-description grey" data-modhub-i18n-ignore>${escape(row.mod.description)}</p>` : ''}<div class="modhub-version-row-links">${sourceLink(market().getExternalDownloadUrl?.(row.mod) || row.mod.githubUrl, '作者主页')}</div>${children}</div>${optionalEnd}`;
+                return `${optionalStart}<div class="modhub-version-batch-row" data-key="${escape(keyOf(row.mod))}">${showName ? `<strong class="gold" data-modhub-i18n-ignore>${escape(row.mod.name)}</strong>` : ''}<p class="grey">${label(explanation)}</p>${row.mod.description ? `<p class="modhub-version-description grey" data-modhub-i18n-ignore>${escape(row.mod.description)}</p>` : ''}<div class="modhub-version-row-links">${sourceLink(market().getExternalDownloadUrl?.(row.mod) || row.mod.githubUrl, '作者主页')}</div>${children}</div>${optionalEnd}`;
             }
             const localVersion = row.local?.version || '';
             const selected = row.candidates.find(candidate => candidate.candidateKey === row.selectedKey);
-            const selectedAssets = selectedRelease(selected, row.selectedOptional)?.assets || [];
+            const selectedAssets = [...new Map([...(selectedRelease(selected, row.selectedOptional)?.assets || []),
+                ...rows.filter(child => child.addon && child.parentKey === keyOf(row.mod) && child.checked)
+                    .flatMap(child => rowSelection(child).release?.assets || [])].map(asset => [asset.downloadUrl, asset])).values()];
             const totalSize = selectedAssets.reduce((total, asset) => total + (Number(asset.size) || 0), 0);
-            const sizeText = totalSize ? `<span>${selectedAssets.some(asset => !Number(asset.size)) ? '已知大小' : '总大小'}</span> <span>${escape(assetSizeText({ size: totalSize }))}</span>` : '大小未知';
-            const choices = groupCandidates(row.candidates, row.gameVersion, row.defaultKey).map(group => `<optgroup label="${escape(group.label)}">${group.candidates.map(candidate => `<option value="${escape(candidate.candidateKey)}" ${candidate.candidateKey === row.selectedKey ? 'selected' : ''} ${row.root && !releaseNeedsAction(row.mod, candidate, row.local) && !candidate.optionalAssets?.length ? 'disabled' : ''}>${escape(candidateLabel(candidate))}</option>`).join('')}</optgroup>`).join('');
+            const sizeText = totalSize ? `${label(selectedAssets.some(asset => !Number(asset.size)) ? '已知大小' : '总大小')} <span>${escape(assetSizeText({ size: totalSize }))}</span>` : label('大小未知');
+            const choices = groupCandidates(row.candidates, row.gameVersion, row.defaultKey).map(group => `<optgroup label="${escape(group.label)}">${group.candidates.map(candidate => `<option value="${escape(candidate.candidateKey)}" ${candidate.candidateKey === row.selectedKey ? 'selected' : ''} ${row.root && !releaseNeedsAction(row.mod, candidate, row.local, row.migration) && !candidate.optionalAssets?.length ? 'disabled' : ''}>${escape(candidateLabel(candidate, row.candidates))}</option>`).join('')}</optgroup>`).join('');
             const editionOptions = packageEditions(row.mod);
             const editions = editionOptions.length && !versions().getLegacyVerifiedRelease?.(row.mod) ? `<label class="modhub-version-edition-label"><span class="grey">安装版本</span><select class="modhub-version-edition-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !needsEdition(row) ? 'disabled' : ''}><option value="">请选择安装版本</option>${editionOptions.map(edition => `<option value="${escape(edition.id)}" ${row.mod._selectedPackageEdition === edition.id ? 'selected' : ''}>${escape(displayVariantLabel(edition.label))}</option>`).join('')}</select></label>` : '';
             const required = row.requirements.some(requirement => requirement.required);
             const requirementText = [...new Set(row.requirements.map(requirement => `${requirement.bootName || row.mod.name} ${rangeText(requirement.version)}`))].join('；');
-            return `${optionalStart}<div class="modhub-version-batch-row${row.root ? '' : ' modhub-version-batch-dependency'}" data-key="${escape(keyOf(row.mod))}">${row.addon ? '' : `<label><strong class="gold" data-modhub-i18n-ignore>${escape(row.mod.name)}</strong>${!row.root ? '<span class="grey">前置模组</span>' : ''}</label>`}${editions}<label><span class="modhub-version-batch-current grey">${escape(localVersion || t(row.local ? '版本未识别' : '未安装'))}${selected ? ` → <strong class="gold">${escape(selected.version || selected.tagName || t('版本未识别'))}</strong> · ${sizeText}` : ''}</span><select class="modhub-version-batch-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !row.history || localError || needsEdition(row) ? 'disabled' : ''}><option value="">${checkingLocal || localError ? '等待核对完成' : needsEdition(row) ? '请先选择安装版本' : row.loading && !row.history ? '正在读取版本列表…' : row.error && !row.history ? '读取失败' : row.root ? '请选择版本或跳过此项' : '请选择前置版本'}</option>${!row.root && !required ? `<option value="__skip__" ${row.selectedKey === '__skip__' ? 'selected' : ''}>暂不安装此前置</option>` : ''}${choices}</select></label>${requirementText ? `<span class="grey">${label('需要')}：${escape(requirementText)}</span>` : ''}${row.selectedKey === '__skip__' ? '<span class="gold">此前置由您自行处理，相关模组可能无法运行。</span>' : ''}${row.defaultReason && row.selectedKey === row.defaultKey && row.defaultRisk ? `<span class="modhub-version-default-note gold">${escape(t(row.defaultReason))}</span>` : ''}${assetsHtml(selected, row.selectedKey === row.defaultKey && !row.defaultRisk ? row.defaultReason : '')}${optionalHtml(selected, row.selectedOptional, !row.loading || Boolean(row.history), keyOf(row.mod))}${sourceWarningsHtml(row.history)}${!checkingLocal && !localError && (row.error || row.loading) ? `<span class="grey">${escape(t(row.error || (row.history ? '正在加载更早版本…' : '正在读取版本列表…')))}</span>` : ''}${errorDetailsHtml(row.errorDetails)}${row.history?.stale ? `<span class="gold">${label('正在显示缓存版本。获取时间：{time}。', { time: row.history.fetchedAt || t('未知') })}</span>` : ''}<div class="modhub-version-row-links">${sourceLink(row.mod.githubUrl, '作者主页')}${row.history?.hasMore || row.error ? `<button type="button" class="macro-button modhub-version-batch-more" data-key="${escape(keyOf(row.mod))}" ${row.loading ? 'disabled' : ''}>${row.error ? row.history ? '重试加载更早版本' : '重试版本列表' : '加载更早版本'}</button>` : ''}</div>${children}</div>${optionalEnd}`;
+            return `${optionalStart}<div class="modhub-version-batch-row${row.root ? '' : ' modhub-version-batch-dependency'}" data-key="${escape(keyOf(row.mod))}">${showName ? `<label><strong class="gold" data-modhub-i18n-ignore>${escape(row.mod.name)}</strong>${!row.root ? '<span class="grey">前置模组</span>' : ''}</label>` : ''}${editions}<label><span class="modhub-version-batch-current grey">${label('当前')}：${escape(localVersion || t(row.local ? '版本未识别' : '未安装'))}${selectedAssets.length > 1 ? ` · ${sizeText}` : ''}</span><select class="modhub-version-batch-select" data-key="${escape(keyOf(row.mod))}" ${checkingLocal || row.loading && !row.history || localError || needsEdition(row) ? 'disabled' : ''}><option value="">${checkingLocal || localError ? '等待核对完成' : needsEdition(row) ? '请先选择安装版本' : row.loading && !row.history ? '正在读取版本列表…' : row.error && !row.history ? '读取失败' : row.root ? '请选择版本或跳过此项' : '请选择前置版本'}</option>${!row.root && !required ? `<option value="__skip__" ${row.selectedKey === '__skip__' ? 'selected' : ''}>暂不安装此前置</option>` : ''}${choices}</select></label>${requirementText ? `<span class="grey">${label('需要')}：${escape(requirementText)}</span>` : ''}${row.selectedKey === '__skip__' ? '<span class="gold">此前置由您自行处理，相关模组可能无法运行。</span>' : ''}${row.defaultReason && row.selectedKey === row.defaultKey && row.defaultRisk ? `<span class="modhub-version-default-note gold">${escape(t(row.defaultReason))}</span>` : ''}${assetsHtml(selected)}${optionalHtml(selected, row.selectedOptional, !row.loading || Boolean(row.history), keyOf(row.mod))}${sourceWarningsHtml(row.history)}${!checkingLocal && !localError && (row.error || row.loading) ? `<span class="grey">${escape(t(row.error || (row.history ? '正在加载更早版本…' : '正在读取版本列表…')))}</span>` : ''}${errorDetailsHtml(row.errorDetails)}${row.history?.stale ? `<span class="gold">${label('正在显示缓存版本。获取时间：{time}。', { time: row.history.fetchedAt || t('未知') })}</span>` : ''}<div class="modhub-version-row-links">${sourceLink(row.mod.githubUrl, '作者主页')}${row.history?.hasMore || row.error ? `<button type="button" class="macro-button modhub-version-batch-more" data-key="${escape(keyOf(row.mod))}" ${row.loading ? 'disabled' : ''}>${row.error ? row.history ? '重试加载更早版本' : '重试版本列表' : '加载更早版本'}</button>` : ''}</div>${children}</div>${optionalEnd}`;
         };
         const previewHtml = () => {
             if (previewBusy) return '';
@@ -701,7 +759,7 @@
                         const nextUnresolved = [], usedDependencies = new Set();
                         try {
                             const selected = selections();
-                            const next = selected.length ? await preparePlan(selected, updateOnly, { download: false, isCurrent: current,
+                            const next = selected.length ? await preparePlan(selected, updateOnly, { download: false, isCurrent: current, migrationDefaults,
                                 resolveSelection: async (node, requirements) => {
                                     usedDependencies.add(node.key);
                                     let row = rows.find(item => keyOf(item.mod) === node.key);
@@ -761,7 +819,9 @@
 
     function bootDependencies(node) {
         const provided = node.effectiveBoots || node.prepared?.boots || (node.local && !node.release ? [localBoot(node.local)] : []);
-        const result = [...requiredDependencies(node.mod), ...(node.release ? declaredDependencies(node) : [])].filter(requirement => {
+        const mainName = provided[0]?.name || node.local?.name || node.release?.packageEdition?.bootName || node.mod.bootNames?.[0];
+        const active = provided.filter(boot => migrationEnabled(node, boot.name) !== false);
+        const result = (migrationEnabled(node, mainName) === false ? [] : [...requiredDependencies(node.mod), ...(node.release ? declaredDependencies(node) : [])]).filter(requirement => {
             if (!requirement.required || !requirement.bootName) return true;
             const internal = provided.filter(boot => getDependencyBootNames(boot).includes(requirement.bootName));
             if (internal.length > 1) throw new Error(`包内前置【${requirement.bootName}】存在多个提供者，请使用作者明确的安装包组合。`);
@@ -769,7 +829,7 @@
             if (!satisfies(internal[0], requirement)) throw new Error(`包内前置【${requirement.bootName}】不满足版本要求：${rangeText(requirement.version)}`);
             return false;
         });
-        for (const boot of provided) {
+        for (const boot of active) {
             for (const dependency of Array.isArray(boot.dependenceInfo) ? boot.dependenceInfo : []) {
                 const name = typeof dependency?.modName === 'string' ? dependency.modName.trim() : '';
                 if (!name || MODHUB_SPECIAL_DEPENDENCIES.has(normalize(name))) continue;
@@ -778,6 +838,7 @@
                 if (providers.length > 1) throw new Error(`包内前置【${name}】存在多个提供者，请使用作者明确的安装包组合。`);
                 const internal = providers[0];
                 if (internal) {
+                    if (migrationEnabled(node, internal.name) === false) throw new Error(`迁移清单要求禁用前置【${internal.name}】，但【${boot.name}】需要启用它。请调整迁移选择。`);
                     if (!satisfies(internal, requirement)) throw new Error(`包内前置【${name}】不满足版本要求：${rangeText(requirement.version)}`);
                     continue;
                 }
@@ -813,7 +874,7 @@
     }
 
     async function preparePlan(selections, updateOnly, { download = true, initialPlan = null, initialImpact = '', acknowledged = new Set(), resolveSelection, resolveUnresolved, isCurrent,
-        preparedCache = new Map(), preserveProgress = false, mergeOnNewDependencies = false, protectedNames = new Map(), downloads } = {}) {
+        preparedCache = new Map(), preserveProgress = false, mergeOnNewDependencies = false, protectedNames = new Map(), downloads, migrationDefaults = initialPlan?.migrationDefaults } = {}) {
         const api = market(), catalog = api.getMarketMods();
         checkExclusiveSelections(selections);
         const nodes = new Map(), roots = new Set(), queue = [];
@@ -829,11 +890,11 @@
             const previous = initialPlan?.nodes.get(key);
             selection = previous || selection;
             if (!nodes.has(key)) nodes.set(key, { key, mod, local: getLocal(mod), release: selection?.release || null,
-                manual: Boolean(selection?.manual), requirements: [], dependencies: new Set(), issue: '', prepared: null,
+                manual: Boolean(selection?.manual), migration: migrationDefaults?.[key] || selection?.migration || null, requirements: [], dependencies: new Set(), issue: '', prepared: null,
                 skipped: Boolean(selection?.skipped), planned: false, plannedVersion: '', unresolved: [],
                 localSnapshot: previous?.localSnapshot, localDisabledSnapshot: previous?.localDisabledSnapshot,
                 unresolvedDecision: previous?.unresolvedDecision,
-                switchGroup: previous?.switchGroup || switchGroup(mod, selection?.release),
+                switchGroup: (migrationDefaults?.[key] || selection?.migration)?.enabled === false ? null : previous?.switchGroup || switchGroup(mod, selection?.release),
                 requiredSnapshot: JSON.stringify(requiredDependencies(mod)),
                 expandedLocal: false, attempts: new Set(), lastBoot: null, recoverableIssue: false, forceReselect: false });
             return nodes.get(key);
@@ -877,6 +938,10 @@
                 const resolved = resolveDependency(requirement, catalog, api.getLocalInstalledProfiles());
                 if (!resolved) { node.unresolved.push(requirement); continue; }
                 const dependency = addNode(resolved.mod);
+                if (migrationEnabled(dependency, resolved.local?.name || resolved.mod.bootNames?.[0]) === false) {
+                    node.issue = `迁移清单要求禁用前置【${resolved.mod.name}】，但【${node.mod.name}】需要启用它。请调整迁移选择。`;
+                    continue;
+                }
                 if (mergeOnNewDependencies && !initialPlan?.nodes.has(dependency.key)) mergePending = true;
                 dependency.local = resolved.local;
                 dependency.requirements.push({ ...requirement, parent: node.key }); node.dependencies.add(dependency.key);
@@ -980,8 +1045,15 @@
                         if (choice.mod) node.mod = choice.mod;
                         node.release = choice.release; node.manual = choice.manual;
                     }
-                    node.switchGroup ||= switchGroup(node.mod, node.release);
-                    if (!releaseNeedsAction(node.mod, node.release, node.local)) {
+                    if (node.migration?.enabled !== false) node.switchGroup ||= switchGroup(node.mod, node.release);
+                    if (node.migration && node.local && releaseInstalled(node.release, node.local) && !needsSwitch(node.switchGroup)) {
+                        node.configurationOnly = true;
+                        node.effectiveBoots = [localBoot(node.local), ...(node.release.assets || []).slice(1).map(componentLocal).map(localBoot)].filter(Boolean);
+                        node.lastBoot = { ...localBoot(node.local) };
+                        expandDependencies(node); await chooseUnresolved(node);
+                        continue;
+                    }
+                    if (!releaseNeedsAction(node.mod, node.release, node.local, node.migration)) {
                         node.issue = '当前所选版本已安装，无需重复安装'; continue;
                     }
                     const signature = JSON.stringify([node.release.candidateKey || node.release.selectedKey || node.release.tagName,
@@ -1033,7 +1105,7 @@
                     if (node.local && api.compareVersions(boot?.version, node.local.version, node.mod) < 0 && !node.manual) {
                         throw new Error('推荐包的真实版本低于本地版本，已停止自动降级；请自行选择历史版本。');
                     }
-                    if (!needsSwitch(node.switchGroup) && prepared.boots.every(item => {
+                    if (!node.migration && !needsSwitch(node.switchGroup) && prepared.boots.every(item => {
                         const profile = profiles.find(local => normalize(local.name) === normalize(item.name));
                         return preparedInstalled(prepared, item, profile);
                     })) {
@@ -1081,7 +1153,7 @@
             });
             const actions = order.filter(key => needed.has(key)).map(key => {
                 const node = nodes.get(key);
-                const type = node.skipped ? '' : node.prepared || !download && node.release ? (node.local ? 'update' : 'install') : (node.local && isDisabled(node.local.name) ? 'enable' : '');
+                const type = node.skipped ? '' : node.configurationOnly ? 'configure' : node.prepared || !download && node.release ? (node.local ? 'update' : 'install') : (node.local && isDisabled(node.local.name) ? 'enable' : '');
                 return { ...node, type, role: roots.has(key) ? '目标模组' : '前置依赖', dependencyRequirements: node.requirements };
             }).filter(node => node.type);
             if (download && approvedSkippedNodes.size) {
@@ -1091,7 +1163,7 @@
                 }
             }
             if (!download) actions.filter(action => action.release).forEach(action => downloadApprovals.set(action.key, downloadSignature(action.release)));
-            const plan = { nodes, roots, reachable, blocked, actions, bytes, downloaded: download, downloadApprovals,
+            const plan = { nodes, roots, reachable, blocked, actions, bytes, downloaded: download, downloadApprovals, migrationDefaults,
                 approvedImpact: JSON.stringify([...approvedImpacts.values()].sort((a, b) => a[0].localeCompare(b[0]))) };
             if (isCurrent && !isCurrent()) throw Object.assign(new Error('安装预览已更新'), { code: 'INSTALL_CANCELLED' });
             api.setBatchInstallPlan?.(plan, { preserveOtherItems: preserveProgress });
@@ -1115,7 +1187,8 @@
         return [action.key, action.type,
             actionBoots(action)[0]?.version || action.release?.version || localBoot(action.local)?.version,
             downloadSignature(action.release), action.switchGroup?.targetName || '', [...(action.switchGroup?.disabledNames || [])].sort(),
-            (action.release?.assets || []).map(asset => [asset.downloadUrl, Boolean(asset.optional && asset.bootName && isDisabled(asset.bootName))])
+            (action.release?.assets || []).map(asset => [asset.downloadUrl, Boolean(asset.optional && asset.bootName && isDisabled(asset.bootName))]),
+            ...(action.migration ? [action.migration] : [])
         ];
     }
 
@@ -1140,7 +1213,8 @@
             const stoppedNames = action.switchGroup?.disabledNames || [];
             const toDisable = new Set([...preserved, ...stoppedNames].map(normalize));
             enabled = unique([...lists.enabled.filter(name => !toDisable.has(normalize(name))),
-                ...records.filter(item => item.imported && !toDisable.has(normalize(item.name))).map(item => item.name),
+                ...records.filter(item => (item.imported || migrationEnabled(action, item.name) === true)
+                    && !toDisable.has(normalize(item.name))).map(item => item.name),
                 ...(action.switchGroup?.targetName ? [action.switchGroup.targetName] : [])]);
             const nextEnabled = new Set(enabled.map(normalize));
             disabled = unique([...lists.disabled, ...stoppedNames, ...preserved]).filter(name => !nextEnabled.has(normalize(name)));
@@ -1169,7 +1243,8 @@
             const records = [];
             for (const [index, boot] of (action.prepared?.boots || actionBoots(action)).entries()) {
                 const asset = action.release?.assets?.[index];
-                const keepDisabled = Boolean(asset?.optional && isDisabled(boot.name));
+                const desired = migrationEnabled(action, boot.name);
+                const keepDisabled = desired === false || desired === undefined && Boolean(asset?.optional && isDisabled(boot.name));
                 const installed = !action.prepared ? await window.modHubReadInstalledModPackage?.(boot.name) : null;
                 const data = action.prepared?.files?.[index] || installed?.data;
                 const profile = market().getLocalInstalledProfiles().find(item => normalize(item.name) === normalize(boot.name));
@@ -1187,8 +1262,23 @@
         const checkedBaseline = result.compatibility?.baselineLists;
         if (result.stale || stopped() || checkedBaseline
             && JSON.stringify([baseline.enabled, baseline.disabled]) !== JSON.stringify([checkedBaseline.enabled, checkedBaseline.disabled])) {
-            throw Object.assign(new Error(stopped() ? '已停止安装准备' : '检查期间配置或安装包已改变，请重新生成安装计划。'),
-                { code: stopped() ? 'INSTALL_CANCELLED' : 'INSTALL_PLAN_CHANGED' });
+            if (stopped()) throw Object.assign(new Error('已停止安装准备'), { code: 'INSTALL_CANCELLED' });
+            const details = [];
+            for (const [key, message] of [['enabled', '启用模组名单或顺序不同。'], ['disabled', '禁用模组名单或顺序不同。']]) {
+                if (checkedBaseline && JSON.stringify(baseline[key]) !== JSON.stringify(checkedBaseline[key])) {
+                    details.push(t(message) + '\n' + t('内存列表：{names}', { names: JSON.stringify(baseline[key]) })
+                        + '\n' + t('仓库列表：{names}', { names: JSON.stringify(checkedBaseline[key]) ?? 'undefined' }));
+                }
+            }
+            const reasons = [...(result.compatibility?.coverage || []).filter(item => item.field === '环境变化'
+                    && typeof item.reason === 'string' && item.reason.trim())
+                    .map(item => typeof item.modName === 'string' && item.modName ? `【${item.modName}】\n${item.reason}` : item.reason),
+                ...(result.issues || []).filter(item => ['stale', 'read-failed'].includes(item.id)).map(item => item.evidence)]
+                .filter(value => typeof value === 'string' && value.trim());
+            details.push(...new Set(reasons));
+            if (!details.length) details.push(t('检查结果已过期，但未提供具体原因。请重新核对配置与安装包。'));
+            throw Object.assign(new Error(t('检查期间配置或安装包已改变，请重新生成安装计划。')
+                + '\n\n' + t('错误详情') + '：\n' + details.join('\n')), { code: 'INSTALL_PLAN_CHANGED', details });
         }
         plan.compatibilityResult = result;
         plan.compatibilitySignature = api.signature(result);
@@ -1270,16 +1360,18 @@
         const actionKeys = new Set(plan.actions.map(action => action.key));
         const actionHtml = action => {
             const boot = actionBoots(action)[0], version = boot?.version || action.release?.version || '未知版本';
-            const operation = action.type === 'enable' ? '启用' : action.local && market().compareVersions(version, action.local.version, action.mod) < 0 ? '降级' : action.type === 'update' ? '更换版本' : '安装';
+            const operation = action.type === 'configure' ? action.migration?.enabled === false ? '保持禁用' : '应用启禁配置' : action.type === 'enable' ? '启用' : action.local && market().compareVersions(version, action.local.version, action.mod) < 0 ? '降级' : action.type === 'update' ? '更换版本' : '安装';
             const assets = action.release?.assets || [];
             const componentHtml = assets.map((asset, index) => {
                 const component = actionBoots(action)[index];
                 const profile = component ? api.getLocalInstalledProfiles().find(local => normalize(local.name) === normalize(component.name))
                     : index === 0 ? action.local : componentLocal(asset);
                 const reuse = action.prepared ? preparedInstalled(action.prepared, component, profile) : releaseInstalled({ ...action.release, version: asset.version || action.release?.version, assets: [asset], ...(index ? { packageEdition: null } : {}) }, profile);
-                const keepDisabled = Boolean(asset.optional && profile && isDisabled(profile.name));
+                const name = component?.name || asset.bootName || (index === 0 ? profile?.name || action.mod.bootNames?.[0] : '');
+                const desired = migrationEnabled(action, name);
+                const keepDisabled = desired === false || desired === undefined && Boolean(asset.optional && profile && isDisabled(profile.name));
                 const state = reuse ? keepDisabled ? '保留同版，保持禁用' : profile && isDisabled(profile.name) ? '保留同版，启用' : '已安装，保留同版' : keepDisabled ? '更新，保持禁用' : profile ? '更新' : '安装';
-                return `<span class="modhub-version-asset-name grey"><strong class="${asset.optional ? 'purple' : 'gold'}">${escape(roleText(asset))}</strong>：<span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${label('当前')}：${escape(profile?.version || t('未安装'))} · ${label('所选')}：${escape(component?.version || asset.version || action.release?.version || t('版本未知'))} · ${escape(t(state))} · ${assetSizeText(asset)}</span></span>`;
+                return `<span class="modhub-version-asset-name grey"><strong class="${asset.optional ? 'purple' : 'gold'}">${escape(roleText(asset))}</strong>：<span data-modhub-i18n-ignore>${escape(asset.name)}</span><span class="modhub-version-meta">${index ? `${label('当前')}：${escape(profile?.version || t('未安装'))} · ${label('所选')}：${escape(component?.version || asset.version || action.release?.version || t('版本未知'))} · ` : ''}${escape(t(state))} · ${escape(assetSizeText(asset))}</span></span>`;
             }).join('');
             const gameRanges = actionBoots(action).flatMap(item => item.dependenceInfo || []).filter(item => normalize(item.modName) === 'gameversion');
             const assessment = gameRanges.map(item => versions().assessCompatibility(item.version));
@@ -1298,7 +1390,7 @@
             return `<div class="modhub-install-plan-item"><div class="modhub-install-plan-heading"><div class="modhub-install-plan-identity"><svg class="modhub-install-plan-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5"/></svg><strong class="modhub-install-plan-name" data-modhub-i18n-ignore>${escape(action.mod.name)}</strong></div><span class="modhub-install-plan-operation gold">${label(operation)} <span data-modhub-i18n-ignore>${escape(version)}</span></span></div>
                 ${action.local && action.type !== 'enable' ? `<div class="modhub-install-plan-meta">${label(recorded ? '安装前版本' : '当前已安装')}：<span data-modhub-i18n-ignore>${escape(action.local.version)}</span></div>` : ''}
                 <p class="modhub-install-plan-meta ${status === 'incompatible' ? 'red' : ''}">${label(gameNote)}${gameRanges.length ? ` ${label('支持范围')}：DoL ${escape(gameRanges.map(item => t(rangeText(item.version))).join('；'))}。` : ''}</p>
-                ${assets.length ? `<details class="modhub-version-assets modhub-install-plan-files"><summary>${label('查看安装包')}${assets.length > 1 ? ` (${label('{count} 个', { count: assets.length })})` : ''}</summary>${componentHtml}</details>` : ''}
+                ${assets.length ? `<div class="modhub-version-assets modhub-install-plan-files">${componentHtml}</div>` : ''}
                 ${action.switchGroup?.disabledNames.length ? `<div class="modhub-install-plan-warning gold">安装成功后停用：${escape(action.switchGroup.disabledNames.join('、'))}。保留旧安装包，可在模组管理中重新选择。</div>` : ''}
                 ${existing.length ? `<details class="modhub-version-assets modhub-install-plan-prerequisites"><summary><span class="green">${label('前置模组已就绪（{count} 项）', { count: existing.length })}</span></summary>${existing.map(providerHtml).join('')}</details>` : ''}</div>`;
         };
@@ -1453,8 +1545,9 @@
                 if (bootSnapshot(localBoot(getLocal(action.mod))) !== action.localSnapshot
                     || Boolean(getLocal(action.mod) && isDisabled(getLocal(action.mod).name)) !== action.localDisabledSnapshot) throw new Error('本地版本、启禁状态或依赖已改变，请重新核对安装计划。');
                 if (JSON.stringify(requiredDependencies(action.mod)) !== action.requiredSnapshot) throw new Error('模组的前置要求已更改，请重新确认要安装的内容。');
+                const mainEnabled = migrationEnabled(action, actionBoots(action)[0]?.name || action.local?.name || action.mod.bootNames?.[0]) !== false;
                 checkDependencies(action.key);
-                for (const requirement of requiredDependencies(action.mod)) {
+                for (const requirement of mainEnabled ? requiredDependencies(action.mod) : []) {
                     const internal = actionBoots(action).filter(boot => getDependencyBootNames(boot).includes(requirement.bootName));
                     if (internal.length === 1 && satisfies(internal[0], requirement)) continue;
                     const resolved = resolveDependency(requirement, api.getMarketMods(), api.getLocalInstalledProfiles());
@@ -1464,7 +1557,25 @@
                 }
                 if (!await confirmLanguageCoexistence(action.mod, languageAcknowledged)) throw Object.assign(new Error('已取消保留其他语言包'), { code: 'INSTALL_CANCELLED' });
                 let changedByAction = false;
-                if (action.type === 'enable') {
+                if (action.type === 'configure') {
+                    const desiredEnabled = desiredPackageStates(action);
+                    const nextLists = plan.compatibilityResult && advanceCompatibilityLists(plan.compatibilityLists, action,
+                        plan.compatibilityChanges.get(action.key));
+                    const stateChanged = Object.entries(desiredEnabled).some(([name, enabled]) => enabled === isDisabled(name));
+                    if (stateChanged) {
+                        const ok = await window.modHubHandleAddMod?.([], { askRestart: false, skipReloadOffer: true, keepCurrentTab: true,
+                            restoreContext, atomicPackageChanges: { desiredEnabled }, beforeImport: () => assertPlanCompatibility(plan) });
+                        if (ok !== true) throw new Error(window._modHubLastInstallError || '迁移启禁配置未能保存。');
+                    }
+                    if (nextLists) plan.compatibilityLists = nextLists;
+                    await window.modHubLoadModManageState?.(true);
+                    if (Object.entries(desiredEnabled).some(([name, enabled]) => enabled === isDisabled(name))) throw new Error('迁移启禁状态回读不一致，请刷新后重试。');
+                    recordCompatibilityChanges(plan, action); await assertPlanCompatibility(plan);
+                    if (stateChanged) {
+                        changed.add(action.mod.name);
+                        window.modHubRegisterOperationReload(restoreContext, '迁移启禁配置已保存，重新载入后生效。');
+                    }
+                } else if (action.type === 'enable') {
                     api.setBatchInstallStatus?.(action.mod.name, 'installing', '正在启用前置模组');
                     const nextLists = plan.compatibilityResult && advanceCompatibilityLists(plan.compatibilityLists, action,
                         plan.compatibilityChanges.get(action.key), action.local.name);
@@ -1488,9 +1599,11 @@
                 } else {
                     const nextLists = plan.compatibilityResult && advanceCompatibilityLists(plan.compatibilityLists, action,
                         plan.compatibilityChanges.get(action.key));
-                    const preserveDisabledNames = (action.release?.assets || []).filter(asset => asset.optional && asset.bootName && isDisabled(asset.bootName)).map(asset => asset.bootName);
-                    const atomicPackageChanges = preserveDisabledNames.length || action.switchGroup || action.release?.packageEdition
-                        ? { preserveDisabledNames, ...(action.switchGroup ? { switchGroup: action.switchGroup } : {}) } : undefined;
+                    const preserveDisabledNames = (action.release?.assets || []).filter(asset => asset.optional && asset.bootName
+                        && migrationEnabled(action, asset.bootName) !== true && isDisabled(asset.bootName)).map(asset => asset.bootName);
+                    const desiredEnabled = desiredPackageStates(action);
+                    const atomicPackageChanges = action.migration || preserveDisabledNames.length || action.switchGroup || action.release?.packageEdition
+                        ? { preserveDisabledNames, ...(action.migration ? { desiredEnabled } : {}), ...(action.switchGroup ? { switchGroup: action.switchGroup } : {}) } : undefined;
                     const ok = await api.downloadAndInstallMod(action.mod, api.getCurrentMirrorId(), {
                         releaseInfo: action.release, preparedPackage: action.prepared, askRestart: false, skipReloadOffer: true,
                         batchMode: true, dependencyRequirements: action.requirements, approvedCompatibilityRisks: approved,
@@ -1510,7 +1623,7 @@
                     await window.modHubLoadModManageState?.(true);
                     for (const boot of actionBoots(action)) {
                         const local = api.getLocalInstalledProfiles().find(profile => normalize(profile.name) === normalize(boot.name));
-                        if (preserveDisabledNames.some(name => normalize(name) === normalize(boot.name))) continue;
+                        if (migrationEnabled(action, boot.name) === false || preserveDisabledNames.some(name => normalize(name) === normalize(boot.name))) continue;
                         if (local && isDisabled(local.name)) {
                             const enabledLists = plan.compatibilityResult && advanceCompatibilityLists(plan.compatibilityLists, action,
                                 plan.compatibilityChanges.get(action.key), local.name);
@@ -1523,7 +1636,7 @@
                         }
                     }
                 }
-                results.set(action.key, { status: 'success' });
+                results.set(action.key, { status: 'success', bootNames: actionBoots(action).map(boot => boot.name) });
                 api.setBatchInstallStatus?.(action.mod.name, action.type === 'enable' ? 'enabled' : 'success',
                     action.type === 'enable' ? '已启用，重新载入后生效' : action.type === 'update' ? '已更新，重新载入后生效' : '已安装，重新载入后生效');
             } catch (error) {
@@ -1597,7 +1710,7 @@
 
     function createBatchDownloads(plan, restoreContext) {
         const api = market(), entries = new Map(), failures = new Map(), consumed = new Set();
-        const actions = plan.actions.filter(action => action.release && action.type !== 'enable'
+        const actions = plan.actions.filter(action => action.release && !['enable', 'configure'].includes(action.type)
             && plan.downloadApprovals.get(action.key) === downloadSignature(action.release));
         const size = node => {
             const assets = api.getReleaseInstallAssets(node.release);
@@ -1783,7 +1896,12 @@
                         market().setBatchInstallStatus?.(node.mod.name, 'error', error.message || '安装准备失败');
                     }
                 } else market().failBatchInstallProgress?.(error.message || '安装准备失败');
-                await window.modHubAlert(error.message || '安装准备失败', '安装未完成');
+                if (error.code === 'INSTALL_PLAN_CHANGED' && Array.isArray(error.details) && error.details.length) {
+                    await window.modHubConfirm({ title: '安装未完成', message: error.message,
+                        trustedMessageHtml: `<p>${label('检查期间配置或安装包已改变，请重新生成安装计划。')}</p>`
+                            + errorDetailsHtml(error.details.flatMap(detail => detail.split('\n'))),
+                        confirmText: '确定', cancelText: '' });
+                } else await window.modHubAlert(error.message || '安装准备失败', '安装未完成');
             }
             return false;
         } finally {
@@ -1831,16 +1949,23 @@
         finally { window.modHubClearMarketPreparationProgress?.(parent.name); }
     }
 
-    async function installBatch(targets, { updateOnly = false, restoreContext } = {}) {
+    async function installBatch(targets, { updateOnly = false, restoreContext, migrationDefaults } = {}) {
         targets = (targets || []).filter(mod => mod && mod.contentType !== 'spell');
         if (!targets.length) return false;
-        if (!restoreContext) return market().runInstallTask(context => installBatch(targets, { updateOnly, restoreContext: context }),
+        if (!restoreContext) return market().runInstallTask(context => installBatch(targets, { updateOnly, restoreContext: context, migrationDefaults }),
             { label: updateOnly ? '市场批量更新' : '市场批量安装', names: targets.map(mod => mod.name) });
         const state = market().batchInstallState;
         if (market().startBatchInstallProgress) market().startBatchInstallProgress(targets, updateOnly);
         else if (state) Object.assign(state, { running: true, stopRequested: false, progressPhase: 'preparing', current: '读取可选版本', completed: 0, total: targets.length });
         market().renderBatchInstallToolbar?.();
         try {
+            migrationDefaults = readMigrationDefaults(targets, migrationDefaults);
+            if (migrationDefaults) targets = targets.map(target => {
+                const matches = market().getMarketMods().filter(mod => keyOf(mod) === keyOf(target));
+                if (matches.length !== 1) throw new Error('迁移模组身份已改变，请重新核对清单。');
+                const defaults = migrationDefaults[keyOf(target)];
+                return { ...matches[0], ...(defaults?.packageEditionId ? { _selectedPackageEdition: defaults.packageEditionId, _packageEditionUpdateOnly: true } : {}) };
+            });
             const members = [];
             for (let target of targets) {
                 if (stopped()) return false;
@@ -1865,7 +1990,7 @@
             market().startBatchInstallProgress?.(unique, updateOnly);
             const languageAcknowledged = new Set();
             for (const member of unique) if (!await confirmLanguageCoexistence(member, languageAcknowledged) || stopped()) return false;
-            return await run(await selectBatch(unique, updateOnly), updateOnly, restoreContext, languageAcknowledged);
+            return await run(await selectBatch(unique, updateOnly, { migrationDefaults }), updateOnly, restoreContext, languageAcknowledged);
         }
         catch (error) {
             if (error.code !== 'INSTALL_CANCELLED') market().failBatchInstallProgress?.(error.message || '批量安装准备失败');

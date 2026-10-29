@@ -2783,16 +2783,160 @@
       "id": "ray-beautification",
       "name": "RAY美化",
       "bootNames": [
-        "Ray美化"
+        "Ray美化",
+        "Ray Art Mod",
+        "Ray Art Mod(for DoLP)"
       ],
       "aliases": [],
-      "repositories": [],
-      "repositoryKeys": [],
+      "repositories": [
+        "Ray-Art-Mod-Released"
+      ],
+      "repositoryKeys": [
+        "Ray-ray2345/Ray-Art-Mod-Released"
+      ],
       "category": "外观与资源",
       "tags": [],
       "packageLanguages": [
         "zh-CN",
         "en"
+      ],
+      "sharedRepository": true,
+      "releaseTrackingSourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases",
+      "packageEditions": [
+        {
+          "id": "zh-full",
+          "label": "DoL 简体中文 完整版",
+          "bootName": "Ray美化",
+          "assetSeries": "Ray.Art.Mod_ZH",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_ZH.mod.zip",
+              "sha256": "2c65e88663b5ca2719eab0929b3ad997304cf082d8fe74d882fed2f79397faf9",
+              "version": "1.6.0"
+            }
+          ]
+        },
+        {
+          "id": "zh-lite",
+          "label": "DoL 简体中文 轻量版",
+          "bootName": "Ray美化",
+          "assetSeries": "Ray.Art.Mod_light_ZH",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_light_ZH.mod.zip",
+              "sha256": "0abb2eda750dc504eb2270d5564ad309fb84a84c82852ef3205f59e21914f9ee",
+              "version": "1.6.0"
+            }
+          ]
+        },
+        {
+          "id": "en-full",
+          "label": "DoL English 完整版",
+          "bootName": "Ray Art Mod",
+          "assetSeries": "Ray.Art.Mod_EN",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_EN.mod.zip",
+              "sha256": "af060cac1cca2cf324d388ad2374bfaa2b44494b28919e0f3629f7823c7129c2",
+              "version": "1.6.0"
+            }
+          ]
+        },
+        {
+          "id": "en-lite",
+          "label": "DoL English 轻量版",
+          "bootName": "Ray Art Mod",
+          "assetSeries": "Ray.Art.Mod_light_EN",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_light_EN.mod.zip",
+              "sha256": "151b92bd4026a6a4d110b056b1a4ce8a611a0fac9d50bb8dbfae4ff0028844b4",
+              "version": "1.6.0"
+            }
+          ]
+        },
+        {
+          "id": "dolp-full",
+          "label": "DoLP 完整版",
+          "bootName": "Ray Art Mod(for DoLP)",
+          "assetSeries": "Ray.Art.Mod.for.DoLP",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod.for.DoLP.1.6.0.mod.zip",
+              "sha256": "76b8852166094efdc205b559b89bb35bbb50c725fcc157418296ddac26938e43",
+              "version": "1.6.0"
+            }
+          ]
+        },
+        {
+          "id": "dolp-lite",
+          "label": "DoLP 轻量版",
+          "bootName": "Ray Art Mod(for DoLP)",
+          "assetSeries": "Ray.Art.Mod.for.DoLP._light",
+          "exclusive": true,
+          "verifiedAssets": [
+            {
+              "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod.for.DoLP._light_1.6.0.mod.zip",
+              "sha256": "0fb81cb305b415eaced0a46f8b13a8778a4122871924e9576775fd5e05049fc2",
+              "version": "1.6.0"
+            }
+          ]
+        }
+      ],
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_ZH.mod.zip",
+          "sha256": "2c65e88663b5ca2719eab0929b3ad997304cf082d8fe74d882fed2f79397faf9",
+          "version": "1.6.0",
+          "bootName": "Ray美化",
+          "size": 90274082,
+          "verifiedAt": "2026-10-29T03:40:50.000Z"
+        },
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_light_ZH.mod.zip",
+          "sha256": "0abb2eda750dc504eb2270d5564ad309fb84a84c82852ef3205f59e21914f9ee",
+          "version": "1.6.0",
+          "bootName": "Ray美化",
+          "size": 33897127,
+          "verifiedAt": "2026-10-29T03:40:50.000Z"
+        },
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_EN.mod.zip",
+          "sha256": "af060cac1cca2cf324d388ad2374bfaa2b44494b28919e0f3629f7823c7129c2",
+          "version": "1.6.0",
+          "bootName": "Ray Art Mod",
+          "size": 90273314,
+          "verifiedAt": "2026-10-29T03:40:50.000Z"
+        },
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod1.6.0_light_EN.mod.zip",
+          "sha256": "151b92bd4026a6a4d110b056b1a4ce8a611a0fac9d50bb8dbfae4ff0028844b4",
+          "version": "1.6.0",
+          "bootName": "Ray Art Mod",
+          "size": 33896359,
+          "verifiedAt": "2026-10-29T03:40:50.000Z"
+        },
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod.for.DoLP.1.6.0.mod.zip",
+          "sha256": "76b8852166094efdc205b559b89bb35bbb50c725fcc157418296ddac26938e43",
+          "version": "1.6.0",
+          "bootName": "Ray Art Mod(for DoLP)",
+          "size": 90273768,
+          "verifiedAt": "2026-10-29T03:40:50.000Z"
+        },
+        {
+          "sourceUrl": "https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases/download/1.6.0/Ray.Art.Mod.for.DoLP._light_1.6.0.mod.zip",
+          "sha256": "0fb81cb305b415eaced0a46f8b13a8778a4122871924e9576775fd5e05049fc2",
+          "version": "1.6.0",
+          "bootName": "Ray Art Mod(for DoLP)",
+          "size": 33896813,
+          "verifiedAt": "2026-10-29T03:40:50.000Z"
+        }
       ]
     },
     {

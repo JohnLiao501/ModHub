@@ -10,7 +10,9 @@
     const reason = error => String(error?.message || error || '未提供具体原因');
     const stamp = value => JSON.stringify(value);
     const listStamp = lists => stamp([lists?.ok, lists?.enabled, lists?.disabled]);
-    const bootStamp = boot => stamp(boot || null);
+    // 对象键序不改变声明含义；数组顺序和所有字段仍参与快照。
+    const bootStamp = boot => JSON.stringify(boot || null, (_key, value) => value && typeof value === 'object' && !Array.isArray(value)
+        ? Object.fromEntries(Object.keys(value).sort().map(key => [key, value[key]])) : value);
     const cancelled = signal => { if (signal?.aborted) throw Object.assign(new Error('已取消兼容性检查'), { name: 'AbortError' }); };
     const busy = () => Boolean(window.modHubIsReloadBusy?.() || window._modHubManagerBusy || window._modHubModLoading);
     const yieldToBrowser = async signal => { cancelled(signal); await window.modHubYieldToBrowser?.(); cancelled(signal); };
@@ -348,7 +350,12 @@
             const installed = await packageRecord(item.name, cache, options.signal);
             fingerprints.push({ name: item.name, hash: installed.hash || '', boot: bootStamp(installed.bootJson), missing: Boolean(installed.missing), error: Boolean(installed.error) });
             if (installed.hashError) uncovered(snapshot, item.name, '包体身份', installed.hashError);
-            if (bootStamp(installed.bootJson) !== bootStamp(item.bootJson) || Boolean(installed.missing) !== Boolean(item.missing)) snapshot.stale = true;
+            const changes = [];
+            if (bootStamp(installed.bootJson) !== bootStamp(item.bootJson)) changes.push('安装包声明与本次检查开始时不同。');
+            if (Boolean(installed.missing) !== Boolean(item.missing)) changes.push(installed.missing ? '原有安装包已不存在。' : '原本缺失的安装包现在已存在。');
+            if (Boolean(installed.error) !== Boolean(item.error)) changes.push(installed.error
+                ? '重新读取安装包失败。具体原因：' + reason(installed.error) : '安装包由读取失败变为可读取。原错误：' + reason(item.error));
+            if (changes.length) { snapshot.stale = true; uncovered(snapshot, item.name, '环境变化', changes.join('\n')); }
             await yieldToBrowser(options.signal);
         }
         snapshot.compatibility.fingerprints = fingerprints.map(({ name, hash }) => ({ name, hash }));

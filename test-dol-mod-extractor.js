@@ -186,7 +186,14 @@ async function main() {
   ], catalog).map(mod => mod.identityId), [null, null, null, null, null, 'eu-clothing-addition'],
   '通用名称与共享仓库不能替代维护者指定的语言或项目身份');
   assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-extra-clothes').bootNames, ['RAY额外服装', 'Ray额外服装']);
-  assert.deepEqual(catalog.mods.find(identity => identity.id === 'ray-beautification').bootNames, ['Ray美化']);
+  const ray = catalog.mods.find(identity => identity.id === 'ray-beautification');
+  assert.deepEqual(ray.bootNames, ['Ray美化', 'Ray Art Mod', 'Ray Art Mod(for DoLP)']);
+  assert.equal(ray.releaseTrackingSourceUrl, 'https://github.com/Ray-ray2345/Ray-Art-Mod-Released/releases');
+  assert.deepEqual(ray.packageEditions.map(edition => edition.id), ['zh-full', 'zh-lite', 'en-full', 'en-lite', 'dolp-full', 'dolp-lite']);
+  assert.ok(ray.packageEditions.every(edition => edition.exclusive === true && !edition.bootEdition
+    && edition.verifiedAssets.length === 1 && ray.verifiedReleaseAssets.some(record => record.sourceUrl === edition.verifiedAssets[0].sourceUrl
+      && record.sha256 === edition.verifiedAssets[0].sha256 && record.bootName === edition.bootName && record.version === '1.6.0')),
+  'RAY 语言、分支及轻量包须以各自真实技术名和唯一附件摘要登记，不捏造包内 edition');
   const originalHistoryFetch = globalThis.fetch;
   try {
     const sourceUrl = 'https://github.com/Owner/Repo';

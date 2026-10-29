@@ -3677,3 +3677,37 @@ button.modhub-btn-primary:active,
     scroll-margin-bottom: 16px;
 }
 .modhub-assist-notice.red { border-left-color: var(--red); }
+
+/* 迁移清单独立滚动，保留标题、说明与底部操作。 */
+.modhub-migration-dialog { width: 100%; max-width: 760px; min-width: 0; box-sizing: border-box; }
+.modhub-migration-dialog .modhub-modal-body { min-height: 0; overflow-wrap: anywhere; }
+.modhub-migration-list { max-height: min(46vh, 440px); min-width: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 0 6px 8px 0; }
+.modhub-migration-row { min-width: 0; padding: 10px 0; border-bottom: 1px solid var(--700); overflow-wrap: anywhere; }
+.modhub-migration-row:last-child { border-bottom: 0; }
+.modhub-migration-meta, .modhub-migration-detail { margin: 4px 0; font-size: .9em; overflow-wrap: anywhere; }
+.modhub-migration-meta { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 12px; }
+.modhub-migration-row > label { display: flex; align-items: center; gap: 8px; min-height: 32px; }
+.modhub-migration-row > label > input { flex-shrink: 0; }
+.modhub-migration-actions { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.modhub-migration-actions > button, .modhub-migration-dialog .modhub-modal-footer > button { min-width: 0; min-height: 32px; flex: 1 1 140px; white-space: normal; overflow-wrap: anywhere; }
+.modhub-migration-row select { box-sizing: border-box; max-width: 100%; min-width: 0; min-height: 32px; }
+.modhub-migration-list:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
+.modhub-migration-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; min-width: 0; }
+.modhub-migration-toolbar > label { display: flex; flex: 1 1 104px; flex-direction: column; min-width: 0; gap: 4px; }
+.modhub-migration-toolbar > label:first-child { flex: 2 1 160px; }
+.modhub-migration-toolbar input, .modhub-migration-toolbar select { width: 100%; min-width: 0; min-height: 32px; box-sizing: border-box; font: inherit; background: var(--850); color: var(--100); border: 1px solid var(--600); }
+.modhub-migration-preview .modhub-modal-body, .modhub-migration-preview .modhub-modal-message { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.modhub-migration-preview .modhub-modal-message { flex: 1 1 auto; }
+.modhub-migration-preview .modhub-modal-message > :not(.modhub-migration-list) { flex-shrink: 0; }
+.modhub-migration-preview .modhub-modal-message > p:first-child { margin: 0 0 8px; }
+.modhub-migration-preview .modhub-migration-list { flex: 1 1 auto; min-height: 64px; }
+@media (max-width: 768px) {
+    .modhub-migration-dialog { max-width: calc(100vw - 32px); max-height: calc(100dvh - 92px - env(safe-area-inset-bottom)); }
+    .modhub-migration-list { max-height: 38vh; }
+    .modhub-migration-row select { width: 100%; font-size: 16px; }
+    .modhub-migration-toolbar input, .modhub-migration-toolbar select { font-size: 16px; }
+}
+@media (max-width: 768px) and (max-height: 740px) {
+    .modhub-migration-preview .modhub-modal-body { padding: 10px 12px; line-height: 1.4; }
+    .modhub-migration-preview .modhub-migration-actions > button { flex: 1 1 0; padding: 4px 6px; line-height: 1.35; }
+}

@@ -475,9 +475,22 @@ button.modhub-button-busy:disabled,
     margin-inline: .75rem !important;
 }
 #customOverlay[data-overlay="modloader"] .modhub-overlay-nav {
-    display: flex; flex: 1 1 auto; align-items: stretch; min-width: 0;
+    display: flex; flex: 1 1 auto; align-items: stretch; min-width: 0; position: relative;
     border-bottom: 1px solid var(--150, #ddd);
 }
+/* 边缘提示只显示仍有隐藏页签的方向，不拦截触摸或覆盖关闭按钮。 */
+#customOverlay[data-overlay="modloader"] .modhub-overlay-nav::before,
+#customOverlay[data-overlay="modloader"] .modhub-overlay-nav::after {
+    content: ''; display: none; position: absolute; top: calc(50% - 6px); z-index: 1; pointer-events: none;
+    border: 6px solid transparent; filter: drop-shadow(0 0 3px var(--900, #111));
+}
+#customOverlay[data-overlay="modloader"] .modhub-overlay-nav.modhub-tabs-hidden-before::before {
+    display: block; left: 0; border-right-color: var(--gold, #d6b365);
+}
+#customOverlay[data-overlay="modloader"] .modhub-overlay-nav.modhub-tabs-hidden-after::after {
+    display: block; right: 40px; border-left-color: var(--gold, #d6b365);
+}
+#customOverlay[data-overlay="modloader"] #overlayTabs:focus-visible { outline: 2px solid var(--gold, #d6b365); outline-offset: -2px; }
 #customOverlay[data-overlay="modloader"] #overlayTabs {
     display: flex !important; flex-wrap: nowrap !important; flex: 1 1 auto !important; min-width: 0 !important;
     width: auto !important; padding-right: 0 !important; border: 0 !important; border-radius: 0 !important;

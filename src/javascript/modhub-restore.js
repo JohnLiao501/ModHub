@@ -1371,6 +1371,11 @@
 
     window.modHubRestore = { createOperation, prepare, finish, withOperation, claim, release, isOperationBlocked, list, showHistory, restore, commitPackageChanges, keepRecoveryOrder: recoveryOrder, isRestoring: () => restoring, getStartupLogs: () => [...startupLogs] };
     Object.assign(window.modHubRestore, { getPanelState, saveConfig, createPoint, deletePoints, setPointProtection, preview, getRecoveryInfo, mountDialog,
+        readBeautyOrder: async () => {
+            const value = await beautyValue(beautyDescriptor(environment()));
+            validateBeauty(value);
+            return value.hasValue ? parseNames(value.value) : null;
+        },
         getStorageIdentity: () => { const { dbName, storeName } = environment(); return { dbName, storeName }; } });
     window.modHubKeepRecoveryOrder = window.modHubKeepRecoveryOrder || recoveryOrder;
     window.addEventListener?.('modhub:languagechange', syncStartupUi);

@@ -19,7 +19,9 @@
     // 原生依赖索引按原文匹配技术名与 alias，不能套用市场的名称规范化。
     const namesOf = boot => [boot?.name, ...(Array.isArray(boot?.alias) ? boot.alias : [])]
         .filter(name => typeof name === 'string' && name.length);
-    const bootStamp = boot => JSON.stringify([boot?.name, boot?.version, boot?.alias, boot?.dependenceInfo, boot?.addonPlugin, boot?.replacePatchList]);
+    const bootStamp = boot => JSON.stringify([boot?.name, boot?.version, boot?.alias, boot?.dependenceInfo, boot?.addonPlugin, boot?.replacePatchList],
+        (_, value) => value && typeof value === 'object' && !Array.isArray(value)
+            ? Object.fromEntries(Object.keys(value).sort().map(name => [name, value[name]])) : value);
     const listStamp = lists => JSON.stringify([lists.ok, lists.enabled, lists.disabled]);
     const packageStamp = packages => JSON.stringify(packages.map(item => [item.name, item.missing, detail(item.error), bootStamp(item.bootJson)]));
     const escape = value => window.modHubEscapeHtml(String(value ?? ''));
@@ -264,8 +266,26 @@
             const afterPackages = after.ok && listStamp(after) === listStamp(snapshot.lists) ? await readPackages(after, options.signal) : [];
             snapshot.stale = (!options.allowBusy && busy()) || revision !== window._modHubReloadRevision
                 || listStamp(after) !== listStamp(snapshot.lists) || packageStamp(afterPackages) !== packageStamp(snapshot.packages);
-            if (snapshot.stale) addIssue(snapshot, 'stale', 'review', '检查期间配置发生变化',
-                '本次检查结果已过期。', '请等待模组操作完成，然后重新检查。');
+            if (snapshot.stale) {
+                const reasons = [];
+                if (!options.allowBusy && busy()) reasons.push('检查时有另一项模组操作正在进行。');
+                if (revision !== window._modHubReloadRevision) reasons.push('检查期间模组操作记录已改变。');
+                if (!after.ok) reasons.push('读取检查结束时的启禁列表失败：' + detail(after.error));
+                if (JSON.stringify(after.enabled) !== JSON.stringify(snapshot.lists.enabled)) reasons.push('启用列表或加载顺序已改变。');
+                if (JSON.stringify(after.disabled) !== JSON.stringify(snapshot.lists.disabled)) reasons.push('禁用列表或加载顺序已改变。');
+                if (listStamp(after) === listStamp(snapshot.lists)) {
+                    for (const [index, item] of snapshot.packages.entries()) {
+                        const current = afterPackages[index];
+                        if (packageStamp([item]) !== packageStamp(current ? [current] : [])) {
+                            reasons.push('已安装模组的声明或读取结果已改变：【' + item.name + '】。');
+                            if (item.error) reasons.push(detail(item.error));
+                            if (current?.error) reasons.push(detail(current.error));
+                        }
+                    }
+                }
+                addIssue(snapshot, 'stale', 'review', '检查期间配置发生变化',
+                    ['本次检查结果已过期。', ...new Set(reasons)].join('\n'), '请等待模组操作完成，然后重新检查。');
+            }
         } catch (error) {
             if (error?.name === 'AbortError') throw error;
             addIssue(snapshot, 'read-failed', 'review', '检查未能完成', detail(error), '请处理上述原因后重新检查；已读取的日志仍可查看。');

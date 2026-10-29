@@ -291,10 +291,23 @@ const MODHUB_ERROR_PATTERNS = [
     },
     {
         id: 'storage-quota',
-        title: '本地存储空间超限 (QuotaExceeded)',
-        keywords: ['quotaexceedederror', 'indexeddb', 'storage quota', 'database error'],
-        desc: '旁加载模组数据超出了浏览器 IndexedDB 存储配额上限。',
-        solution: '建议：在模组管理中删除未使用的大型旁加载模组，或改用独立微端运行游戏。'
+        keywords: ['quotaexceedederror', 'indexeddb', 'localstorage', 'storage', 'database', 'versionerror'],
+        resolve: line => {
+            const quotaError = /\bquotaexceedederror\b/i.test(line);
+            const storageContext = /\b(?:indexeddb|localstorage|storage|database)\b/i.test(line);
+            if (!quotaError && !storageContext && !/\bversionerror\b/i.test(line)) return null;
+            return quotaError || (storageContext && /\bquota\s+(?:has\s+been\s+)?exceeded\b/i.test(line)) ? {
+                id: 'storage-quota',
+                title: '本地存储空间超限 (QuotaExceeded)',
+                desc: '旁加载模组数据超出了浏览器 IndexedDB 存储配额上限。',
+                solution: '建议：在模组管理中删除未使用的大型旁加载模组，或改用独立微端运行游戏。'
+            } : {
+                id: 'storage-access',
+                title: '本地存储访问失败',
+                desc: '浏览器本地存储访问失败，可能与连接状态、数据库版本或存储权限有关。具体原因请查看错误详情。',
+                solution: '建议：1. 先保存游戏进度，再关闭其他游戏页面并重新进入；2. 检查浏览器是否允许此页面使用本地存储；3. 若仍有异常，保留错误原文并获取帮助。'
+            };
+        }
     },
     {
         id: 'asset-missing',

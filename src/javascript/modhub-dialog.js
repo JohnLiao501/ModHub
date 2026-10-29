@@ -125,6 +125,7 @@ window.modHubShowToast = function(message, type = '', duration = 2500) {
  */
 // 活动模态弹窗栈，支持多层弹窗平滑嵌套与层级递增，彻底杜绝子弹窗破坏父弹窗 DOM
 const modHubModalStack = [];
+let modHubModalSequence = 0;
 
 window.modHubConfirm = function(options) {
     window.modHubEnsureStyles?.({ active: true });
@@ -171,7 +172,9 @@ window.modHubConfirm = function(options) {
     }
 
     return new Promise((resolve) => {
+        const previousFocus = document.activeElement;
         const stackLevel = modHubModalStack.length;
+        const titleId = `modHubConfirmTitle_${++modHubModalSequence}`;
         const overlay = document.createElement('div');
         overlay.id = stackLevel === 0 ? 'modHubConfirmOverlay' : `modHubConfirmOverlay_${stackLevel}`;
         overlay.className = 'modhub-modal-backdrop';
@@ -181,6 +184,8 @@ window.modHubConfirm = function(options) {
         dialog.className = `modhub-modal-dialog${dialogClass ? ` ${dialogClass}` : ''}`;
         dialog.setAttribute('role', 'dialog');
         dialog.setAttribute('aria-modal', 'true');
+        dialog.setAttribute('aria-labelledby', titleId);
+        dialog.tabIndex = -1;
 
         const messageHtml = trustedMessageHtml || window.modHubEscapeHtml(window.modHubT?.(message) || message).replace(/\n/g, '<br>');
         const selectHtml = selectOptions.length ? `
@@ -198,7 +203,7 @@ window.modHubConfirm = function(options) {
 
         dialog.innerHTML = `
             <div class="modhub-modal-header">
-                <span class="${isDanger ? 'red' : 'gold'} modhub-modal-title">${window.modHubEscapeHtml(title)}</span>
+                <span id="${titleId}" class="${isDanger ? 'red' : 'gold'} modhub-modal-title">${window.modHubEscapeHtml(title)}</span>
                 <button type="button" class="modhub-modal-close" aria-label="关闭">&times;</button>
             </div>
             <div class="modhub-modal-body" tabindex="0" role="region" aria-label="提示内容">
@@ -267,16 +272,22 @@ window.modHubConfirm = function(options) {
             syncConfirmState();
         };
 
-        if (typeof onRender === 'function') {
-            try {
-                onRender(dialog);
-                window.modHubLocalizeOwned?.(dialog);
-            } catch (err) {
-                console.warn('[modHubConfirm] onRender 执行异常:', err);
-            }
-        }
-
         let resolved = false;
+        const contains = node => node === dialog || dialog.contains?.(node) || node?.closest?.('.modhub-modal-dialog') === dialog;
+        const available = node => node && node.isConnected !== false && !node.disabled && !node.hidden
+            && !node.matches?.(':disabled') && !node.closest?.('[inert], [hidden]') && node.getClientRects?.().length !== 0
+            && !['hidden', 'collapse'].includes(window.getComputedStyle?.(node)?.visibility);
+        const focusable = () => Array.from(dialog.querySelectorAll('button, input, select, textarea, summary, a[href], [contenteditable="true"], [tabindex]'))
+            .filter(node => available(node) && node.tabIndex !== -1);
+        const focus = preferred => {
+            const controls = focusable();
+            const target = contains(preferred) && available(preferred) ? preferred
+                : available(confirmBtn) ? confirmBtn : controls.find(node => node.classList.contains('modhub-modal-btn-cancel')) || controls[0] || dialog;
+            target.focus?.();
+        };
+        const keepFocus = event => {
+            if (modHubModalStack.at(-1) === modalEntry && !contains(event.target)) focus();
+        };
 
         const getConfirmResult = () => {
             if (typeof customResult === 'function') {
@@ -288,6 +299,7 @@ window.modHubConfirm = function(options) {
         const closeWith = (result) => {
             if (resolved) return;
             resolved = true;
+            const wasActive = modHubModalStack.at(-1) === modalEntry;
             if (delayTimer) {
                 clearInterval(delayTimer);
                 delayTimer = null;
@@ -299,8 +311,16 @@ window.modHubConfirm = function(options) {
 
             if (typeof document.removeEventListener === 'function') {
                 document.removeEventListener('keydown', handleKeydown);
+                document.removeEventListener('focusin', keepFocus);
             }
             overlay.classList.add('modhub-modal-closing');
+            overlay.inert = true;
+            if (wasActive) {
+                const parent = modHubModalStack.at(-1);
+                if (parent) parent.focus(previousFocus);
+                else if (available(previousFocus)) previousFocus.focus?.();
+                else document.querySelector?.('.modhub-restore-panel')?.focus?.();
+            }
             setTimeout(() => {
                 if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
                 window.modHubRefreshLanguageSelectors?.();
@@ -315,9 +335,16 @@ window.modHubConfirm = function(options) {
             if (e.key === 'Escape') {
                 e.preventDefault();
                 closeWith(false);
+            } else if (e.key === 'Tab') {
+                const controls = focusable(), first = controls[0], last = controls.at(-1);
+                if (!first) { e.preventDefault(); dialog.focus(); }
+                else if (!controls.includes(document.activeElement)) { e.preventDefault(); (e.shiftKey ? last : first).focus(); }
+                else if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+                else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
             } else if (e.key === 'Enter') {
-                if (e.defaultPrevented || (e.target?.closest?.('button, a, input, select, textarea, summary, [contenteditable="true"]')
-                    && e.target.closest('.modhub-modal-dialog') === dialog)) return;
+                if (e.defaultPrevented) return;
+                if (!contains(e.target || document.activeElement)) { e.preventDefault(); focus(); return; }
+                if (e.target?.closest?.('button, a, input, select, textarea, summary, [contenteditable="true"]')) return;
                 e.preventDefault();
                 if (canConfirm()) closeWith(getConfirmResult());
             }
@@ -326,6 +353,7 @@ window.modHubConfirm = function(options) {
         const modalEntry = {
             overlay,
             dialog,
+            focus,
             closeWith
         };
         modHubModalStack.push(modalEntry);
@@ -333,6 +361,7 @@ window.modHubConfirm = function(options) {
 
         if (typeof document.addEventListener === 'function') {
             document.addEventListener('keydown', handleKeydown);
+            document.addEventListener('focusin', keepFocus);
         }
 
         dialog.querySelector('.modhub-modal-close')?.addEventListener('click', () => closeWith(false));
@@ -341,7 +370,6 @@ window.modHubConfirm = function(options) {
             if (canConfirm()) closeWith(getConfirmResult());
         });
         select?.addEventListener('change', syncConfirmState);
-        syncConfirmState();
 
         overlay.addEventListener('click', (e) => {
             if (e.target === overlay) {
@@ -349,14 +377,16 @@ window.modHubConfirm = function(options) {
             }
         });
 
-        if (confirmBtn && !confirmBtn.disabled && !isDelaying && typeof confirmBtn.focus === 'function') {
-            confirmBtn.focus();
-        } else {
-            const cancelBtn = dialog.querySelector('.modhub-modal-btn-cancel');
-            if (cancelBtn && typeof cancelBtn.focus === 'function') {
-                cancelBtn.focus();
+        if (typeof onRender === 'function') {
+            try {
+                onRender(dialog);
+                window.modHubLocalizeOwned?.(dialog);
+            } catch (err) {
+                console.warn('[modHubConfirm] onRender 执行异常:', err);
             }
         }
+        syncConfirmState();
+        if (modHubModalStack.at(-1) === modalEntry) focus();
     });
 };
 

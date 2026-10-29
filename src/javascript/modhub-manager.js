@@ -216,6 +216,7 @@ window.modHubIsCloseButton = function(elementOrText) {
 };
 
 // 模组管理器顶栏初始化，保留原生移动关闭选项对应的页签索引。
+let modHubTabScrollCleanup;
 window.modHubInitOverlayTabs = function() {
     window.modHubEnsureStyles?.({ active: true });
     window.modHubBindReloadReminder();
@@ -228,6 +229,38 @@ window.modHubInitOverlayTabs = function() {
     window.modHubLocalizeOwned?.(title || tabRoot);
     window.modHubRefreshLanguageSelectors?.();
     window.modHubUpdateMarketTabBadge();
+    modHubTabScrollCleanup?.();
+    modHubTabScrollCleanup = null;
+    const nav = tabRoot?.closest?.('.modhub-overlay-nav');
+    if (nav) {
+        const updateScrollHints = () => {
+            const maximum = Math.max(0, tabRoot.scrollWidth - tabRoot.clientWidth);
+            const position = Math.max(0, Math.min(maximum, tabRoot.scrollLeft));
+            const overflowing = tabRoot.clientWidth > 0 && maximum > 1;
+            nav.classList.toggle('modhub-tabs-hidden-before', overflowing && position > 1);
+            nav.classList.toggle('modhub-tabs-hidden-after', overflowing && maximum - position > 1);
+            if (overflowing) {
+                tabRoot.tabIndex = 0;
+                tabRoot.setAttribute('role', 'region');
+                tabRoot.setAttribute('aria-label', window.modHubT?.('模组功能页签，可左右滚动查看更多') || '模组功能页签，可左右滚动查看更多');
+            } else {
+                ['tabindex', 'role', 'aria-label'].forEach(name => tabRoot.removeAttribute(name));
+            }
+        };
+        const observer = typeof window.ResizeObserver === 'function' ? new window.ResizeObserver(updateScrollHints) : null;
+        observer?.observe(tabRoot);
+        for (const button of tabRoot.querySelectorAll('button')) observer?.observe(button);
+        tabRoot.addEventListener('scroll', updateScrollHints, { passive: true });
+        window.addEventListener('resize', updateScrollHints);
+        window.addEventListener('modhub:languagechange', updateScrollHints);
+        modHubTabScrollCleanup = () => {
+            observer?.disconnect();
+            tabRoot.removeEventListener('scroll', updateScrollHints);
+            window.removeEventListener('resize', updateScrollHints);
+            window.removeEventListener('modhub:languagechange', updateScrollHints);
+        };
+        updateScrollHints();
+    }
     if (typeof $ === 'undefined') return;
     var tabs = $("#overlayTabs.modhub-modloader-tabs");
     if (!tabs.length) return;
@@ -1364,7 +1397,7 @@ window.modHubTriggerImport = function() {
 
 window.modHubFormatReloadMessage = function(message) {
     return window.modHubEscapeHtml(message)
-        .replace(/((?:模组|核心框架)【)([^】]+)】/g, '$1<strong class="gold">$2</strong>】')
+        .replace(/((?:模组|核心框架)【)([^】]+)】/g, '$1<strong class="gold" data-modhub-i18n-ignore>$2</strong>】')
         .replace('重新载入可能丢失尚未存档的游戏进度，请先存档。', '重新载入<strong class="red">可能丢失尚未存档的游戏进度</strong>，<strong class="gold" style="white-space: nowrap;">请先存档</strong>。')
         .replace(/\n/g, '<br>');
 };
@@ -1387,6 +1420,10 @@ async function modHubCommitImportedPackages(files, options, context) {
     const key = name => name.toLowerCase();
     const preserveDisabled = readNames(options.preserveDisabledNames);
     if (preserveDisabled.some(name => !disabled.some(item => key(item) === key(name)))) throw new Error('附加项的禁用状态已改变，请重新生成安装计划');
+    const desiredEnabled = options.desiredEnabled ?? {};
+    if (!desiredEnabled || typeof desiredEnabled !== 'object' || Array.isArray(desiredEnabled)
+        || Object.values(desiredEnabled).some(value => typeof value !== 'boolean')) throw new Error('迁移启禁配置格式无效');
+    const stateNames = readNames(Object.keys(desiredEnabled));
     const switchGroup = options.switchGroup;
     const guardedPackages = [];
     let targetName = '', disabledNames = [];
@@ -1425,20 +1462,32 @@ async function modHubCommitImportedPackages(files, options, context) {
         packages.push({ name, data, ...(previous.missing ? {} : { expectedData: previous.data }) });
         boots.push(boot);
     }
+    for (const name of stateNames) {
+        if (packages.some(item => item.name === name)) continue;
+        if (![...enabled, ...disabled].includes(name)) throw new Error(`迁移配置包含未安装的模组【${name}】`);
+        const installed = await window.modHubReadInstalledModPackage(name);
+        if (installed.error || installed.missing || installed.bootJson?.name !== name) throw installed.error || new Error(`无法核验迁移模组【${name}】`);
+        if (!guardedPackages.some(item => item.name === name)) guardedPackages.push({ name, expectedData: installed.data });
+        if (!boots.some(boot => boot.name === name)) boots.push(installed.bootJson);
+    }
+    if (preserveDisabled.some(name => desiredEnabled[name] === true)
+        || targetName && desiredEnabled[targetName] === false) throw new Error('迁移启禁状态与所选安装分支冲突，请重新核对');
     if (targetName && !packages.some(item => key(item.name) === key(targetName))) {
         const target = await window.modHubReadInstalledModPackage(targetName);
         if (target.error || target.missing || ![...enabled, ...disabled].some(name => key(name) === key(targetName))) {
             throw new Error('所选切换分支没有已核验的安装包');
         }
     }
-    const toDisable = new Set([...preserveDisabled, ...disabledNames].map(key));
+    const desiredDisabled = stateNames.filter(name => desiredEnabled[name] === false);
+    const toDisable = new Set([...preserveDisabled, ...disabledNames, ...desiredDisabled].map(key));
     const nextEnabled = window.modHubKeepRecoveryOrder(window.modHubUniqueModNames([
         ...enabled.filter(name => !toDisable.has(key(name))),
         ...packages.map(item => item.name).filter(name => !toDisable.has(key(name))),
+        ...stateNames.filter(name => desiredEnabled[name]),
         ...(targetName ? [targetName] : [])
     ]), boots.map(bootJson => ({ name: bootJson.name, bootJson })));
     const enabledKeys = new Set(nextEnabled.map(key));
-    const nextDisabled = window.modHubUniqueModNames([...disabled, ...disabledNames, ...preserveDisabled])
+    const nextDisabled = window.modHubUniqueModNames([...disabled, ...disabledNames, ...preserveDisabled, ...desiredDisabled])
         .filter(name => !enabledKeys.has(key(name)));
     try {
         await restore.commitPackageChanges({ context, packages, guardedPackages, expectedEnabled: enabled, expectedDisabled: disabled,
@@ -1449,7 +1498,7 @@ async function modHubCommitImportedPackages(files, options, context) {
     }
     boots.forEach(bootJson => window._modHubDisabledModInfo.set(key(bootJson.name), { name: bootJson.name, bootJson }));
     window.modHubMarket?.invalidateLocalPackageProfiles?.();
-    return window.modHubUniqueModNames([...packages.map(item => item.name), ...(targetName ? [targetName] : [])]);
+    return window.modHubUniqueModNames([...packages.map(item => item.name), ...stateNames, ...(targetName ? [targetName] : [])]);
 }
 
 window.modHubHandleAddMod = async function(fileInput, options = {}) {
@@ -1461,7 +1510,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
     const files = Array.isArray(fileInput)
         ? fileInput
         : Array.from(fileInput?.files || (Array.isArray(fileInput?.files) ? fileInput.files : []));
-    if ((!files || files.length === 0) && !options.atomicPackageChanges?.switchGroup) return;
+    if ((!files || files.length === 0) && !options.atomicPackageChanges?.switchGroup && !Object.keys(options.atomicPackageChanges?.desiredEnabled || {}).length) return;
 
     const fileCount = files.length;
     const isBatch = fileCount > 1;
@@ -2017,6 +2066,7 @@ window.initModManage = async function(refresh = false) {
             }
             // 美化自动启用也可能写入配置，初始化期间同样禁止交错操作。
             window._modHubManagerBusy = true;
+            await window.modHubMigration?.loadTask?.();
             await window.modHubLoadBeautyState();
             window._modHubManagerStateUncertain = false;
             if (refresh) {
@@ -2046,7 +2096,8 @@ window.initModManage = async function(refresh = false) {
 
 const MODHUB_MANAGER_TOOLS = [
     { id: 'modHubCompatibilityBtn', label: '兼容性检查', title: '检查已安装模组的依赖和兼容性', action: "window.modHubCompatibility?.show?.() || window.modHubAlert('兼容性检查尚未就绪，请等待模组加载完成后重试。')" },
-    { id: 'modHubRestorePointsBtn', label: '时间点还原', title: '查看和还原已保存的模组状态', action: 'window.modHubRestore.showHistory()' }
+    { id: 'modHubRestorePointsBtn', label: '时间点还原', title: '查看和还原已保存的模组状态', action: 'window.modHubRestore.showHistory()' },
+    { id: 'modHubMigrationBtn', label: '模组迁移', title: '导出模组清单或在新游戏中重建模组环境', action: "window.modHubMigration?.open?.() || window.modHubAlert('模组迁移尚未就绪，请等待模组加载完成后重试。')" }
 ];
 
 function modHubReadPinnedManagerTools() {

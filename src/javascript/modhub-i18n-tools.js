@@ -1780,6 +1780,18 @@ window.modHubRegisterTranslations?.({
         "建議：在模組管理中刪除未使用的大型旁加載模組，或改用獨立微端運行游戲。",
         "Remove unused large sideloaded mods in the mod manager, or use a standalone game client."
     ],
+    "本地存储访问失败": [
+        "本地儲存存取失敗",
+        "Local storage access failed"
+    ],
+    "浏览器本地存储访问失败，可能与连接状态、数据库版本或存储权限有关。具体原因请查看错误详情。": [
+        "瀏覽器本地儲存存取失敗，可能與連線狀態、資料庫版本或儲存權限有關。具體原因請查看錯誤詳情。",
+        "The browser could not access local storage. This may involve the connection state, database version, or storage permissions. See the error details for the specific cause."
+    ],
+    "建议：1. 先保存游戏进度，再关闭其他游戏页面并重新进入；2. 检查浏览器是否允许此页面使用本地存储；3. 若仍有异常，保留错误原文并获取帮助。": [
+        "建議：1. 先儲存遊戲進度，再關閉其他遊戲頁面並重新進入；2. 檢查瀏覽器是否允許此頁面使用本地儲存；3. 若仍有異常，保留錯誤原文並取得協助。",
+        "Suggested checks: 1. Save your game progress before closing other game pages and reopening the game. 2. Check that the browser allows this page to use local storage. 3. If the problem continues, keep the original error and get help."
+    ],
     "图片或多媒体资源加载失败": [
         "圖片或多媒體資源加載失敗",
         "Image or media resource failed to load"
@@ -1851,6 +1863,10 @@ window.modHubRegisterTranslations?.({
     "【本地存储空间超限 (QuotaExceeded)】": [
         "【本地存儲空間超限 (QuotaExceeded)】",
         "[Local storage quota exceeded]"
+    ],
+    "【本地存储访问失败】": [
+        "【本地儲存存取失敗】",
+        "[Local storage access failed]"
     ],
     "【图片或多媒体资源加载失败】": [
         "【圖片或多媒體資源加載失敗】",

@@ -1,6 +1,6 @@
 {
   "name": "ModHub",
-  "version": "1.8.3",
+  "version": "1.9.0",
   "nickName": {
     "zh-CN": "模组管理器与市场套件",
     "zh-TW": "模組管理器與市場套件",
@@ -19,6 +19,7 @@
     "javascript/modhub-i18n-market.js",
     "javascript/modhub-i18n-help.js",
     "javascript/modhub-i18n-tools.js",
+    "javascript/modhub-i18n-migration.js",
     "javascript/modhub-dialog.js",
     "javascript/modhub-restore-panel.js",
     "javascript/modhub-restore.js"
@@ -36,6 +37,7 @@
     "javascript/modhub-market-spells.js",
     "javascript/modhub-market-versions.js",
     "javascript/modhub-market-install.js",
+    "javascript/modhub-migration.js",
     "javascript/modhub-ai-package.js",
     "vendor/json5/index.min.js",
     "javascript/modhub-compat.js",

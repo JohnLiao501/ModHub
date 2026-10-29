@@ -1,5 +1,11 @@
 /** ModHub 管理器与公共界面语言包。 */
 window.modHubRegisterTranslations({
+  // 品牌名保持原文，避免被下载线路译文反向识别。
+  "ModHub": ["ModHub", "ModHub"],
+  "模组功能页签，可左右滚动查看更多": [
+    "模組功能頁籤，可左右捲動查看更多",
+    "Mod tabs. Scroll left or right to see more."
+  ],
   "模组管理": [
     "模組管理",
     "Mod management"

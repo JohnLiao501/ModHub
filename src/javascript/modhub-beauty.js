@@ -37,7 +37,7 @@ window.modHubToggleAutoBeautySetting = async function(checked) {
 };
 
 window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames = []) {
-    if (window.modHubRestore?.isRestoring?.()) syncAuto = false;
+    if (window.modHubRestore?.isRestoring?.() || window.modHubMigration?.isBeautyPending?.()) syncAuto = false;
     modHubBindBeautyImageGuard();
     const bAddon = window.addonBeautySelectorAddon;
     if (!bAddon || typeof bAddon.getTypeOrder !== 'function') {
@@ -144,6 +144,7 @@ window.modHubRenderBeautyUI = function() {
     const autoBeautyEnabled = window.modHubIsAutoBeautyEnabled();
 
     let html = `
+        ${window.modHubMigration?.isBeautyPending?.() ? '<div class="childItem grey modhub-hint-bar">模组迁移尚未结束，美化自动同步已暂停，以保留待恢复的选择。请在【更多工具 → 模组迁移】中继续或结束任务，之后恢复自动同步。</div>' : ''}
         <div class="childItem modhub-section modhub-beauty-auto-box">
             <label class="modhub-checkbox-label">
                 <input type="checkbox" id="toggleAutoBeauty" class="macro-checkbox" ${autoBeautyEnabled ? 'checked' : ''} onchange="window.modHubToggleAutoBeautySetting(this.checked)" />

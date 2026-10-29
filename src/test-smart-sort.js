@@ -49,10 +49,13 @@ process.on('beforeExit', () => {
     await require('../tests/market-description-dependencies.test')();
     await require('../tests/market-version-install.test')();
     await require('../tests/market-batch-progress.test')();
+    await require('../tests/migration-install.test')();
+    await require('../tests/migration.test')();
+    await require('../tests/migration-integration.test')();
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.8.3 全部测试通过');
+    console.log('ModHub v1.9.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

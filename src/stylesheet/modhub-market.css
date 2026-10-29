@@ -1147,17 +1147,7 @@
 
 .modhub-market-meta > span { min-width: 0; }
 
-.modhub-market-addon-summary {
-    margin: 12px 0;
-    padding-top: 10px;
-    border-top: 1px solid var(--600, #555);
-}
-
-.modhub-market-addon-item {
-    overflow-wrap: anywhere;
-}
-
-.modhub-market-addon-summary .btn-market-addons {
+.modhub-market-actions .btn-market-addons {
     min-height: 32px;
     flex-shrink: 0;
 }
@@ -2099,7 +2089,7 @@
     min-width: 0;
 }
 .modhub-version-batch-row > label > strong { overflow-wrap: anywhere; }
-.modhub-version-batch-row > .modhub-version-optional { display: block; cursor: default; }
+div.modhub-version-optional { display: block; cursor: default; }
 .modhub-version-optional-label { display: flex; align-items: center; gap: 10px; min-width: 0; min-height: 32px; cursor: pointer; }
 .modhub-version-optional-label > input { flex: 0 0 16px; width: 16px; min-width: 16px; margin: 0; accent-color: var(--gold, #d4af37); }
 .modhub-version-optional-label > strong { min-width: 0; overflow-wrap: anywhere; font-size: 0.9em; }
@@ -2111,8 +2101,6 @@
 .modhub-version-unresolved { display: grid; gap: 6px; min-width: 0; }
 .modhub-version-unresolved-choice { padding: 8px 10px; overflow-wrap: anywhere; }
 .modhub-version-package-details { min-width: 0; font-size: 0.85em; color: var(--400, #aaa); }
-.modhub-version-package-details > summary { min-height: 32px; padding: 4px 0; box-sizing: border-box; cursor: pointer; }
-.modhub-version-package-details > summary:focus-visible { outline: 1px solid var(--gold); outline-offset: 2px; }
 .modhub-version-package-details .modhub-version-asset-name { padding: 3px 8px; }
 #modHubInstallPlanPreview { min-width: 0; font-size: 0.9em; overflow-wrap: anywhere; }
 #modHubInstallPlanPreview > :first-child { margin-top: 0; }
@@ -2574,6 +2562,46 @@
 .modhub-market-language-choice:focus-visible { outline: 2px solid var(--gold, #d4af37); outline-offset: 2px; }
 .modhub-market-language-choice:disabled { cursor: default; opacity: 0.65; }
 .modhub-market-variant-status { font-size: 0.75em; }
+
+/* 双层包型仅调整排布，沿用原有胶囊外观与选中状态。 */
+.modhub-market-layered-package-card .modhub-market-title-controls {
+    flex-basis: 100%;
+    width: 100%;
+    margin-left: 0;
+    justify-content: flex-start;
+}
+.modhub-market-package-switch {
+    display: grid;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+}
+.modhub-market-package-axis {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+}
+.modhub-market-package-axis-label {
+    color: var(--400, #999);
+    font-size: 0.75em;
+    line-height: 1.4;
+}
+.modhub-market-package-axis > .modhub-market-language-switch {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    box-sizing: border-box;
+}
+.modhub-market-package-axis:first-child > .modhub-market-language-switch {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.modhub-market-package-switch .modhub-market-language-choice {
+    flex-wrap: wrap;
+    align-content: center;
+}
+.modhub-market-package-switch .modhub-market-language-choice > span { min-width: 0; }
+.modhub-market-package-switch .modhub-market-variant-status { flex-shrink: 0; font-size: max(11px, 0.75em); }
+
 .modhub-market-variant-list,
 .modhub-market-variant-row { display: flex; flex: 1 0 auto; flex-direction: column; min-width: 0; min-height: 0; }
 .modhub-market-variant-row { overflow-wrap: anywhere; }

@@ -26,6 +26,10 @@
         "清空搜索输入": ["清空搜索輸入", "Clear search input"],
         "支持多词搜索、拼音全拼、首字母和少量拼写误差；有搜索词时，默认按相关程度优先显示。": ["支持多詞搜索、拼音全拼、首字母和少量拼寫誤差；有搜索詞時，默認按相關程度優先顯示。", "Supports multiple words, pinyin, initials, and minor spelling errors. Search results are ranked by relevance."],
         "刷新市场": ["刷新市場", "Refresh market"],
+        "时间未知": ["時間未知", "Time unknown"],
+        "目录来源：Wiki 直连。获取时间：{time}。": ["目錄來源：Wiki 直連。取得時間：{time}。", "Catalog source: direct Wiki connection. Retrieved: {time}."],
+        "未取得最新目录，正在使用缓存。获取时间：{time}。": ["未取得最新目錄，正在使用快取。取得時間：{time}。", "The latest catalog is unavailable. Using a cached catalog retrieved at {time}."],
+        "已通过 Wiki 载入目录，统一索引暂不可用。": ["已透過 Wiki 載入目錄，統一索引暫不可用。", "Loaded the catalog from the Wiki. The unified index is currently unavailable."],
         "刷新市场，重新获取最新模组目录": ["刷新市場，重新獲取最新模組目錄", "Refresh the market to fetch the latest catalog"],
         "模组分类": ["模組分類", "Mod category"],
         "全部分类": ["全部分類", "All categories"],
@@ -699,6 +703,11 @@
         "根据安装包名称推荐。": ["根據安裝包名稱推薦。", "Recommended based on the package filename."],
         "检查发现需要重新确认的安装内容，请核对后继续。": ["檢查發現需要重新確認的安裝內容，請核對後繼續。", "The checks found installation changes requiring confirmation. Review them before continuing."],
         "检查期间配置或安装包已改变，请重新生成安装计划。": ["檢查期間配置或安裝包已改變，請重新生成安裝計劃。", "Configuration or packages changed during checking. Generate the plan again."],
+        "启用模组名单或顺序不同。": ["啟用模組名單或順序不同。", "The enabled mod list or order differs."],
+        "禁用模组名单或顺序不同。": ["停用模組名單或順序不同。", "The disabled mod list or order differs."],
+        "内存列表：{names}": ["記憶體列表：{names}", "In-memory list: {names}"],
+        "仓库列表：{names}": ["儲存庫列表：{names}", "Stored list: {names}"],
+        "检查结果已过期，但未提供具体原因。请重新核对配置与安装包。": ["檢查結果已過期，但未提供具體原因。請重新核對配置與安裝包。", "The check result is outdated, but no specific reason was provided. Check the configuration and packages again."],
         "检测到多个独立模组或安装变体，请选择需要的安装包": ["檢測到多個獨立模組或安裝變體，請選擇需要的安裝包", "Multiple independent mods or installation variants were found. Choose the package you need"],
         "检测到循环依赖": ["檢測到循環依賴", "Circular dependency detected"],
         "模组": ["模組", "Mod"],
@@ -1345,6 +1354,18 @@
         "仅回溯": ["僅回溯", "History only"],
         "图像版 Visual": ["圖像版 Visual", "Visual"],
         "轻量版 Lite": ["輕量版 Lite", "Lite"],
+        "包体系列": ["模組包系列", "Package series"],
+        "包型": ["模組包類型", "Package type"],
+        "DoL 简体中文": ["DoL 簡體中文", "DoL Simplified Chinese"],
+        "DoL English": ["DoL English", "DoL English"],
+        "完整版": ["完整版", "Full"],
+        "轻量版": ["輕量版", "Lite"],
+        "DoL 简体中文 完整版": ["DoL 簡體中文 完整版", "DoL Simplified Chinese Full"],
+        "DoL 简体中文 轻量版": ["DoL 簡體中文 輕量版", "DoL Simplified Chinese Lite"],
+        "DoL English 完整版": ["DoL English 完整版", "DoL English Full"],
+        "DoL English 轻量版": ["DoL English 輕量版", "DoL English Lite"],
+        "DoLP 完整版": ["DoLP 完整版", "DoLP Full"],
+        "DoLP 轻量版": ["DoLP 輕量版", "DoLP Lite"],
         "下载任务": ["下載任務", "Downloads"],
         "存在未完成项": ["存在未完成項", "Some tasks incomplete"],
         "已结束": ["已結束", "Finished"],
@@ -1392,6 +1413,16 @@
         ["仅回溯", ["僅回溯", "History only"]],
         ["图像版 Visual", ["圖像版 Visual", "Visual"]],
         ["轻量版 Lite", ["輕量版 Lite", "Lite"]],
+        ["DoL 简体中文", ["DoL 簡體中文", "DoL Simplified Chinese"]],
+        ["DoL English", ["DoL English", "DoL English"]],
+        ["完整版", ["完整版", "Full"]],
+        ["轻量版", ["輕量版", "Lite"]],
+        ["DoL 简体中文 完整版", ["DoL 簡體中文 完整版", "DoL Simplified Chinese Full"]],
+        ["DoL 简体中文 轻量版", ["DoL 簡體中文 輕量版", "DoL Simplified Chinese Lite"]],
+        ["DoL English 完整版", ["DoL English 完整版", "DoL English Full"]],
+        ["DoL English 轻量版", ["DoL English 輕量版", "DoL English Lite"]],
+        ["DoLP 完整版", ["DoLP 完整版", "DoLP Full"]],
+        ["DoLP 轻量版", ["DoLP 輕量版", "DoLP Lite"]],
         ["简体中文", ["簡體中文", "Simplified Chinese"]],
         ["繁体中文", ["繁體中文", "Traditional Chinese"]],
         ["中文", ["中文", "Chinese"]],
@@ -3875,6 +3906,10 @@
     cardTranslations.set('随机化', ['隨機化', 'Randomization']);
     cardTranslations.set('炼金', ['煉金', 'Alchemy']);
     cardTranslations.set('科技', ['科技', 'Technology']);
+    cardTranslations.set('人物与服装美化，提供 DoL 简体中文、英文及 DoLP 的完整和轻量包。请选择一种包型，可按需安装额外服装；加密资源请按作者说明解锁。', [
+        '人物與服裝美化，提供 DoL 簡體中文、英文及 DoLP 的完整和輕量包。請選擇一種包型，可按需安裝額外服裝；加密資源請依作者說明解鎖。',
+        'Character and clothing visuals, with Full and Lite packages for DoL in Simplified Chinese or English, and for DoLP. Choose one edition and install extra clothing as needed. Follow the author\'s instructions to unlock encrypted resources.'
+    ]);
 
     window.modHubGetMarketCardText = function (entry, field, locale = window.modHubGetLanguage?.() || 'zh-CN') {
         const source = typeof entry?.[field] === 'string' ? entry[field] : '';
