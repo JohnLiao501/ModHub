@@ -40,12 +40,12 @@
 
 <<widget "modloadermodmanage">>
 	<div id="modHubModManageContainer" class="modhub-container"><<modhubloading "正在读取模组列表…">></div>
-	<<run setTimeout(initModManage, 1)>>
+	<<run setTimeout(() => window.initModManage(), 1)>>
 <</widget>>
 
 <<widget "modloaderreadme">>
 	<div id="modHubReadmeContainer" class="modhub-container"><<modhubloading "正在读取模组说明…">></div>
-	<<run setTimeout(initModReadMe, 1)>>
+	<<run setTimeout(() => window.initModReadMe(), 1)>>
 <</widget>>
 
 <<widget "modloaderlog">>

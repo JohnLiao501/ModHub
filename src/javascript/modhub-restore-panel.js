@@ -119,6 +119,7 @@
 @media(max-width:768px){.modhub-restore-panel-settings{grid-template-columns:1fr}.modhub-restore-panel-footer button{flex:1 1 0;min-width:0}.modhub-restore-panel-manual button,.modhub-restore-panel-actions button{flex:1 1 auto;min-width:0}.modhub-restore-panel-body{padding-left:12px;padding-right:12px}}
 @media(max-width:768px){.modhub-restore-panel-point-fields{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}.modhub-restore-panel-point-fields>span:first-child{grid-column:1/-1}}
 @media(max-width:600px){.modhub-restore-point-actions{grid-template-columns:repeat(2,minmax(0,1fr))}.modhub-restore-point-actions>button:first-child{grid-column:1/-1}.modhub-restore-history-actions button{width:100%}}
+@media(max-width:400px){.modhub-restore-panel-footer .modhub-restore-primary{padding-left:4px;padding-right:4px}}
 @media(max-height:560px){.modhub-restore-panel-header,.modhub-restore-panel-footer{padding:8px 12px}.modhub-restore-panel-body{padding:8px 12px}.modhub-restore-panel p{margin-bottom:8px}.modhub-restore-panel-actions{margin:6px 0}.modhub-restore-panel-notice{margin-top:6px!important}.modhub-restore-panel-status{margin-top:4px}}
 `;
         document.head.appendChild(style);
@@ -469,6 +470,25 @@
                 group.appendChild(names); list.appendChild(group); count++;
             });
             [['orderChanged', '恢复加载顺序'], ['beautyChanged', '恢复美化配置'], ['settingsChanged', '恢复管理配置']].forEach(([key, label]) => { if (changes[key]) { list.appendChild(element('p', label, 'gold')); count++; } });
+            if (preview.orderChanges?.length) {
+                const group = element('section');
+                group.appendChild(element('strong', '启用模组加载顺序对比', 'gold'));
+                group.appendChild(element('p', '仅列出加入、移出或相对顺序改变的模组；序号按完整启用列表计算。', 'grey'));
+                const names = element('ul');
+                preview.orderChanges.forEach(change => {
+                    const item = element('li');
+                    item.appendChild(element('strong', change.name, change.kind === 'added' ? 'green' : change.kind === 'removed' ? 'red' : 'gold', undefined, true));
+                    const position = element('small', undefined, 'grey', undefined, true);
+                    displayBinding(() => {
+                        const message = change.kind === 'added' ? '加入启用序列：还原后第 {target} 位'
+                            : change.kind === 'removed' ? '移出启用序列：当前位置第 {current} 位' : '当前位置：第 {current} 位；还原后：第 {target} 位';
+                        position.textContent = window.modHubT?.(message, { current: change.currentIndex, target: change.targetIndex })
+                            || message.replace('{current}', change.currentIndex).replace('{target}', change.targetIndex);
+                    });
+                    item.appendChild(position); names.appendChild(item);
+                });
+                group.appendChild(names); list.appendChild(group); count++;
+            }
             if (!count && preview.canRestore) list.appendChild(element('p', '目标与当前模组状态一致', 'grey'));
             (preview.riskMessages || []).forEach(risk => list.appendChild(element('p', risk, 'red')));
             body.appendChild(list);

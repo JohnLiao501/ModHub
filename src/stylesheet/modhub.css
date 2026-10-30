@@ -2622,6 +2622,7 @@ button.modhub-btn-primary:active,
     align-items: center;
     justify-content: center;
     padding: 16px;
+    padding-bottom: 60px;
     padding-bottom: calc(60px + env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
     animation: modHubFadeIn 0.15s ease-out forwards;
@@ -2633,6 +2634,7 @@ button.modhub-btn-primary:active,
     min-width: 0;
     max-width: 440px;
     min-height: 0;
+    max-height: calc(100vh - 76px);
     max-height: calc(100vh - 76px - env(safe-area-inset-bottom, 0px));
     max-height: calc(100dvh - 76px - env(safe-area-inset-bottom, 0px));
     box-sizing: border-box;
@@ -2729,6 +2731,29 @@ button.modhub-btn-primary:active,
 .modhub-modal-message {
     color: #ddd;
 }
+
+.modhub-pending-reload-status {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 8px;
+    color: var(--gold, #d4af37);
+}
+.modhub-pending-reload-status[hidden] { display: none; }
+.modhub-pending-reload-status > span { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+.modhub-pending-reload-status > button { flex: 0 0 auto; width: auto; min-width: 0; min-height: 32px; }
+.modhub-reload-changes-dialog { max-width: 680px; }
+.modhub-reload-changes-dialog .modhub-modal-body,
+.modhub-reload-changes-dialog .modhub-modal-message { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+.modhub-reload-changes-dialog .modhub-modal-message { flex: 1 1 auto; }
+.modhub-reload-changes-dialog .modhub-modal-message > p { flex-shrink: 0; margin: 0 0 8px; }
+.modhub-reload-change-list { min-height: 0; max-height: 50vh; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; overflow-wrap: anywhere; }
+.modhub-reload-change-list:focus-visible { outline: 1px solid var(--gold, #d4af37); outline-offset: -2px; }
+.modhub-reload-change-list h3 { margin: 8px 0 4px; font-size: 1em; }
+.modhub-reload-change-list ul { margin: 0; padding-left: 24px; }
+.modhub-reload-change-list li { margin-bottom: 6px; }
+.modhub-reload-change-list li > span { display: block; color: var(--400); }
 
 .modhub-delete-intro {
     margin: 0 0 14px;

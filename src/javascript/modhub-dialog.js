@@ -8,6 +8,25 @@ window.modHubEscapeHtml = function(str) {
         .replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
 };
 
+// 仅共同模组的相对顺序变化算重排，增删造成的序号偏移单独说明。
+window.modHubDescribeOrderChanges = function(before, after) {
+    const previous = new Map(before.map((name, index) => [name, index + 1]));
+    const target = new Map(after.map((name, index) => [name, index + 1]));
+    const shared = new Map(before.filter(name => target.has(name)).map((name, index) => [name, index]));
+    const changes = [];
+    let sharedIndex = 0;
+    for (const name of after) {
+        if (!previous.has(name)) {
+            changes.push({ name, kind: 'added', currentIndex: null, targetIndex: target.get(name) });
+            continue;
+        }
+        if (shared.get(name) !== sharedIndex) changes.push({ name, kind: 'moved', currentIndex: previous.get(name), targetIndex: target.get(name) });
+        sharedIndex++;
+    }
+    for (const name of before) if (!target.has(name)) changes.push({ name, kind: 'removed', currentIndex: previous.get(name), targetIndex: null });
+    return changes;
+};
+
 const MODHUB_PROGRESS_FRAMES = Array.from({ length: 120 }, (_, index) => String.fromCharCode(0xE000 + index)).join('');
 let modHubProgressFontLoading = false;
 

@@ -85,6 +85,7 @@
     const registeredIdentityMetadata = new Map();
     let marketHistoryRefresh = 0;
     const installedPackageRecords = new Map();
+    const verifiedPackageNames = new Set();
     // 仅标记本次读取产生的标准化资料，不缓存身份匹配或安装状态。
     const normalizedLocalProfiles = new WeakSet();
     const downloadedPackageDigests = new Map();
@@ -132,15 +133,6 @@
     // 针对社区个别模组作者打包失误（如 Release 为新版但内部 boot.json 未递增）或 Wiki 录入虚高版本的容错规则库
     const MOD_MARKET_VERSION_RULES = [
         {
-            // 惠特尼剧情扩展: Wiki 词条误录为 v1.0，实际仓库与作者最新发布版为 0.3.1
-            name: '惠特尼剧情扩展',
-            match: (name, repo) => name.includes('惠特尼') || repo === 'whitneyexpansion',
-            isUpToDate: (localVer, remoteVer) => {
-                // 本地只要已安装 >= 0.3.1，即认定为已是最新
-                return compareVersions(localVer, '0.3.1') >= 0;
-            }
-        },
-        {
             // 强势罗宾扩展: Release 0.08 的包内版本实际写作 0.0.8
             name: '强势罗宾扩展',
             match: (name, repo) => name === 'domrobin' || repo === 'degreesoflewdityrobinmod',
@@ -178,19 +170,27 @@
 
     function getConfirmedUpdates() {
         try {
-            return JSON.parse(readStoredValue(CONFIRMED_STORAGE_KEY) || '{}');
+            const saved = JSON.parse(readStoredValue(CONFIRMED_STORAGE_KEY) || '{}');
+            return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
         } catch {
             return {};
         }
     }
 
-    function setModUpdateConfirmed(modName, version) {
-        if (!modName || !version) return;
-        const map = getConfirmedUpdates();
-        map[modName] = version;
+    function setModUpdateConfirmed(bootName, digest, version) {
+        if (!bootName || !version || !/^sha256:[a-f0-9]{64}$/i.test(digest || '')) return;
         try {
-            localStorage.setItem(CONFIRMED_STORAGE_KEY, JSON.stringify(map));
+            localStorage.setItem(CONFIRMED_STORAGE_KEY, JSON.stringify({ ...getConfirmedUpdates(),
+                [bootName]: { bootName, digest: digest.toLowerCase(), version } }));
         } catch (_) {}
+    }
+
+    function getConfirmedUpdate(profile) {
+        if (!profile?.name) return null;
+        const saved = getConfirmedUpdates();
+        const record = Object.hasOwn(saved, profile.name) ? saved[profile.name] : null;
+        return record?.bootName === profile.name && record.bootName === (profile.bootJson?.name || profile.name)
+            && /^sha256:[a-f0-9]{64}$/.test(record.digest || '') && typeof record.version === 'string' && record.version ? record : null;
     }
 
     // 社区知名模组全能中英文别名与关联仓库映射词库（用于 Wiki 词条与本地技术模组精准比对）
@@ -1010,10 +1010,21 @@
         spells: { category: 'all', status: 'all', search: '', sort: 'date' }
     };
     let isLoading = false;
-    const batchInstallState = { selecting: false, selected: new Set(), running: false, preparing: false, progressExpanded: true, progressScrollTop: 0, stopRequested: false, progressPhase: '', current: '', completed: 0, total: 0, items: new Map() };
+    const batchInstallState = { selecting: false, selected: new Set(), running: false, preparing: false, reselectable: false, progressExpanded: true, progressScrollTop: 0, stopRequested: false, progressPhase: '', current: '', completed: 0, total: 0, items: new Map() };
 
     const MODHUB_BATCH_FINISHED = new Set(['success', 'enabled', 'ready', 'error', 'skipped', 'cancelled']);
     const batchEscape = value => window.modHubEscapeHtml(String(value || ''));
+    function batchSelectionIdentity(mod) {
+        return JSON.stringify((mod?.isLanguageGroup ? mod.variants || [] : [mod]).map(member => [getMarketModKey(member),
+            sourceUrlKey(member?.githubUrl || member?.sourceUrl), [...(Array.isArray(member?.bootNames) ? member.bootNames : [])].sort(),
+            member?.variant?.type || '', member?.variant?.groupId || '', member?.variant?.id || '']).sort((a, b) => a[0].localeCompare(b[0])));
+    }
+
+    function batchSelectionSnapshot(mod) {
+        const edition = window.modHubMarketVariants?.normalizePackageEditions(mod?.packageEditions).find(item => item.id === mod._selectedPackageEdition);
+        return { key: getMarketModKey(mod), identity: batchSelectionIdentity(mod),
+            edition: edition ? [edition.id, edition.bootName, edition.bootEdition || '', edition.assetSeries] : null };
+    }
     function batchTargetCounts() {
         const items = [...batchInstallState.items.values()].filter(item => item.role === '目标模组');
         return { total: items.length, finished: items.filter(item => MODHUB_BATCH_FINISHED.has(item.state)).length,
@@ -1025,8 +1036,8 @@
         const state = batchInstallState;
         const openPanel = !state.running && !state.preparing;
         if (openPanel) state.progressExpanded = true;
-        Object.assign(state, { running: true, preparing: false, stopRequested: false, progressPhase: 'preparing', current: '读取可选版本', completed: 0, total: targets.length });
-        state.items = new Map(targets.map(mod => [mod.name, { name: mod.name, key: getMarketModKey(mod), type: updateOnly ? 'update' : 'install', role: '目标模组', state: 'preparing', text: '正在读取可选版本', percent: null }]));
+        Object.assign(state, { running: true, preparing: false, reselectable: !updateOnly && !window.modHubMigration?.isRunning?.(), stopRequested: false, progressPhase: 'preparing', current: '读取可选版本', completed: 0, total: targets.length });
+        state.items = new Map(targets.map(mod => [mod.name, { name: mod.name, key: getMarketModKey(mod), selection: batchSelectionSnapshot(mod), type: updateOnly ? 'update' : 'install', role: '目标模组', state: 'preparing', text: '正在读取可选版本', percent: null }]));
         targets.forEach(mod => resetDownloadProgress(mod.name));
         renderBatchInstallToolbar();
         if (openPanel) setBatchTaskPanelExpanded(true);
@@ -1035,9 +1046,9 @@
     function trackBatchInstallMod(mod, role = '前置模组', type = '') {
         if (!batchInstallState.running) return;
         const previous = batchInstallState.items.get(mod.name);
-        if (previous) { if (type) { previous.type = type; previous.requiresAction = true; } if (role === '目标模组') previous.role = role; return; }
+        if (previous) { if (type) { previous.type = type; previous.requiresAction = true; } if (role === '目标模组') { previous.role = role; previous.selection = batchSelectionSnapshot(mod); } return; }
         if (!activeDownloadControllers.has(mod.name)) resetDownloadProgress(mod.name);
-        batchInstallState.items.set(mod.name, { name: mod.name, key: getMarketModKey(mod), role, type, requiresAction: Boolean(type), state: 'waiting', text: '等待处理', percent: null });
+        batchInstallState.items.set(mod.name, { name: mod.name, key: getMarketModKey(mod), selection: batchSelectionSnapshot(mod), role, type, requiresAction: Boolean(type), state: 'waiting', text: '等待处理', percent: null });
         renderBatchInstallToolbar();
     }
 
@@ -1054,19 +1065,20 @@
                 && (node.requirements || []).every(requirement => satisfiesDependency(node.local.bootJson || node.local, requirement));
             const state = blocked ? old?.state === 'cancelled' ? 'cancelled' : node.issue ? 'error' : 'skipped' : node.skipped ? 'skipped' : !action ? ready ? 'ready' : 'skipped' : node.prepared ? 'prepared' : 'waiting';
             batchInstallState.items.set(node.mod.name, { ...old, name: node.mod.name, key: node.key,
+                selection: batchSelectionSnapshot({ ...node.mod, _selectedPackageEdition: node.release?.packageEdition?.id || node.mod._selectedPackageEdition }), retryable: !node.skipped && Boolean(blocked),
                 type: action?.type || old?.type || '', role: plan.roots.has(node.key) ? '目标模组' : '前置模组', state,
                 requiresAction: Boolean(action), handled: old?.handled || Boolean(node.prepared),
                 text: blocked || (node.skipped ? '本次跳过' : !action ? ready ? '已就绪，无需安装' : '目标未安装，本次跳过' : node.prepared ? '安装包已准备好，等待确认' : action.type === 'enable' ? '等待确认启用' : '等待确认下载'), percent: null });
         }
         for (const item of previous.values()) if (!preserveOtherItems && item.role === '目标模组' && !batchInstallState.items.has(item.name)) {
-            batchInstallState.items.set(item.name, { ...item, state: 'skipped', text: '本次未选择安装版本', percent: null });
+            batchInstallState.items.set(item.name, { ...item, state: 'skipped', retryable: false, text: '本次未选择安装版本', percent: null });
         }
         renderBatchInstallToolbar();
     }
 
     function finishBatchInstallProgress() {
         for (const item of batchInstallState.items.values()) if (!MODHUB_BATCH_FINISHED.has(item.state)) {
-            item.state = 'cancelled'; item.percent = null;
+            item.state = 'cancelled'; item.percent = null; item.retryable = true;
             item.text = batchInstallState.stopRequested ? '已停止，尚未安装' : '已取消，尚未安装';
         }
         batchInstallState.running = false;
@@ -1219,7 +1231,9 @@
         const item = batchInstallState.items.get(modName);
         if (!item) return;
         const wasVisible = isBatchProgressItemVisible(item);
-        Object.assign(item, { state: status.state, percent: status.percent, text: status.text });
+        const retryable = ['error', 'cancelled'].includes(status.state) || status.state === 'skipped'
+            && (['前置未完成，本次跳过', '已停止，尚未安装', '已停止后续安装'].includes(status.text) || item.retryable && item.text === status.text);
+        Object.assign(item, { state: status.state, percent: status.percent, text: status.text, retryable });
         if (['active', 'checking', 'prepared', 'installing', 'success', 'enabled', 'error', 'cancelled'].includes(status.state)) item.handled = true;
         if (!MODHUB_BATCH_FINISHED.has(status.state)) batchInstallState.current = modName;
         if (wasVisible !== isBatchProgressItemVisible(item)) { renderBatchInstallToolbar(); return; }
@@ -1402,7 +1416,7 @@
                 if (downloadProgressState.get(name)?.batchProgress && !activeDownloadControllers.has(name)) resetDownloadProgress(name);
             }
             batchInstallState.items.clear();
-            Object.assign(batchInstallState, { stopRequested: false, progressPhase: '', current: '', completed: 0, total: 0, progressExpanded: true, progressScrollTop: 0 });
+            Object.assign(batchInstallState, { reselectable: false, stopRequested: false, progressPhase: '', current: '', completed: 0, total: 0, progressExpanded: true, progressScrollTop: 0 });
         }
         syncBatchSelectionControls();
     }
@@ -1432,6 +1446,62 @@
         syncBatchSelectionControls();
     }
 
+    function unfinishedBatchTargets() {
+        return batchInstallState.reselectable ? [...batchInstallState.items.values()].filter(item => item.role === '目标模组'
+            && item.selection && (['error', 'cancelled'].includes(item.state) || item.state === 'skipped' && item.retryable)) : [];
+    }
+
+    function hiddenBatchSelectionCount(profiles = getLocalInstalledProfiles(), evaluatedMods) {
+        const visible = new Set(getFilteredDisplayMods(filterAndSortMods(profiles, evaluatedMods), profiles, evaluatedMods).map(getMarketModKey));
+        return [...batchInstallState.selected].filter(key => !visible.has(key)).length;
+    }
+
+    function reselectUnfinishedMods() {
+        const state = batchInstallState;
+        if (currentMarketSection !== 'packages' || state.running || state.preparing || marketInstallBusy || marketViewLoading
+            || window.modHubMigration?.isRunning?.() || window.modHubRestore?.isOperationBlocked?.()) return false;
+        const targets = unfinishedBatchTargets(), profiles = getLocalInstalledProfiles(), displayed = getDisplayMods();
+        const restored = new Map();
+        let unavailable = 0, conflicts = 0;
+        for (const item of targets) {
+            const snapshot = item.selection;
+            const matches = [...marketModList, ...displayed.filter(mod => mod.isLanguageGroup)].filter(mod => getMarketModKey(mod) === snapshot.key);
+            const mod = matches.length === 1 ? matches[0] : null;
+            const display = mod && displayed.find(entry => getMarketModKey(entry) === snapshot.key
+                || entry.isLanguageGroup && entry.variants.some(member => getMarketModKey(member) === snapshot.key));
+            const edition = snapshot.edition && window.modHubMarketVariants?.normalizePackageEditions(mod?.packageEditions)
+                .find(option => JSON.stringify([option.id, option.bootName, option.bootEdition || '', option.assetSeries]) === JSON.stringify(snapshot.edition));
+            const candidate = mod && { ...mod, ...(edition ? { _selectedPackageEdition: edition.id, _packageEditionUpdateOnly: true } : {}) };
+            const displayKey = display && getMarketModKey(display);
+            if (!mod || !display || batchSelectionIdentity(mod) !== snapshot.identity || snapshot.edition && !edition
+                || mod.autoInstall === false || mod._identityMetadataUnavailable || !isMarketSourceVisible(mod)
+                || !isBatchInstallEligible(candidate, profiles) || restored.has(displayKey) && restored.get(displayKey).key !== snapshot.key) {
+                unavailable++; continue;
+            }
+            const selected = state.selected.has(displayKey) && resolveDisplayedInstallMod(display, profiles);
+            if (selected && (!mod.isLanguageGroup && getMarketModKey(selected) !== snapshot.key
+                || snapshot.edition && selected._selectedPackageEdition !== snapshot.edition[0])) {
+                unavailable++; conflicts++; continue;
+            }
+            restored.set(displayKey, { key: snapshot.key, mod, display, edition });
+        }
+        for (const [displayKey, choice] of restored) {
+            if (choice.display.isLanguageGroup && !choice.mod.isLanguageGroup) selectedMarketLanguages.set(choice.display.variantGroupId, choice.key);
+            if (choice.edition) selectedMarketPackageEditions.set(choice.key, choice.edition.id);
+            state.selected.add(displayKey);
+        }
+        if (restored.size) {
+            state.selecting = true;
+            state.progressExpanded = false;
+            renderMarketCards();
+            syncBatchSelectionControls();
+            document.getElementById('modHubBatchInstall')?.focus();
+        }
+        window.modHubShowToast(modHubT('已重新选择 {count} 项，{unavailable} 项当前不可选择。现有筛选已保留，请点击“下载并安装”重新确认。',
+            { count: restored.size, unavailable }) + (conflicts ? ' ' + modHubT('已保留当前选择的语言或包型；如需恢复上次选项，请先取消该项选择。') : ''), restored.size ? 'info' : 'warning');
+        return restored.size;
+    }
+
     function renderBatchInstallToolbar(profiles, evaluatedMods) {
         const state = batchInstallState;
         if (!state.running && !state.preparing && state.selected.size) {
@@ -1452,6 +1522,7 @@
         const filters = document.querySelector('#modHubModMarketContainer .modhub-market-filter-row');
         const controls = filters?.closest('.modhub-market-toolbar');
         const selecting = state.selecting && !state.running;
+        const hiddenSelected = selecting && state.selected.size ? hiddenBatchSelectionCount(profiles, evaluatedMods) : 0;
         // 多选操作仍覆盖整个列表，任务入口和浮窗不占用结果栏布局。
         if (controls && (selecting || state.preparing)) {
             if (toolbar.parentNode !== controls.parentNode) controls.after(toolbar);
@@ -1472,21 +1543,22 @@
             toolbar.innerHTML = modHubHtml(`
                 <button id="modHubBatchToggle" type="button" class="macro-button ${state.selecting ? 'modhub-btn-secondary' : 'modhub-btn-primary modhub-batch-entry'}" aria-pressed="${state.selecting}"${state.selecting ? '' : ' aria-describedby="modHubBatchEntryHint"'}>${state.selecting ? '退出多选' : '多选安装'}</button>
                 ${state.selecting ? '' : '<span id="modHubBatchEntryHint" class="modhub-batch-entry-hint">勾选多个模组，统一下载并安装</span>'}
-                ${state.selecting ? `<span class="modhub-batch-count grey" role="status" aria-live="polite">已选 ${state.selected.size} 项</span>
+                ${state.selecting ? `<span class="modhub-batch-count grey" role="status" aria-live="polite">${modHubLabelHtml('已选 {count} 项', { count: state.selected.size })}${hiddenSelected ? ` · ${modHubLabelHtml('筛选外 {count} 项', { count: hiddenSelected })}` : ''}</span>
                 <button id="modHubBatchSelectAll" type="button" class="macro-button modhub-btn-secondary">全选当前筛选</button>
                 <button id="modHubBatchClear" type="button" class="macro-button modhub-btn-secondary" ${state.selected.size ? '' : 'disabled'}>清空选择</button>
                 <button id="modHubBatchInstall" type="button" class="macro-button modhub-btn-primary" ${state.selected.size ? '' : 'disabled'}>下载并安装（${state.selected.size}）</button>` : ''}`);
         }
         const visibleProgressItems = [...state.items.values()].filter(isBatchProgressItemVisible);
+        const unfinishedTargets = unfinishedBatchTargets();
         toolbar.classList.toggle('is-expanded', selecting || state.preparing);
         if (visibleProgressItems.length || state.running || state.preparing) {
             const taskCounts = batchTaskCounts();
-            toolbar.innerHTML += modHubHtml(`<div id="modHubBatchProgressDetails" class="modhub-batch-progress-details">${batchTaskToggleHtml(taskCounts)}<section id="modHubBatchProgressContent" class="modhub-batch-task-panel" role="dialog" aria-modal="false" aria-labelledby="modHubBatchTaskPanelTitle"${state.progressExpanded ? '' : ' hidden'}><div class="modhub-batch-task-panel-header"><strong id="modHubBatchTaskPanelTitle" class="gold">${modHubLabelHtml('下载与安装任务')}</strong><button id="modHubBatchProgressClose" type="button" class="macro-button modhub-btn-secondary modhub-batch-task-close" aria-label="${escapeHtml(modHubT('收起任务面板'))}" title="${escapeHtml(modHubT('收起面板不会停止任务。'))}"><span aria-hidden="true">&times;</span></button></div><div class="modhub-batch-status" role="status" aria-live="polite"><strong id="modHubBatchProgressTitle" class="gold">${state.preparing && !state.running ? '正在准备批量安装' : state.running ? `批量安装 ${counts.finished}/${counts.total}` : `查看上次结果（完成 ${counts.success} 项）`}</strong>${state.running ? `<span id="modHubBatchProgressCurrent">${state.current ? escapeHtml(modHubT('正在处理：{name}', { name: batchDisplayName(state.current) })) : '正在准备安装计划'}</span>` : ''}</div>${state.running ? `<button id="modHubBatchStop" type="button" class="macro-button modhub-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>` : state.preparing ? '' : `<div class="modhub-batch-result-actions"><span class="grey">成功 ${counts.success} 项，未完成 ${counts.failed} 项，跳过或取消 ${counts.skipped} 项</span><button id="modHubBatchResultsClear" type="button" class="macro-button modhub-btn-secondary">清除全部记录</button></div>`}<div id="modHubBatchProgressList" class="modhub-batch-progress-list" role="region" aria-label="各模组安装进度，可上下滚动" tabindex="0">${visibleProgressItems.map(item => `<div class="modhub-batch-item" data-mod-name="${batchEscape(item.name)}">${batchItemHtml(item)}</div>`).join('')}</div></section></div>`);
+            toolbar.innerHTML += modHubHtml(`<div id="modHubBatchProgressDetails" class="modhub-batch-progress-details">${batchTaskToggleHtml(taskCounts)}<section id="modHubBatchProgressContent" class="modhub-batch-task-panel" role="dialog" aria-modal="false" aria-labelledby="modHubBatchTaskPanelTitle"${state.progressExpanded ? '' : ' hidden'}><div class="modhub-batch-task-panel-header"><strong id="modHubBatchTaskPanelTitle" class="gold">${modHubLabelHtml('下载与安装任务')}</strong><button id="modHubBatchProgressClose" type="button" class="macro-button modhub-btn-secondary modhub-batch-task-close" aria-label="${escapeHtml(modHubT('收起任务面板'))}" title="${escapeHtml(modHubT('收起面板不会停止任务。'))}"><span aria-hidden="true">&times;</span></button></div><div class="modhub-batch-status" role="status" aria-live="polite"><strong id="modHubBatchProgressTitle" class="gold">${state.preparing && !state.running ? '正在准备批量安装' : state.running ? `批量安装 ${counts.finished}/${counts.total}` : `查看上次结果（完成 ${counts.success} 项）`}</strong>${state.running ? `<span id="modHubBatchProgressCurrent">${state.current ? escapeHtml(modHubT('正在处理：{name}', { name: batchDisplayName(state.current) })) : '正在准备安装计划'}</span>` : ''}</div>${state.running ? `<button id="modHubBatchStop" type="button" class="macro-button modhub-btn-secondary" ${state.stopRequested ? 'disabled' : ''}>${state.stopRequested ? '当前项完成后停止' : '停止后续'}</button>` : state.preparing ? '' : `<div class="modhub-batch-result-actions"><span class="grey">成功 ${counts.success} 项，未完成 ${counts.failed} 项，跳过或取消 ${counts.skipped} 项</span>${unfinishedTargets.length ? `<button id="modHubBatchReselect" type="button" class="macro-button modhub-btn-secondary" title="${escapeHtml(modHubT('仅恢复选择，仍需重新确认安装版本与前置。'))}"${marketInstallBusy || marketViewLoading ? ' disabled' : ''}>${modHubLabelHtml('重新选择未完成项')}</button>` : ''}<button id="modHubBatchResultsClear" type="button" class="macro-button modhub-btn-secondary">清除全部记录</button></div>`}<div id="modHubBatchProgressList" class="modhub-batch-progress-list" role="region" aria-label="各模组安装进度，可上下滚动" tabindex="0">${visibleProgressItems.map(item => `<div class="modhub-batch-item" data-mod-name="${batchEscape(item.name)}">${batchItemHtml(item)}</div>`).join('')}</div></section></div>`);
             const list = document.getElementById('modHubBatchProgressList');
             if (list && state.progressExpanded) list.scrollTop = state.progressScrollTop;
             fitBatchTaskPanel();
         }
-        const handlers = { modHubBatchToggle: () => toggleBatchSelection(), modHubBatchSelectAll: selectAllVisibleMods, modHubBatchClear: clearBatchSelection, modHubBatchInstall: () => installSelectedMods(), modHubBatchStop: () => { state.stopRequested = true; renderBatchInstallToolbar(); }, modHubBatchResultsClear: () => clearBatchInstallResults() };
+        const handlers = { modHubBatchToggle: () => toggleBatchSelection(), modHubBatchSelectAll: selectAllVisibleMods, modHubBatchClear: clearBatchSelection, modHubBatchInstall: () => installSelectedMods(), modHubBatchStop: () => { state.stopRequested = true; renderBatchInstallToolbar(); }, modHubBatchResultsClear: () => clearBatchInstallResults(), modHubBatchReselect: reselectUnfinishedMods };
         Object.entries(handlers).forEach(([id, handler]) => {
             const button = document.getElementById(id);
             if (button) button.onclick = handler;
@@ -4763,6 +4835,16 @@
         state.promise = queueModUpdateCheck(async () => {
             const candidates = [];
             let history;
+            const local = mod._matchedLocal;
+            if (getConfirmedUpdate(local) && !verifiedPackageNames.has(local.name.trim().toLowerCase())) {
+                if (modUpdateBlocked()) await waitForModUpdateIdle(current);
+                if (!current() || isWithdrawn(mod)) return;
+                try { await refreshLocalPackageProfiles([local.name], current); }
+                catch (error) { console.warn('[ModHub] 更新确认包体回读未完成，继续核对发布版本', error); }
+                if (!current() || isWithdrawn(mod)) return;
+                mod._matchedLocal = getLocalInstalledProfiles().find(profile => profile.name === local.name) || null;
+                if (getModUpdateSignature(mod, gameVersion) !== signature) { getModUpdateInfo(mod); return; }
+            }
             do {
                 if (modUpdateBlocked()) await waitForModUpdateIdle(current);
                 if (!current() || isWithdrawn(mod)) return;
@@ -4916,6 +4998,7 @@
             profiles.push({
                 name: modName,
                 packageDigest,
+                packageDigestVerified: verifiedPackageNames.has(profileKey),
                 version,
                 // 原生依赖别名与递归前置仅取同名 boot 声明，展示别名不能替代身份。
                 ...(boot.name ? { bootJson: boot } : {}),
@@ -5201,9 +5284,10 @@
                     mod._ignoredVersion = ignoredVer;
                     return 'up_to_date';
                 }
-                const confirmedMap = getConfirmedUpdates();
-                const confirmedVer = confirmedMap[mod.name] || (matchedProfile.name ? confirmedMap[matchedProfile.name] : null);
-                if (!packageUpdate && confirmedVer && compareVersions(remoteVer, confirmedVer) <= 0) {
+                const confirmed = getConfirmedUpdate(matchedProfile);
+                if (!packageUpdate && confirmed
+                    && verifiedPackageNames.has(matchedProfile.name.trim().toLowerCase())
+                    && confirmed.digest === matchedProfile.packageDigest && compareVersions(remoteVer, confirmed.version) <= 0) {
                     return 'up_to_date';
                 }
                 return 'update_available';
@@ -5488,15 +5572,17 @@
             const item = state?.sideMods?.find(mod => mod.name === action.local?.name);
             return item ? item.enabled === true : (state?.sideEnabled || []).includes(action.local?.name);
         };
-        const setResult = (action, status, reason = '') => {
+        const setResult = (action, status, reason = '', retryable = false) => {
             results.set(action.key, { status, reason, action });
             trackBatchInstallMod(action.mod, action.role, action.type);
             setBatchInstallStatus(action.mod.name, status === 'success' ? action.type === 'enable' ? 'enabled' : 'success' : status === 'failed' ? 'error' : 'skipped',
                 reason || (action.type === 'enable' ? '已启用，重新载入后生效' : action.type === 'update' ? '已更新，重新载入后生效' : '已安装，重新载入后生效'));
+            const item = batchInstallState.items.get(action.mod.name);
+            if (item && status === 'skipped') item.retryable = retryable;
         };
         for (const target of plan.targets) {
             const key = getMarketModKey(target);
-            if (plan.blocked.has(key)) setResult({ key, mod: target, role: '目标模组' }, 'skipped', plan.blocked.get(key));
+            if (plan.blocked.has(key)) setResult({ key, mod: target, role: '目标模组' }, 'skipped', plan.blocked.get(key), true);
         }
         const failedDependency = (key, seen = new Set()) => {
             if (seen.has(key)) return null;
@@ -5514,7 +5600,7 @@
             let action = plan.actions[index];
             if (stopped || options.restoreContext?.cancelled || options.shouldStop?.()) {
                 stopped = true;
-                setResult(action, 'skipped', '已停止后续安装');
+                setResult(action, 'skipped', '已停止后续安装', true);
                 continue;
             }
             options.onProgress?.(action, index, plan.actions.length);
@@ -5525,17 +5611,17 @@
                 currentPlan = options.getPlan?.() || plan;
                 const currentAction = currentPlan.actions.find(item => item.key === action.key);
                 if (!currentAction) {
-                    setResult(action, 'skipped', currentPlan.blocked.get(action.key) || '已从当前安装计划移除');
+                    setResult(action, 'skipped', currentPlan.blocked.get(action.key) || '已从当前安装计划移除', currentPlan.blocked.has(action.key));
                     continue;
                 }
                 action = currentAction;
                 const dependency = failedDependency(action.key);
                 if (dependency) {
-                    setResult(action, 'skipped', `前置【${dependency}】未完成`);
+                    setResult(action, 'skipped', `前置【${dependency}】未完成`, true);
                     continue;
                 }
                 if (options.confirm && !await options.confirm(plan, action, results)) {
-                    setResult(action, 'skipped', '已取消安装计划确认');
+                    setResult(action, 'skipped', '已取消安装计划确认', true);
                     stopped = true;
                     continue;
                 }
@@ -5543,7 +5629,7 @@
                 currentPlan = options.getPlan?.() || plan;
                 const confirmedAction = currentPlan.actions.find(item => item.key === action.key);
                 if (!confirmedAction) {
-                    setResult(action, 'skipped', currentPlan.blocked.get(action.key) || '已从当前安装计划移除');
+                    setResult(action, 'skipped', currentPlan.blocked.get(action.key) || '已从当前安装计划移除', currentPlan.blocked.has(action.key));
                     continue;
                 }
                 action = confirmedAction;
@@ -6029,6 +6115,8 @@
 
     // 只从加载器真实旁加载仓库读取精确技术名；运行时清单可能尚未重新载入。
     async function refreshLocalPackageProfiles(names, current) {
+        const revision = localProfileRevision;
+        const active = () => revision === localProfileRevision && (!current || current());
         const utils = window.modHubGetGui?.()?.gModUtils;
         const loader = utils?.getModLoader?.()?.getIndexDBLoader?.();
         const keyval = utils?.getIdbKeyValRef?.();
@@ -6039,26 +6127,28 @@
         const requested = names || registered;
         let complete = true;
         for (const name of [...new Set(requested)]) {
+            if (!active()) { complete = false; break; }
             if (current) {
-                if (!current()) { complete = false; break; }
                 // 每个包校验前让出主线程，及时处理切页并停止余下扫描。
                 await new Promise(resolve => setTimeout(resolve, 0));
-                if (!current()) { complete = false; break; }
+                if (!active()) { complete = false; break; }
             }
             const key = String(name || '').trim().toLowerCase();
             if (!key || !registered.some(item => String(item).trim().toLowerCase() === key)) continue;
             installedPackageRecords.delete(key);
+            verifiedPackageNames.delete(key);
             try {
                 const storedName = registered.find(item => String(item).trim().toLowerCase() === key);
                 const data = await keyval.get(loader.constructor.calcModNameKey(storedName), loader.customStore);
-                if (current && !current()) { complete = false; break; }
+                if (!active()) { complete = false; break; }
                 if (!data) continue;
                 const bootJson = await controller.checkModZipFileIndexDB(data);
-                if (current && !current()) { complete = false; break; }
+                if (!active()) { complete = false; break; }
                 if (String(bootJson?.name || '').trim().toLowerCase() !== key) continue;
                 const digest = await getPackageDigest(data);
-                if (current && !current()) { complete = false; break; }
+                if (!active()) { complete = false; break; }
                 installedPackageRecords.set(key, { bootJson, digest });
+                if (digest) verifiedPackageNames.add(key);
                 window._modHubDisabledModInfo?.set?.(key, { name: bootJson.name, bootJson });
             } catch (_) { complete = false; /* 无法回读时不推断已安装的发布版本。 */ }
         }
@@ -6073,6 +6163,7 @@
 
     function invalidateLocalPackageProfiles() {
         localProfileState = null;
+        verifiedPackageNames.clear();
         localProfileRevision++;
     }
 
@@ -6101,7 +6192,7 @@
     function isReleasePackageInstalled(release, profile) {
         const asset = getReleaseInstallAssets(release)[0];
         const digest = getAssetPackageDigest(asset);
-        return digest && profile?.packageDigest ? digest === profile.packageDigest : null;
+        return digest && profile?.packageDigest && profile.packageDigestVerified !== false ? digest === profile.packageDigest : null;
     }
 
     function getPublishedVersion(release) {
@@ -6269,7 +6360,6 @@
             return failBatch('所选版本或安装包已变化，请重新核验');
         }
         let installAssets = [];
-        let targetVersion = mod.version || '';
 
         // 1. 获取 Release 信息
         reportProgress(null, '正在获取发布信息...', 'preparing');
@@ -6277,7 +6367,6 @@
         try {
             if (!releaseInfo) releaseInfo = await fetchModRelease(mod, { useCache: true });
             installAssets = getReleaseInstallAssets(releaseInfo);
-            if (releaseInfo.version) targetVersion = releaseInfo.version;
         } catch (err) {
             console.warn('[ModHub] 读取 Release 失败，尝试回退', err);
             if (options.batchMode) return failBatch(err?.message || '读取发布包失败');
@@ -6315,7 +6404,6 @@
             releaseInfo = applyManualAssetSelection(releaseInfo, choice);
             if (!releaseInfo) return false;
             installAssets = getReleaseInstallAssets(releaseInfo);
-            targetVersion = releaseInfo.version || targetVersion;
         }
 
         if (!installAssets.length) {
@@ -6632,6 +6720,7 @@
             // 写入前统一核验所有包，避免主包错误或附属包无效时留下部分安装。
             const modController = window.modHubGetController?.() || gui.modModLoadController;
             const boots = [];
+            const packageDigests = [];
             const sameComponents = new Set();
             if ((options.prepareOnly || preparedPackage || options.dependencyRequirements?.some(item => item.bootVersions))
                 && typeof modController?.checkModZipFileIndexDB !== 'function') {
@@ -6685,6 +6774,7 @@
                             }
                         }
                         boots.push(boot);
+                        packageDigests.push(fileDigest);
                     } catch (error) {
                         const failure = new Error(error?.message || '无法读取安装包的模组清单');
                         failure.code = 'INSTALL_PACKAGE_INVALID';
@@ -6891,13 +6981,9 @@
             if (options.restoreContext?.reloadOnChange) window.modHubRegisterOperationReload(options.restoreContext,
                 `模组【${mod.name}】已成功安装并载入配置。`, { isFramework: window.modHubIsFrameworkMod?.(mod.name) });
 
-            // 安装完毕后记录版本确权，防止第三方 zip 内 boot.json 漏改版本号导致死循环更新
-            const installedVer = (preparedPackage ? boots[0]?.version : '') || targetVersion || mod.version;
             setModUpdateIgnored(mod.name, '', false);
-            setModUpdateConfirmed(mod.name, installedVer);
             if (mod._matchedLocal?.name) {
                 setModUpdateIgnored(mod._matchedLocal.name, '', false);
-                setModUpdateConfirmed(mod._matchedLocal.name, installedVer);
             }
 
             // 安装完毕后刷新市场 UI 状态
@@ -6909,7 +6995,13 @@
                 if (typeof window.modHubLoadModManageState === 'function') {
                     await window.modHubLoadModManageState(true);
                 }
-                await refreshLocalPackageProfiles(boots.map(boot => boot.name));
+                const refreshed = await refreshLocalPackageProfiles(boots.map(boot => boot.name));
+                const installedPrimary = refreshed && primaryBoot && getLocalInstalledProfiles().find(profile => profile.name === primaryBoot.name);
+                // 仅凭真实主包回读证明所选发布已安装，旧版包或回读失败不能沿用历史确认。
+                if (installedPrimary?.bootJson?.name === primaryBoot?.name && packageDigests[0]
+                    && installedPrimary.packageDigest === packageDigests[0]) {
+                    setModUpdateConfirmed(primaryBoot.name, packageDigests[0], releaseInfo.version);
+                }
             } catch (refreshError) {
                 console.warn('[ModHub] 安装后刷新本地模组档案失败', refreshError);
             }
@@ -8193,6 +8285,8 @@
 
     function renderMarketSections() {
         const spellView = currentMarketSection === 'spells';
+        const reselect = document.getElementById('modHubBatchReselect');
+        if (reselect) reselect.disabled = batchInstallState.running || batchInstallState.preparing || marketInstallBusy || marketViewLoading;
         document.getElementById('modHubMarketStats')?.querySelectorAll('button').forEach(button => {
             button.disabled = batchInstallState.running || batchInstallState.preparing || marketInstallBusy
                 || marketViewLoading && button.classList.contains('modhub-market-update-all');
@@ -8904,6 +8998,7 @@
         toggleBatchSelection,
         selectAllVisibleMods,
         clearBatchSelection,
+        reselectUnfinishedMods,
         setBatchModSelected,
         isStatsFilterActive,
         shouldShowCategoryFilters,

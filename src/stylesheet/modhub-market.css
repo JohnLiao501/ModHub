@@ -655,6 +655,16 @@
     font-size: 0.85em;
 }
 
+.modhub-batch-result-actions > .grey { flex: 1 1 100%; }
+
+.modhub-batch-result-actions > button {
+    flex: 0 0 auto;
+    min-width: 0;
+    min-height: 32px;
+    max-width: 100%;
+    white-space: normal;
+}
+
 .modhub-market-batch-toolbar .modhub-batch-result-remove {
     flex: 0 0 auto;
     border: 0;
@@ -1736,21 +1746,14 @@
     padding: 2px;
 }
 
-.modhub-version-dialog:has(#modHubBatchVersionChoices) .modhub-modal-body {
-    display: flex;
-    flex-direction: column;
-    max-height: 60vh;
-    max-height: 60dvh;
-    overflow: hidden;
-    box-sizing: border-box;
+/* 批量选版沿用公共正文滚动，避免多层裁切把尾项和操作区隔开。 */
+#modHubBatchVersionChoices {
+    min-width: 0;
+    max-height: none;
+    overflow: visible;
+    margin: 0;
+    padding: 0;
 }
-.modhub-version-dialog:has(#modHubBatchVersionChoices) .modhub-modal-message {
-    display: flex;
-    flex: 1 1 auto;
-    min-height: 0;
-    overflow: hidden;
-}
-#modHubBatchVersionChoices { flex: 1 1 auto; min-height: 0; max-height: none; margin: 0; padding: 0; }
 #modHubBatchVersionChoices > p:first-child { margin-top: 0; }
 
 .modhub-version-context {

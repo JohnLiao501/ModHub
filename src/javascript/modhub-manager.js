@@ -414,10 +414,10 @@ window.modHubReadIndexDBModLists = async function() {
     }
 };
 
-// 工具函数：统一安全调用 overwriteModIndexDBModList / overwriteModIndexDBHiddenModList
+// 工具函数：在真实仓库的同一事务中保存两份模组列表
 // options.dropNames：本次操作中被明确移除、不允许被「已安装保留」逻辑复活的模组名（如删除模组）
-// options.skipVerify：跳过写入后回读校验（仅供内部极端场景使用）
 window.modHubSaveIndexDBModList = async function(enabledList, disabledList, options = {}) {
+    window._modHubReloadBaselineRevision = (window._modHubReloadBaselineRevision || 0) + 1;
     let targetEnabled = window.modHubUniqueModNames(enabledList);
     const enabledNames = new Set(targetEnabled.map(name => name.trim().toLowerCase()));
     let targetDisabled = window.modHubUniqueModNames(disabledList)
@@ -430,6 +430,7 @@ window.modHubSaveIndexDBModList = async function(enabledList, disabledList, opti
     // 一旦内存状态来自陈旧快照，直接覆盖会把已安装模组挤出启用列表，
     // 造成「包体仍在库中、ModLoader 却不再加载它」的假删除，故此处自动保留。
     const current = await window.modHubReadIndexDBModLists();
+    if (!current.ok) throw current.error || new Error('无法读取真实模组列表，已停止保存');
     if (current.ok) {
         const known = new Set([...targetEnabled, ...targetDisabled].map(name => name.trim().toLowerCase()));
         const rescued = current.enabled.filter(name => {
@@ -443,24 +444,56 @@ window.modHubSaveIndexDBModList = async function(enabledList, disabledList, opti
     }
 
     targetEnabled = window.modHubKeepRecoveryOrder(targetEnabled);
-    const gui = window.modHubGetGui();
-    const controller = [window.modHubGetController(), gui, gui?.modModLoadController].find(target =>
-        typeof target?.overwriteModIndexDBModList === 'function' &&
-        typeof target?.overwriteModIndexDBHiddenModList === 'function');
-    if (!controller) throw new Error('未找到完整的 ModLoadController 模组列表存储接口');
-    if (await controller.overwriteModIndexDBModList(targetEnabled) === false) throw new Error('启用列表保存失败');
-    if (await controller.overwriteModIndexDBHiddenModList(targetDisabled) === false) throw new Error('禁用列表保存失败');
+    const utils = window.modHubGetGui()?.gModUtils || window.modUtils;
+    const loader = utils?.getModLoader?.()?.getIndexDBLoader?.(), schema = loader?.constructor;
+    if (typeof loader?.customStore !== 'function' ||
+        ![schema?.dbName, schema?.storeName, schema?.modDataIndexDBZipList, schema?.modDataIndexDBZipListHidden]
+            .every(value => typeof value === 'string' && value) || schema.modDataIndexDBZipList === schema.modDataIndexDBZipListHidden) {
+        throw new Error('当前 ModLoader 不支持两份模组列表的真实存储事务，已停止保存');
+    }
+    const sameOrder = (a, b) => a.length === b.length && a.every((name, index) => name === b[index]);
+    const parseList = raw => {
+        const value = raw === undefined || raw === null ? [] : typeof raw === 'string' ? JSON.parse(raw) : raw;
+        if (!Array.isArray(value) || value.some(name => typeof name !== 'string')) throw new Error('仓库模组列表格式无效，已停止保存');
+        return value;
+    };
+    await loader.customStore('readwrite', store => new Promise((resolve, reject) => {
+        const tx = store.transaction;
+        let error, count = 0;
+        const abort = cause => { error = cause; try { tx?.abort(); } catch (_) {} reject(cause); };
+        if (!tx || store.name !== schema.storeName || tx.db?.name !== schema.dbName) return abort(new Error('模组存储位置已变化，未写入数据'));
+        tx.oncomplete = resolve;
+        tx.onabort = tx.onerror = event => reject(error || tx.error || event?.target?.error || new Error('模组列表保存事务失败'));
+        const rows = {};
+        try {
+            for (const [key, field] of [[schema.modDataIndexDBZipList, 'enabled'], [schema.modDataIndexDBZipListHidden, 'disabled']]) {
+                const request = store.get(key);
+                request.onsuccess = () => {
+                    try {
+                        rows[field] = parseList(request.result);
+                        if (++count !== 2) return;
+                        if (!sameOrder(rows.enabled, current.enabled) || !sameOrder(rows.disabled, current.disabled)) {
+                            throw new Error('启禁配置已被其他操作更改，已停止覆盖');
+                        }
+                        store.put(JSON.stringify(targetEnabled), schema.modDataIndexDBZipList);
+                        store.put(JSON.stringify(targetDisabled), schema.modDataIndexDBZipListHidden);
+                    } catch (cause) { abort(cause); }
+                };
+            }
+        } catch (cause) { abort(cause); }
+    }));
 
-    // 写入后回读校验：ModLoader 对重复项 / 非字符串列表会静默跳过写入且不返回 false，
-    // 只有回读比对才能真正确认配置已经落盘，杜绝「提示已保存但实际没生效」。
-    if (current.ok && options.skipVerify !== true) {
+    try {
         const after = await window.modHubReadIndexDBModLists();
         if (after.ok) {
-            const sameOrder = (a, b) => a.length === b.length && a.every((name, index) => name === b[index]);
             if (!sameOrder(targetEnabled, after.enabled) || !sameOrder(targetDisabled, after.disabled)) {
                 throw new Error('模组列表写入校验失败，存储中的启禁状态或精确顺序与预期不一致');
             }
-        } else throw new Error('模组列表保存后无法回读，不能确认启禁状态与顺序');
+            modHubRememberSavedReloadLists(after.enabled, after.disabled);
+        } else throw new Error('模组列表保存后无法回读，不能确认启禁状态与顺序：' + (after.error?.message || '读取失败'));
+    } catch (error) {
+        error.committed = true;
+        throw error;
     }
     return true;
 };
@@ -1889,6 +1922,10 @@ window.modHubLoadModManageState = function(refresh = false, options = {}) {
             sideDisabled: sideMods.filter(m => !m.enabled).map(m => m.name),
             builtInMods: [...builtInMods]
         };
+        try {
+            const saved = await modHubReadReloadLists();
+            modHubRememberSavedReloadLists(saved.enabled, saved.disabled);
+        } catch (_) { window._modHubReloadSavedLists = null; }
 
         // 先显示已读到的列表；包体资料、自愈和美化同步仍由初始化锁保护。
         window.modHubRenderModManageUI();
@@ -1926,6 +1963,17 @@ window.modHubUpdateManagerStatus = function() {
         status.className = window._modHubManagerSaveFailed ? 'red' : 'grey';
         status.hidden = !window._modHubManagerStatus && !busy && !window._modHubManagerSaveFailed;
     }
+    const pending = document.getElementById('modHubPendingReloadStatus');
+    if (pending) {
+        const changes = window.modHubGetPendingReloadChanges();
+        pending.hidden = !changes.count && (changes.available || !window._modHubReloadRevision);
+        const summary = pending.querySelector('[data-modhub-reload-summary]');
+        if (summary) summary.textContent = changes.available
+            ? window.modHubT('待重载配置变更：{count} 项', { count: changes.count })
+            : window.modHubT(changes.reason);
+        const button = pending.querySelector('button');
+        if (button) button.disabled = !changes.available || window.modHubIsReloadBlocked();
+    }
 };
 
 // ponytail: 共用一把操作锁；确有并行操作需求时再按存储资源拆分。
@@ -1950,6 +1998,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
     const beforeBeauty = beauty && { ...beauty, enabledList: [...beauty.enabledList], disabledList: [...beauty.disabledList] };
     const beforeReload = modHubReloadConfigSnapshot(beforeMod, beforeBeauty);
     const previousStatus = window._modHubManagerStatus;
+    window._modHubReloadBaselineRevision = (window._modHubReloadBaselineRevision || 0) + 1;
     const reportError = error => {
         // 错误收集不能阻止原有失败恢复及锁释放。
         try { options.onError?.(error); } catch (_) {}
@@ -2247,6 +2296,10 @@ window.modHubRenderModManageUI = function() {
         </div>
         <div class="modhub-sticky-toolbar">
             <div id="modHubManagerStatus" class="grey" role="status" aria-live="polite"></div>
+            <div id="modHubPendingReloadStatus" class="modhub-pending-reload-status" hidden>
+                <span data-modhub-reload-summary></span>
+                <button id="modHubViewPendingChangesBtn" type="button" class="macro-button modhub-btn-secondary" onclick="window.modHubShowPendingReloadChanges()">查看变更</button>
+            </div>
             <div class="modhub-group-header modhub-manager-actionbar">
                 <div class="modhub-header-actions">
                     <button id="modHubImportModBtn" data-modhub-busy-key="modHubImportModBtn" class="macro-button modhub-btn-primary" type="button" title="从本地选择或直接拖拽 Zip / ModPack 模组文件导入" onclick="window.modHubTriggerImport()">导入模组</button>
@@ -2577,9 +2630,129 @@ window.modHubIsFrameworkMod = function(modName) {
     return false;
 };
 
-// ponytail: 按成功操作记录提醒批次；需要识别整轮操作改回原状时，再保存会话基准配置。
+// 重载询问按操作批次去重；变更清单独立对比本页实际运行状态。
 window._modHubReloadRevision = window._modHubReloadRevision || 0;
 window._modHubReloadPromptedRevision = window._modHubReloadPromptedRevision || 0;
+
+function modHubRememberSavedReloadLists(enabled, disabled) {
+    window._modHubReloadSavedLists = { enabled: [...enabled], disabled: [...disabled] };
+}
+
+function modHubReadReloadLists() {
+    const utils = window.modHubGetGui()?.gModUtils || window.modUtils;
+    const loader = utils?.getModLoader?.()?.getIndexDBLoader?.(), schema = loader?.constructor;
+    if (typeof loader?.customStore !== 'function' ||
+        ![schema?.dbName, schema?.storeName, schema?.modDataIndexDBZipList, schema?.modDataIndexDBZipListHidden]
+            .every(value => typeof value === 'string' && value) || schema.modDataIndexDBZipList === schema.modDataIndexDBZipListHidden) {
+        return Promise.reject(new Error('无法核对当前已保存配置，变更清单暂不可用。'));
+    }
+    return loader.customStore('readonly', store => new Promise((resolve, reject) => {
+        const tx = store.transaction;
+        let error;
+        const rows = {};
+        const abort = cause => { error = cause; try { tx?.abort(); } catch (_) {} reject(cause); };
+        if (!tx || store.name !== schema.storeName || tx.db?.name !== schema.dbName) return abort(new Error('模组存储位置已变化，无法核对变更清单。'));
+        tx.onabort = tx.onerror = event => reject(error || tx.error || event?.target?.error || new Error('模组配置读取事务失败。'));
+        tx.oncomplete = () => {
+            const names = [...(rows.enabled || []), ...(rows.disabled || [])];
+            if (!rows.enabled || !rows.disabled || window.modHubUniqueModNames(names).length !== names.length) {
+                reject(new Error('模组启禁登记不完整或存在重复，无法核对变更清单。'));
+            } else resolve(rows);
+        };
+        try {
+            for (const [key, field] of [[schema.modDataIndexDBZipList, 'enabled'], [schema.modDataIndexDBZipListHidden, 'disabled']]) {
+                const request = store.get(key);
+                request.onsuccess = () => {
+                    try {
+                        const value = request.result == null ? [] : typeof request.result === 'string' ? JSON.parse(request.result) : request.result;
+                        if (!Array.isArray(value) || value.some(name => typeof name !== 'string' || !name.trim())) throw new Error('模组启禁登记格式无效，无法核对变更清单。');
+                        rows[field] = value;
+                    } catch (cause) { abort(cause); }
+                };
+            }
+        } catch (cause) { abort(cause); }
+    }));
+}
+
+function modHubCaptureReloadBaseline() {
+    if (window._modHubReloadBaselinePromise) return window._modHubReloadBaselinePromise;
+    const unknown = reason => { window._modHubReloadBaseline = { available: false, reason }; };
+    const revision = window._modHubReloadBaselineRevision || 0;
+    try {
+        const utils = window.modHubGetGui()?.gModUtils || window.modUtils;
+        const cache = utils?.getModLoader?.()?.getModCacheArray?.();
+        const sources = new Set(['Remote', 'Local', 'LocalStorage', 'IndexDB', 'SideLazy']);
+        if (!Array.isArray(cache) || cache.some(item => !sources.has(item?.from)
+            || typeof (item.mod?.name || item.name) !== 'string' || !(item.mod?.name || item.name).trim())) {
+            throw new Error('无法核对本页实际运行清单，请沿用现有重载提示。');
+        }
+        const enabled = cache.filter(item => item.from === 'IndexDB').map(item => item.mod?.name || item.name);
+        if (window.modHubUniqueModNames(enabled).length !== enabled.length) throw new Error('无法核对本页实际运行清单，请沿用现有重载提示。');
+        // 运行清单立即冻结；迟到的初始登记不得冒充操作前配置。
+        window._modHubReloadBaselinePromise = modHubReadReloadLists().then(lists => {
+            if (revision !== (window._modHubReloadBaselineRevision || 0)) {
+                unknown('本页初始配置未能完成核对，无法生成变更清单。');
+                return;
+            }
+            window._modHubReloadBaseline = { available: true, enabled,
+                installed: window.modHubUniqueModNames([...enabled, ...lists.enabled, ...lists.disabled]) };
+            if (!window._modHubReloadSavedLists) modHubRememberSavedReloadLists(lists.enabled, lists.disabled);
+        }).catch(() => unknown('本页初始配置未能完成核对，无法生成变更清单。'));
+    } catch (_) {
+        unknown('无法核对本页实际运行清单，请沿用现有重载提示。');
+        window._modHubReloadBaselinePromise = Promise.resolve();
+    }
+    return window._modHubReloadBaselinePromise;
+}
+
+window.modHubGetPendingReloadChanges = function() {
+    const baseline = window._modHubReloadBaseline, saved = window._modHubReloadSavedLists;
+    const empty = { available: false, count: 0, added: [], removed: [], enabled: [], disabled: [], orderChanges: [] };
+    if (window.modHubIsReloadBlocked()) return { ...empty, reason: '请等待操作完成；保存失败时请先刷新列表核实配置。' };
+    if (!baseline?.available || !saved) return { ...empty, reason: baseline?.reason || (baseline?.available
+        ? '无法核对当前已保存配置，变更清单暂不可用。' : '正在核对本页初始配置，请稍候。') };
+    const beforeNames = new Set(baseline.installed), running = new Set(baseline.enabled);
+    const enabled = new Set(saved.enabled), disabled = new Set(saved.disabled);
+    const installed = window.modHubUniqueModNames([...saved.enabled, ...saved.disabled]);
+    const added = installed.filter(name => !beforeNames.has(name));
+    const removed = baseline.installed.filter(name => !enabled.has(name) && !disabled.has(name));
+    const turnedOn = saved.enabled.filter(name => beforeNames.has(name) && !running.has(name));
+    const turnedOff = baseline.enabled.filter(name => disabled.has(name));
+    const orderChanges = window.modHubDescribeOrderChanges(baseline.enabled, saved.enabled).filter(item => item.kind === 'moved');
+    return { available: true, added, removed, enabled: turnedOn, disabled: turnedOff, orderChanges,
+        count: added.length + removed.length + turnedOn.length + turnedOff.length + orderChanges.length };
+};
+
+window.modHubShowPendingReloadChanges = async function() {
+    if (window.modHubIsReloadBlocked()) return false;
+    await modHubCaptureReloadBaseline();
+    let latest;
+    try { latest = await modHubReadReloadLists(); }
+    catch (error) {
+        window._modHubReloadSavedLists = null;
+        window.modHubUpdateManagerStatus();
+        await window.modHubAlert(error.message || String(error));
+        return false;
+    }
+    if (window.modHubIsReloadBlocked()) return false;
+    modHubRememberSavedReloadLists(latest.enabled, latest.disabled);
+    const changes = window.modHubGetPendingReloadChanges();
+    window.modHubUpdateManagerStatus();
+    if (!changes.available) return false;
+    const escape = window.modHubEscapeHtml;
+    const named = name => `<strong class="gold" data-modhub-i18n-ignore>${escape(name)}</strong>`;
+    const group = (title, items) => items.length ? `<section><h3>${escape(window.modHubT(title))}</h3><ul>${items.map(item => `<li>${item}</li>`).join('')}</ul></section>` : '';
+    const html = '<p>' + escape(window.modHubT('对比本页实际运行清单与当前已保存配置，仅列出旁加载登记、启禁和加载顺序差异。')) + '</p>'
+        + '<p class="grey">' + escape(window.modHubT('同名包体的内容变化不在此清单中；没有配置差异不代表无需重新载入。')) + '</p>'
+        + (changes.count ? `<div class="modhub-reload-change-list" tabindex="0" role="region" aria-label="${escape(window.modHubT('待重载变更清单'))}">`
+            + group('新增登记', changes.added.map(named)) + group('移除登记', changes.removed.map(named))
+            + group('启用', changes.enabled.map(named)) + group('禁用', changes.disabled.map(named))
+            + group('加载顺序调整', changes.orderChanges.map(item => named(item.name) + '<span>'
+                + escape(window.modHubT('本页第 {current} 位；已保存第 {target} 位', { current: item.currentIndex, target: item.targetIndex })) + '</span>')) + '</div>'
+            : '<p>' + escape(window.modHubT('当前没有可核实的配置差异。')) + '</p>');
+    await window.modHubConfirm({ title: '待重载变更清单', trustedMessageHtml: html, confirmText: '关闭', cancelText: '', dialogClass: 'modhub-reload-changes-dialog' });
+    return true;
+};
 
 function modHubReloadConfigSnapshot(modState) {
     return JSON.stringify([
@@ -2968,6 +3141,7 @@ window.modHubApplyHelpConfiguration = async function(plan, { source, onPrepared 
                 return onPrepared?.(pointId);
             },
             onError: error => {
+                committed ||= error?.committed === true;
                 const reason = error?.message || String(error);
                 if (!failureReason) failureReason = reason;
                 else if (failureReason !== reason) failureReason += '；' + reason;
@@ -3511,17 +3685,20 @@ window.modHubSaveModManageState = async function(showSuccess = true, options = {
     modHubKeepManagerRecoveryOrder(state);
 
     window.modHubRenderModManageUI();
+    let committed = false;
     try {
         await window.modHubSaveIndexDBModList(state.sideEnabled, state.sideDisabled, options);
-        if (typeof localStorage !== 'undefined' && state.sideMods) {
-            try {
-                localStorage.setItem('modhub_sideload_mod_order', JSON.stringify(state.sideMods.map(m => m.name)));
-            } catch (_) {}
+        committed = true;
+        if (state.sideMods) {
+            const order = JSON.stringify(state.sideMods.map(m => m.name));
+            localStorage.setItem('modhub_sideload_mod_order', order);
+            if (localStorage.getItem('modhub_sideload_mod_order') !== order) throw new Error('模组交错顺序保存后回读不一致');
         }
 
         if (showSuccess) window.modHubShowToast('模组配置已更新，重新载入后生效', 'success');
         return true;
     } catch (e) {
+        if (committed) e.committed = true;
         if (window._modHubManagerBusy) throw e;
         console.error('[ModHub] 保存模组状态失败', e);
         window.modHubShowToast('保存模组状态失败: ' + (e.message || e), 'warning');
@@ -3879,3 +4056,5 @@ window.jQuery?.(document).one?.(':storyready.modHubRecoveryPlacement', async () 
         console.warn('[ModHub] 恢复工具顺序核验未完成', error);
     }
 });
+
+modHubCaptureReloadBaseline();

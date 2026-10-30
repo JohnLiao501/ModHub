@@ -46,6 +46,23 @@ window.modHubRegisterTranslations({
     "關閉",
     "Close"
   ],
+  "查看变更": ["查看變更", "View changes"],
+  "待重载配置变更：{count} 项": ["待重新載入設定變更：{count} 項", "Saved configuration changes pending reload: {count}"],
+  "待重载变更清单": ["待重新載入變更清單", "Changes pending reload"],
+  "正在核对本页初始配置，请稍候。": ["正在核對本頁初始設定，請稍候。", "Checking this page's initial configuration. Please wait."],
+  "无法核对本页实际运行清单，请沿用现有重载提示。": ["無法核對本頁實際執行清單，請沿用現有重新載入提示。", "The running mod list is unavailable. Follow the existing reload prompts."],
+  "本页初始配置未能完成核对，无法生成变更清单。": ["本頁初始設定未能完成核對，無法產生變更清單。", "The initial configuration could not be verified. The change list is unavailable."],
+  "对比本页实际运行清单与当前已保存配置，仅列出旁加载登记、启禁和加载顺序差异。": ["對比本頁實際執行清單與目前已儲存設定，僅列出側載登記、啟用停用及載入順序差異。", "Compares this page's running mods with the saved configuration. Lists sideloaded mod registration, enabled state, and load order changes."],
+  "同名包体的内容变化不在此清单中；没有配置差异不代表无需重新载入。": ["同名套件的內容變化不在此清單中；沒有設定差異不代表無需重新載入。", "Content changes within packages with the same name are not listed. An empty list does not mean a reload is unnecessary."],
+  "新增登记": ["新增登記", "Added registrations"],
+  "移除登记": ["移除登記", "Removed registrations"],
+  "本页第 {current} 位；已保存第 {target} 位": ["本頁第 {current} 位；已儲存第 {target} 位", "Running position: {current}; saved position: {target}"],
+  "当前没有可核实的配置差异。": ["目前沒有可核實的設定差異。", "No verified configuration differences."],
+  "无法核对当前已保存配置，变更清单暂不可用。": ["無法核對目前已儲存設定，變更清單暫不可用。", "The saved configuration could not be verified. The change list is unavailable."],
+  "模组存储位置已变化，无法核对变更清单。": ["模組儲存位置已變更，無法核對變更清單。", "The mod storage location changed. The change list could not be verified."],
+  "模组配置读取事务失败。": ["模組設定讀取交易失敗。", "The mod configuration read transaction failed."],
+  "模组启禁登记不完整或存在重复，无法核对变更清单。": ["模組啟用停用登記不完整或重複，無法核對變更清單。", "The enabled and disabled mod registrations are incomplete or duplicated. The change list could not be verified."],
+  "模组启禁登记格式无效，无法核对变更清单。": ["模組啟用停用登記格式無效，無法核對變更清單。", "The enabled and disabled mod registrations are invalid. The change list could not be verified."],
   "请选择": [
     "請選擇",
     "Please select"

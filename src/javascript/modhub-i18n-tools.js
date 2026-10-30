@@ -396,6 +396,26 @@ window.modHubRegisterTranslations?.({
         "恢復加載順序",
         "Restore load order"
     ],
+    "启用模组加载顺序对比": [
+        "啟用模組載入順序對比",
+        "Enabled mod load order comparison"
+    ],
+    "仅列出加入、移出或相对顺序改变的模组；序号按完整启用列表计算。": [
+        "僅列出加入、移出或相對順序改變的模組；序號按完整啟用清單計算。",
+        "Only mods added to, removed from, or reordered within the enabled list are shown. Positions refer to the complete enabled list."
+    ],
+    "当前位置：第 {current} 位；还原后：第 {target} 位": [
+        "目前位置：第 {current} 位；還原後：第 {target} 位",
+        "Current position: {current}; after restore: {target}"
+    ],
+    "加入启用序列：还原后第 {target} 位": [
+        "加入啟用序列：還原後第 {target} 位",
+        "Added to the enabled list: position {target} after restore"
+    ],
+    "移出启用序列：当前位置第 {current} 位": [
+        "移出啟用序列：目前位置第 {current} 位",
+        "Removed from the enabled list: currently at position {current}"
+    ],
     "恢复美化配置": [
         "恢復美化配置",
         "Restore appearance settings"

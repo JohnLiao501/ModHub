@@ -613,7 +613,14 @@
         return window.modHubT?.('当前版本：{current}；还原后版本：{target}', { current, target }) || `当前版本：${current}；还原后版本：${target}`;
     }
 
-    function restoreConfirmationHtml(point, change, riskMessages, packageVersions) {
+    function orderChangeText(item) {
+        const message = item.kind === 'added' ? '加入启用序列：还原后第 {target} 位'
+            : item.kind === 'removed' ? '移出启用序列：当前位置第 {current} 位' : '当前位置：第 {current} 位；还原后：第 {target} 位';
+        return window.modHubT?.(message, { current: item.currentIndex, target: item.targetIndex })
+            || message.replace('{current}', item.currentIndex).replace('{target}', item.targetIndex);
+    }
+
+    function restoreConfirmationHtml(point, change, riskMessages, packageVersions, orderChanges) {
         const items = [];
         [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '将移除的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].forEach(([key, label]) => {
             if (!change[key].length) return;
@@ -621,6 +628,10 @@
             items.push(`<li><strong class="${color}">${key === 'removed' ? `将移除 ${change[key].length} 个模组` : `${label}（${change[key].length} 个）`}</strong><br>${change[key].map(name => `<strong class="gold" data-modhub-no-translate>${escapeHtml(name)}</strong>${['installed', 'updated', 'removed'].includes(key) ? `<br><span class="grey">${escapeHtml(packageVersionText(packageVersions[name]))}</span>` : ''}`).join('<br>')}</li>`);
         });
         [['orderChanged', '恢复加载顺序'], ['beautyChanged', '恢复美化配置'], ['settingsChanged', '恢复管理配置']].forEach(([key, label]) => { if (change[key]) items.push(`<li><strong class="gold">${label}</strong></li>`); });
+        if (orderChanges.length) {
+            const translate = value => window.modHubT?.(value) || value;
+            items.push(`<li><strong class="gold">${escapeHtml(translate('启用模组加载顺序对比'))}</strong><p class="grey">${escapeHtml(translate('仅列出加入、移出或相对顺序改变的模组；序号按完整启用列表计算。'))}</p><ul>${orderChanges.map(item => `<li><strong class="${item.kind === 'added' ? 'green' : item.kind === 'removed' ? 'red' : 'gold'}" data-modhub-no-translate>${escapeHtml(item.name)}</strong><br><span class="grey">${escapeHtml(orderChangeText(item))}</span></li>`).join('')}</ul></li>`);
+        }
         const list = items.length ? `<ul class="modhub-restore-notice-list" tabindex="0" aria-label="还原变更">${items.join('')}</ul>` : '<p class="grey">目标与当前模组状态一致。</p>';
         return `<p class="modhub-restore-notice-target">将还原到 <strong class="gold" data-modhub-no-translate>${escapeHtml(point.label)}</strong> 对应的模组状态。<br>时间：<strong class="gold">${escapeHtml(pointDate(point.at))}</strong></p>${list}<p><strong class="gold">还原前会保存当前模组状态</strong>，方便需要时撤销此次还原。</p><p class="modhub-restore-notice-summary"><strong class="green">当前 ModHub 恢复工具与游戏存档保留</strong>；完成后<strong class="gold">游戏将重新加载</strong>。</p>${riskMessages.length ? `<p class="red">${riskMessages.map(escapeHtml).join('<br>')}</p>` : ''}`;
     }
@@ -1048,11 +1059,12 @@
             return profile ? (typeof profile.bootJson.version === 'string' ? profile.bootJson.version : '') : null;
         };
         const packageVersions = Object.fromEntries([...changedNames].map(name => [name, { current: versionOf(currentProfiles, name), target: versionOf(profiles, name) }]));
-        return { target, changes, riskMessages, packageVersions };
+        const orderChanges = window.modHubDescribeOrderChanges(current.state.enabled, target.enabled);
+        return { target, changes, riskMessages, packageVersions, orderChanges };
     }
 
     async function preview(id) {
-        const result = { id, label: '', at: null, changes: { installed: [], updated: [], removed: [], enabled: [], disabled: [], orderChanged: false, beautyChanged: false, settingsChanged: false }, riskMessages: [], packageVersions: {}, canRestore: false };
+        const result = { id, label: '', at: null, changes: { installed: [], updated: [], removed: [], enabled: [], disabled: [], orderChanged: false, beautyChanged: false, settingsChanged: false }, riskMessages: [], packageVersions: {}, orderChanges: [], canRestore: false };
         try {
             const env = environment();
             const current = await snapshot(env);
@@ -1062,7 +1074,7 @@
             result.at = point.at;
             if (restoring || owner || window._modHubManagerBusy || current.rows.get(MODHUB_JOURNAL_KEY)) fail('另一项模组操作或恢复仍在进行');
             const built = await buildTarget(env, current, point);
-            return { ...result, changes: built.changes, riskMessages: built.riskMessages, packageVersions: built.packageVersions, canRestore: true };
+            return { ...result, changes: built.changes, riskMessages: built.riskMessages, packageVersions: built.packageVersions, orderChanges: built.orderChanges, canRestore: true };
         } catch (error) {
             return { ...result, reason: error.message || String(error) };
         }
@@ -1108,12 +1120,14 @@
             const point = readPoints(current.rows).find(item => item.id === id);
             if (!point) fail('还原点不存在或已过保留期限');
             // 每次提交从真实当前状态重新构建目标，不使用界面预览缓存。
-            const { target, changes: change, riskMessages, packageVersions } = await buildTarget(env, current, point);
+            const { target, changes: change, riskMessages, packageVersions, orderChanges } = await buildTarget(env, current, point);
             const changes = [['installed', '恢复已删除模组'], ['updated', '回退包体'], ['removed', '将移除的模组'], ['enabled', '恢复启用'], ['disabled', '恢复禁用']].filter(([key]) => change[key].length).map(([key, label]) => `${label}：${change[key].map(name => `${name}${['installed', 'updated', 'removed'].includes(key) ? `（${packageVersionText(packageVersions[name])}）` : ''}`).join('、')}`);
             if (change.orderChanged) changes.push('恢复加载顺序');
             if (change.beautyChanged) changes.push('恢复美化配置');
             if (change.settingsChanged) changes.push('恢复管理配置');
-            const confirmed = await window.modHubConfirm?.({ title: '确认时间点还原', message: `将还原到“${point.label}”对应的模组状态。\n时间：${pointDate(point.at)}\n\n${changes.join('\n') || '目标与当前模组状态一致'}\n\n还原前会保存当前模组状态。当前 ModHub 恢复工具与游戏存档保留；还原完成后重新加载。${riskMessages.length ? '\n\n' + riskMessages.join('\n') : ''}`, trustedMessageHtml: restoreConfirmationHtml(point, change, riskMessages, packageVersions), dialogClass: 'modhub-restore-notice', confirmText: '确认还原并重新加载', cancelText: '取消还原', confirmType: 'danger', onRender: dialog => mountDialog(dialog, !startupFinished) });
+            const orderDetail = orderChanges.length ? '\n\n' + (window.modHubT?.('启用模组加载顺序对比') || '启用模组加载顺序对比')
+                + '\n' + orderChanges.map(item => item.name + '：' + orderChangeText(item)).join('\n') : '';
+            const confirmed = await window.modHubConfirm?.({ title: '确认时间点还原', message: `将还原到“${point.label}”对应的模组状态。\n时间：${pointDate(point.at)}\n\n${changes.join('\n') || '目标与当前模组状态一致'}${orderDetail}\n\n还原前会保存当前模组状态。当前 ModHub 恢复工具与游戏存档保留；还原完成后重新加载。${riskMessages.length ? '\n\n' + riskMessages.join('\n') : ''}`, trustedMessageHtml: restoreConfirmationHtml(point, change, riskMessages, packageVersions, orderChanges), dialogClass: 'modhub-restore-notice', confirmText: '确认还原并重新加载', cancelText: '取消还原', confirmType: 'danger', onRender: dialog => mountDialog(dialog, !startupFinished) });
             if (!confirmed) { restoring = false; recoveryContext.releaseStorageLock?.(); return false; }
             const safety = { version: 1, id: `before-restore-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`, label: '还原前状态', kind: 'preRestore', userProtected: false, roundId: bootRound, at: Date.now(), source: sourceMetadata(env), state: current.state };
             const journal = { version: 1, pointId: id, pointLabel: point.label, pointAt: point.at, safetyPointId: safety.id, phase: 'prepared', source: current.state, target };
