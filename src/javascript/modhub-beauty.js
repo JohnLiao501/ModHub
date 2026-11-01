@@ -134,8 +134,16 @@ window.modHubLoadBeautyState = async function(syncAuto = true, removedModNames =
 window.modHubRenderBeautyUI = function() {
     const container = document.getElementById('modHubBeautyContainer');
     if (!container) return;
+    let integratedBeauty = '';
+    if (window.modHubMarketVersions?.getGameIdentity?.().distribution === 'lyra') {
+        integratedBeauty = '<div class="childItem grey modhub-hint-bar">此整合包可将美化直接写入游戏图像目录，这些图像不能在此启禁或排序。以模组提供的美化仍按实际注册项管理；切换内置图像需更换对应整合包。</div>';
+        const activeMods = [...(window._modHubModState?.sideEnabled || []), ...(window._modHubModState?.builtInMods || [])];
+        if (activeMods.some(name => /^GameOriginalImagePack(?:-\d|$)/i.test(String(name).trim()))) {
+            integratedBeauty += '<div class="childItem gold modhub-hint-bar">检测到已启用的 GameOriginalImagePack。该图像包可能覆盖整合包自带美化；如需使用内置图像，请在模组管理中禁用该包并重新载入。</div>';
+        }
+    }
     if (!window._modHubBeautyState) {
-        container.innerHTML = '<div class="mod-empty grey">未检测到 BeautySelectorAddon，暂时无法管理美化图像包。</div>';
+        container.innerHTML = integratedBeauty + '<div class="mod-empty grey">未检测到 BeautySelectorAddon，暂时无法管理美化图像包。</div>';
         window.modHubLocalizeOwned?.(container);
         return;
     }
@@ -144,6 +152,7 @@ window.modHubRenderBeautyUI = function() {
     const autoBeautyEnabled = window.modHubIsAutoBeautyEnabled();
 
     let html = `
+        ${integratedBeauty}
         ${window.modHubMigration?.isBeautyPending?.() ? '<div class="childItem grey modhub-hint-bar">模组迁移尚未结束，美化自动同步已暂停，以保留待恢复的选择。请在【更多工具 → 模组迁移】中继续或结束任务，之后恢复自动同步。</div>' : ''}
         <div class="childItem modhub-section modhub-beauty-auto-box">
             <label class="modhub-checkbox-label">

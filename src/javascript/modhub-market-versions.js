@@ -25,12 +25,21 @@
 
     function getGameIdentity() {
         const rawVersion = typeof window.StartConfig?.version === 'string' ? window.StartConfig.version : '';
-        const dolp = rawVersion.trim().match(/^v?(\d+(?:\.\d+)*)\s+DoLP\s+(?:v\s*)?(\d+(?:\.\d+)*)(?:[-+].*)?$/i);
+        const dolp = rawVersion.trim().match(/^v?(\d+(?:\.\d+)*)\s+DoLP\s+(?:v\s*)?(\d+(?:\.\d+)*)(?:\s+DoLX\s+(?:v\s*)?(\d+(?:\.\d+)*[a-z]?))?(?:[-+].*)?$/i);
         const version = normalizeGameVersion(dolp ? dolp[1] : rawVersion);
-        const branchVersion = dolp ? normalizeGameVersion(dolp[2]) : '';
-        const branch = dolp && version && branchVersion ? 'dolp'
-            : version && !/(?:^|[^a-z0-9])(?:dolp|dol[\s_-]*plus)(?=$|[^a-z0-9])/i.test(rawVersion) ? 'dol' : 'unknown';
-        return { branch, version: branch === 'unknown' ? '' : version, branchVersion, rawVersion };
+        const parentBranchVersion = dolp ? normalizeGameVersion(dolp[2]) : '';
+        const dolxVersion = dolp?.[3] || '';
+        const validDoLX = Boolean(dolxVersion && normalizeGameVersion(dolxVersion.replace(/[a-z]$/i, '')));
+        const branchVersion = dolxVersion ? validDoLX ? dolxVersion : '' : parentBranchVersion;
+        const hasDoLX = /(?:^|[^a-z0-9])dolx(?=$|[^a-z0-9])/i.test(rawVersion);
+        const branch = dolp && version && parentBranchVersion && (!hasDoLX || validDoLX) ? dolxVersion ? 'dolx' : 'dolp'
+            : version && !/(?:^|[^a-z0-9])(?:dolp|dol[\s_-]*plus|dolx)(?=$|[^a-z0-9])/i.test(rawVersion) ? 'dol' : 'unknown';
+        // Lyra 信息包也用于衍生整合；图片来源不能用来推断游戏内容分支。
+        const lyra = window.modHubGetModInfo?.('Lyra');
+        const lyraBoot = lyra?.bootJson || lyra;
+        return { branch, version: branch === 'unknown' ? '' : version, branchVersion, rawVersion,
+            ...(branch === 'dolx' ? { parentBranch: 'dolp', parentBranchVersion } : {}),
+            ...(lyraBoot?.name === 'Lyra' ? { distribution: 'lyra', distributionVersion: String(lyraBoot.version || '') } : {}) };
     }
 
     function getGameVersion() {
@@ -39,8 +48,17 @@
 
     function getGameVersionLabel() {
         const identity = getGameIdentity();
-        return identity.branch === 'dolp' ? `DoLP ${identity.branchVersion}（DoL ${identity.version}）`
+        const label = identity.branch === 'dolx' ? `DoLX ${identity.branchVersion}（DoLP ${identity.parentBranchVersion}；DoL ${identity.version}）`
+            : identity.branch === 'dolp' ? `DoLP ${identity.branchVersion}（DoL ${identity.version}）`
             : identity.version ? `DoL ${identity.version}` : '';
+        return identity.distribution === 'lyra' ? `Lyra (${label || identity.rawVersion || '?'})` : label;
+    }
+
+    function getGameCompatibilityWarning() {
+        const identity = getGameIdentity();
+        if (identity.branch === 'dolp') return '当前为 DoLP，作者的 DoL 版本范围不能证明 DoLP 适配，请查看作者说明。';
+        if (identity.branch === 'dolx') return '当前为 DoLX，作者的 DoL 或 DoLP 版本说明不能证明 DoLX 适配，请查看作者说明。';
+        return identity.distribution === 'lyra' ? '当前为 Lyra 系整合包，DoL 基线版本相同不能证明整合模组与图像兼容，请查看作者说明。' : '';
     }
 
     function isNativeRangeSyntaxSupported(range) {
@@ -113,8 +131,9 @@
     function assessCompatibility(range, gameVersion = getGameVersion()) {
         const unknown = reason => ({ status: 'unknown', reason });
         const version = normalizeGameVersion(gameVersion);
+        const warning = getGameCompatibilityWarning();
+        if (warning) return { ...unknown(warning), branchUnverified: true };
         if (!version) return unknown('当前游戏版本未能识别，请按作者说明选择安装包');
-        if (getGameIdentity().branch === 'dolp') return { ...unknown('当前为 DoLP，作者的 DoL 版本范围不能证明 DoLP 适配，请查看作者说明。'), branchUnverified: true };
         if (typeof range !== 'string' || !range.trim()) return unknown('支持的游戏版本将在下载后检查');
         if (!isNativeRangeSyntaxSupported(range)) return unknown('暂不能识别作者的游戏版本说明，请查看发布说明');
         const result = assessVersionRange(version, range, true);
@@ -571,10 +590,12 @@
 
     function candidateCompatibility(asset, release, gameVersion) {
         const identity = getGameIdentity();
-        const dolpAsset = /(?:^|[^a-z0-9])(?:dolp|dol[\s_-]*plus)(?=$|[^a-z0-9])/i.test(asset.name);
-        if (dolpAsset && identity.branch === 'dol') return {
-            status: 'unknown', evidence: 'filename', gameVersion, gameBranch: 'dolp', branchMismatch: true, referenceMismatch: true,
-            reason: '安装包名称标注适用于 DoLP，当前游戏为 DoL，请按作者说明选择安装包。'
+        const assetBranch = /(?:^|[^a-z0-9])(?:dolx|x[\s_-]*change)(?=$|[^a-z0-9])/i.test(asset.name) ? 'dolx'
+            : /(?:^|[^a-z0-9])(?:dolp|dol[\s_-]*plus)(?=$|[^a-z0-9])/i.test(asset.name) ? 'dolp' : 'dol';
+        if (assetBranch !== 'dol' && identity.branch !== 'unknown' && assetBranch !== identity.branch) return {
+            status: 'unknown', evidence: 'filename', gameVersion, gameBranch: assetBranch, branchMismatch: true, referenceMismatch: true,
+            reason: assetBranch === 'dolp' && identity.branch === 'dol' ? '安装包名称标注适用于 DoLP，当前游戏为 DoL，请按作者说明选择安装包。'
+                : '安装包名称标注了其他游戏分支，请按作者说明选择适用于当前游戏的安装包。'
         };
         const declaration = asset.compatibility?.gameVersionRange ? asset.compatibility : release.compatibility;
         if (declaration?.gameVersionRange) return { ...assessCompatibility(declaration.gameVersionRange, gameVersion),
@@ -582,23 +603,23 @@
         const target = normalizeGameVersion(asset.targetGameVersion || window.modHubMarket.getAssetGameVersion(asset.name));
         if (target) {
             const matches = Boolean(gameVersion && window.modHubMarket.compareVersions(target, gameVersion) === 0);
-            if (identity.branch === 'dolp' && !dolpAsset) return {
-                status: 'unknown', evidence: 'filename', gameVersion, gameBranch: 'dol', branchUnverified: true,
-                targetGameVersion: target, reason: '安装包名称仅标注 DoL 版本，尚未确认 DoLP 适配，请查看作者说明。'
+            if (getGameCompatibilityWarning() && (assetBranch !== identity.branch || identity.distribution)) return {
+                status: 'unknown', evidence: 'filename', gameVersion, gameBranch: assetBranch, branchUnverified: true,
+                targetGameVersion: target, reason: identity.branch === 'dolp' ? '安装包名称仅标注 DoL 版本，尚未确认 DoLP 适配，请查看作者说明。' : getGameCompatibilityWarning()
             };
-            const gameName = dolpAsset ? 'DoLP 的 DoL 基线' : 'DoL';
+            const gameName = assetBranch === 'dolx' ? 'DoLX 的 DoL 基线' : assetBranch === 'dolp' ? 'DoLP 的 DoL 基线' : 'DoL';
             return { status: 'unknown', evidence: 'filename', referenceMismatch: Boolean(gameVersion && !matches), gameVersion,
-                gameBranch: dolpAsset ? 'dolp' : 'dol',
+                gameBranch: assetBranch,
                 targetGameVersion: target, reason: !gameVersion
                     ? `安装包名称标注适用于 ${gameName} ${target}。当前游戏版本未能识别`
                     : matches ? `安装包名称标注适用于当前 ${gameName} ${target}`
                         : `安装包名称标注适用于 ${gameName} ${target}，当前游戏为 ${getGameVersionLabel()}` };
         }
-        return { status: 'unknown', evidence: 'unknown', gameVersion, gameBranch: dolpAsset ? 'dolp' : identity.branch,
-            ...(identity.branch === 'dolp' && !dolpAsset ? { branchUnverified: true } : {}), reason: identity.branch === 'dolp'
-                ? '当前为 DoLP，模组是否适用于此分支尚未确认，请查看作者说明。' : gameVersion
+        return { status: 'unknown', evidence: 'unknown', gameVersion, gameBranch: assetBranch === 'dol' ? identity.branch : assetBranch,
+            ...(getGameCompatibilityWarning() ? { branchUnverified: true } : {}), reason: identity.branch === 'dolp'
+                ? '当前为 DoLP，模组是否适用于此分支尚未确认，请查看作者说明。' : getGameCompatibilityWarning() || (gameVersion
             ? '支持的游戏版本将在下载后检查'
-            : '当前游戏版本未能识别，请查看作者说明' };
+            : '当前游戏版本未能识别，请查看作者说明') };
     }
 
     function getCandidateStatus(candidate, { recommended = false } = {}) {
@@ -607,7 +628,8 @@
         if (info.branchMismatch) {
             label = '名称标注其他游戏分支';
         } else if (info.branchUnverified) {
-            label = 'DoLP 适配待核对';
+            const identity = getGameIdentity();
+            label = identity.branch === 'dolp' ? 'DoLP 适配待核对' : identity.branch === 'dolx' ? 'DoLX 适配待核对' : '整合包适配待核对';
         } else if (info.status === 'incompatible') {
             label = '作者支持范围不符';
             tone = 'red';
@@ -1049,5 +1071,5 @@
         })];
     }
 
-    window.modHubMarketVersions = { getGameIdentity, getGameVersion, getGameVersionLabel, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchOfficialReleaseAsset, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
+    window.modHubMarketVersions = { getGameIdentity, getGameVersion, getGameVersionLabel, getGameCompatibilityWarning, formatReleaseDate, formatVersionRange, assessVersionRange, assessCompatibility, fetchOfficialReleaseAsset, fetchReleases, isUnsafeHistoryError: unsafeHistoryError, getHistoryErrorInfo, getHistorySelectionWarnings, buildCandidates, getLegacyVerifiedRelease, getLatestGameCandidate, getLatestReleaseCandidate, getLatestUpdateCandidate, getDefaultSelection, rankCandidates, getCandidateStatus, renderCandidateOptions };
 })();

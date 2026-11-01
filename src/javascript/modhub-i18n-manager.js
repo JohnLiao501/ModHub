@@ -1,5 +1,13 @@
 /** ModHub 管理器与公共界面语言包。 */
 window.modHubRegisterTranslations({
+  "此整合包可将美化直接写入游戏图像目录，这些图像不能在此启禁或排序。以模组提供的美化仍按实际注册项管理；切换内置图像需更换对应整合包。": [
+    "此整合包可將美化直接寫入遊戲圖像目錄，這些圖像無法在此啟停或排序。以模組提供的美化仍按實際註冊項目管理；切換內建圖像需更換對應整合包。",
+    "This distribution can place visual replacements directly in the game image folder. These images cannot be toggled or reordered here. Visual mods are managed through their registered entries. To change bundled images, use the corresponding distribution package."
+  ],
+  "检测到已启用的 GameOriginalImagePack。该图像包可能覆盖整合包自带美化；如需使用内置图像，请在模组管理中禁用该包并重新载入。": [
+    "偵測到已啟用的 GameOriginalImagePack。此圖像包可能覆蓋整合包內建美化；若要使用內建圖像，請在模組管理中停用此包並重新載入。",
+    "An enabled GameOriginalImagePack was detected. It may override this distribution's bundled visuals. To use the bundled images, disable that package in mod management and reload."
+  ],
   // 品牌名保持原文，避免被下载线路译文反向识别。
   "ModHub": ["ModHub", "ModHub"],
   "模组功能页签，可左右滚动查看更多": [

@@ -809,6 +809,7 @@
             && [row.record.bootName, row.mod?.name].some(value => key(value).includes(key(search.trim()))));
         const game = window.modHubMarketVersions?.getGameIdentity?.() || {};
         const sourceGame = plan.manifest.source.gameBranch === 'dolp' ? 'DoLP ' + plan.manifest.source.gameBranchVersion + ' (DoL ' + plan.manifest.source.gameVersion + ')'
+            : plan.manifest.source.gameBranch === 'dolx' ? 'DoLX ' + plan.manifest.source.gameBranchVersion + ' (DoL ' + plan.manifest.source.gameVersion + ')'
             : plan.manifest.source.gameVersion ? 'DoL ' + plan.manifest.source.gameVersion : t('未识别');
         const targetGame = window.modHubMarketVersions?.getGameVersionLabel?.() || (game.version ? 'DoL ' + game.version : t('未识别'));
         const selection = await window.modHubConfirm({ title: '迁移预览', message: '清单仅记录模组环境，不含包体。将联网重新选版，目标环境的其他模组会保留。',

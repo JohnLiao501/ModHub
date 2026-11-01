@@ -6292,7 +6292,7 @@
         return (boots || []).flatMap(boot => {
             const gameRanges = (Array.isArray(boot?.dependenceInfo) ? boot.dependenceInfo : [])
                 .filter(dependency => dependency?.modName === 'GameVersion');
-            if (!gameRanges.length && versions.getGameIdentity?.().branch === 'dolp') gameRanges.push({ version: '' });
+            if (!gameRanges.length && versions.getGameCompatibilityWarning?.()) gameRanges.push({ version: '' });
             return gameRanges.flatMap(dependency => {
                 const range = String(dependency.version || '');
                 const assessment = versions.assessCompatibility(range, gameVersion);

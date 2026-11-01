@@ -636,6 +636,46 @@ window.modHubRegisterTranslations?.({
         "正在恢復的操作未完成",
         "Restore operation incomplete"
     ],
+    "停止本次恢复": [
+        "停止本次恢復",
+        "Stop this recovery"
+    ],
+    "保留恢复记录": [
+        "保留恢復記錄",
+        "Keep recovery record"
+    ],
+    "当前保存的配置与本次恢复记录不一致，重新打开游戏不会自动解除此冲突。": [
+        "目前儲存的設定與本次恢復記錄不一致，重新開啟遊戲不會自動解除此衝突。",
+        "The saved configuration no longer matches this recovery record. Reopening the game will not resolve this conflict automatically."
+    ],
+    "可停止本次恢复并重新加载，保留当前已保存的模组和配置。原还原点和还原前状态将设为手动保护，便于重新选择或撤销本次还原；确认不再需要后，可在时间点还原中取消保护。已完成的部分恢复不会撤销。选择保留恢复记录或关闭窗口时，游戏加载仍将暂停。": [
+        "可停止本次恢復並重新載入，保留目前已儲存的模組和設定。原還原點和還原前狀態將設為手動保護，便於重新選擇或撤銷本次還原；確認不再需要後，可在時間點還原中取消保護。已完成的部分恢復不會撤銷。選擇保留恢復記錄或關閉視窗時，遊戲載入仍將暫停。",
+        "You can stop this recovery and reload while keeping the saved mods and settings. The original restore point and the state saved before recovery will be manually protected so you can select them again or undo this restore. Remove their protection in Restore Points when they are no longer needed. Completed recovery steps will not be undone. Keeping the recovery record or closing this window leaves loading paused."
+    ],
+    "{error}\n\n当前保存的配置与本次恢复记录不一致，重新打开游戏不会自动解除此冲突。\n\n可停止本次恢复并重新加载，保留当前已保存的模组和配置。原还原点和还原前状态将设为手动保护，便于重新选择或撤销本次还原；确认不再需要后，可在时间点还原中取消保护。已完成的部分恢复不会撤销。选择保留恢复记录或关闭窗口时，游戏加载仍将暂停。": [
+        "{error}\n\n目前儲存的設定與本次恢復記錄不一致，重新開啟遊戲不會自動解除此衝突。\n\n可停止本次恢復並重新載入，保留目前已儲存的模組和設定。原還原點和還原前狀態將設為手動保護，便於重新選擇或撤銷本次還原；確認不再需要後，可在時間點還原中取消保護。已完成的部分恢復不會撤銷。選擇保留恢復記錄或關閉視窗時，遊戲載入仍將暫停。",
+        "{error}\n\nThe saved configuration no longer matches this recovery record. Reopening the game will not resolve this conflict automatically.\n\nYou can stop this recovery and reload while keeping the saved mods and settings. The original restore point and the state saved before recovery will be manually protected so you can select them again or undo this restore. Remove their protection in Restore Points when they are no longer needed. Completed recovery steps will not be undone. Keeping the recovery record or closing this window leaves loading paused."
+    ],
+    "恢复记录已被其他页面修改，未停止恢复": [
+        "恢復記錄已被其他頁面修改，未停止恢復",
+        "Another page changed the recovery record. Recovery was not stopped."
+    ],
+    "停止恢复后记录回读不一致": [
+        "停止恢復後記錄回讀不一致",
+        "The recovery records did not match when read back after stopping recovery."
+    ],
+    "停止恢复未完成": [
+        "停止恢復未完成",
+        "Could not finish stopping recovery"
+    ],
+    "停止操作尚未核验完成，游戏加载仍将暂停。请重新打开游戏后核对。": [
+        "停止操作尚未核驗完成，遊戲載入仍將暫停。請重新開啟遊戲後核對。",
+        "Stopping recovery has not been fully verified. Loading remains paused. Reopen the game to check the state."
+    ],
+    "{error}\n\n停止操作尚未核验完成，游戏加载仍将暂停。请重新打开游戏后核对。": [
+        "{error}\n\n停止操作尚未核驗完成，遊戲載入仍將暫停。請重新開啟遊戲後核對。",
+        "{error}\n\nStopping recovery has not been fully verified. Loading remains paused. Reopen the game to check the state."
+    ],
     "上次游戏启动未完成，可以尝试时间点恢复。": [
         "上次游戲啟動未完成，可以嘗試時間點恢復。",
         "The previous startup did not complete. You can try a restore point."

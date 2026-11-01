@@ -719,10 +719,11 @@
 
     function sameMods(a, b) { return same([a.enabled, a.disabled, a.packages], [b.enabled, b.disabled, b.packages]); }
     function checkReplaySource(journal, current) {
-        if (journal.version !== 1 || !journal.source || !sameMods(current, journal.source) && !sameMods(current, journal.target)) fail('恢复期间模组状态被其他页面修改，已停止覆盖');
+        const conflict = message => { throw Object.assign(new Error(message), { code: 'MODHUB_RESTORE_CONFLICT' }); };
+        if (journal.version !== 1 || !journal.source || !sameMods(current, journal.source) && !sameMods(current, journal.target)) conflict('恢复期间模组状态被其他页面修改，已停止覆盖');
         const beautyMatches = state => current.beauty.hasValue === state.beauty.hasValue && current.beauty.value === state.beauty.value;
-        if (!beautyMatches(journal.source) && !beautyMatches(journal.target)) fail('恢复期间美化配置被其他页面修改，已停止覆盖');
-        if (MODHUB_SETTINGS.some(key => current.settings[key] !== journal.source.settings[key] && current.settings[key] !== journal.target.settings[key])) fail('恢复期间设置被其他页面修改，已停止覆盖');
+        if (!beautyMatches(journal.source) && !beautyMatches(journal.target)) conflict('恢复期间美化配置被其他页面修改，已停止覆盖');
+        if (MODHUB_SETTINGS.some(key => current.settings[key] !== journal.source.settings[key] && current.settings[key] !== journal.target.settings[key])) conflict('恢复期间设置被其他页面修改，已停止覆盖');
     }
 
     function equalPackage(a, b) {
@@ -850,7 +851,7 @@
             const packageKeys = new Set([...expected.keys()].filter(key => typeof key === 'string' && key.startsWith(env.prefix)));
             const seen = new Set();
             const checkedKeys = [env.enabledKey, env.disabledKey, MODHUB_POINTS_KEY, MODHUB_JOURNAL_KEY, MODHUB_STARTUP_KEY, configKey(env)];
-            if (values.some(([key]) => key === MODHUB_SUCCESS_KEY)) checkedKeys.push(MODHUB_SUCCESS_KEY);
+            if (values.some(([key]) => key === MODHUB_SUCCESS_KEY) || deletes.includes(MODHUB_SUCCESS_KEY)) checkedKeys.push(MODHUB_SUCCESS_KEY);
             for (const key of checkedKeys) {
                 const request = store.get(key);
                 request.onsuccess = () => {
@@ -1283,6 +1284,30 @@
             if (journal) {
                 restoring = true;
                 try { await runJournal(env, journal); } catch (error) {
+                    if (error.code === 'MODHUB_RESTORE_CONFLICT') {
+                        const stop = await window.modHubConfirm?.({ title: '正在恢复的操作未完成', message: `${error.message}\n\n当前保存的配置与本次恢复记录不一致，重新打开游戏不会自动解除此冲突。\n\n可停止本次恢复并重新加载，保留当前已保存的模组和配置。原还原点和还原前状态将设为手动保护，便于重新选择或撤销本次还原；确认不再需要后，可在时间点还原中取消保护。已完成的部分恢复不会撤销。选择保留恢复记录或关闭窗口时，游戏加载仍将暂停。`, confirmText: '停止本次恢复', cancelText: '保留恢复记录', confirmType: 'danger', onRender: dialog => mountDialog(dialog, true) });
+                        if (stop !== true) return;
+                        try {
+                            const current = await entries(env);
+                            if (!same(current.get(MODHUB_JOURNAL_KEY), journal)) throw busy('恢复记录已被其他页面修改，未停止恢复');
+                            const points = parsePoints(current.get(MODHUB_POINTS_KEY)).map(point =>
+                                point.id === journal.pointId || point.id === journal.safetyPointId
+                                    || !journal.safetyPointId && pointKind(point) === 'preRestore' && sameState(point.state, journal.source)
+                                    ? { ...point, userProtected: true } : point);
+                            // 用户确认后保留两个引用点，防止解除日志保护后立即被历史配额清理。
+                            await guardedValues(env, current, [[MODHUB_POINTS_KEY, points]], [MODHUB_JOURNAL_KEY, MODHUB_SUCCESS_KEY]);
+                            await transaction(env, 'readonly', (store, done) => {
+                                for (const [key, expected] of [[MODHUB_JOURNAL_KEY, undefined], [MODHUB_SUCCESS_KEY, undefined], [MODHUB_POINTS_KEY, points]]) {
+                                    const request = store.get(key);
+                                    request.onsuccess = () => { if (!same(request.result, expected)) done.fail(new Error('停止恢复后记录回读不一致')); };
+                                }
+                            });
+                            window.location.reload();
+                        } catch (cause) {
+                            await window.modHubConfirm?.({ title: '停止恢复未完成', message: `${cause.message}\n\n停止操作尚未核验完成，游戏加载仍将暂停。请重新打开游戏后核对。`, cancelText: '', onRender: dialog => mountDialog(dialog, true) });
+                        }
+                        return;
+                    }
                     await window.modHubConfirm?.({ title: '正在恢复的操作未完成', message: `${error.message}\n\n游戏加载已暂停。关闭其他游戏页面、释放空间后重新进入，将继续同一恢复操作。`, cancelText: '', onRender: dialog => mountDialog(dialog, true) });
                 }
                 return;
