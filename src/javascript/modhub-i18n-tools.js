@@ -1,5 +1,14 @@
 /** ModHub 还原、说明、美化与日志界面的本地文案。 */
 window.modHubRegisterTranslations?.({
+    "安装包变更缺少完整目标模组档案，已停止写入": ["安裝包變更缺少完整目標模組資料，已停止寫入", "The package changes are missing complete target mod profiles. Writing has stopped."],
+    "安装目标模组档案格式或技术名不一致，已停止写入": ["安裝目標模組資料格式或技術名稱不一致，已停止寫入", "The target mod profiles have invalid formats or mismatched technical names. Writing has stopped."],
+    "安装目标模组档案包含重复技术名，已停止写入": ["安裝目標模組資料含有重複技術名稱，已停止寫入", "The target mod profiles contain duplicate technical names. Writing has stopped."],
+    "安装目标模组档案缺少已启用模组，已停止写入": ["安裝目標模組資料缺少已啟用模組，已停止寫入", "The target mod profiles are missing enabled mods. Writing has stopped."],
+    "模组启用与禁用列表重复，无法核对当前状态": ["模組啟用與停用清單重複，無法核對目前狀態", "The enabled and disabled mod lists overlap. The current state could not be verified."],
+    "模组启禁登记不完整，已停止写入。请先在原生模组管理器核对。": ["模組啟用停用登記不完整，已停止寫入。請先在原生模組管理器核對。", "The mod registrations are incomplete. Writing has stopped. Check them in the native mod manager first."],
+    "操作期间模组存储位置或操作锁已变化，已停止写入": ["操作期間模組儲存位置或操作鎖已變更，已停止寫入", "The mod storage location or operation lock changed. Writing has stopped."],
+    "模组状态无法核对": ["模組狀態無法核對", "Mod state could not be verified"],
+    "未能完整读取已保存的模组状态，本次操作已停止。\n\n错误详情：{p0}": ["未能完整讀取已儲存的模組狀態，本次操作已停止。\n\n錯誤詳情：{p0}", "The saved mod state could not be read completely. This operation has stopped.\n\nError details: {p0}"],
     "时间点还原": [
         "時間點還原",
         "Restore points"

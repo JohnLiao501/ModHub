@@ -6,6 +6,7 @@
     const MODHUB_GAME_BACKUP_PREFIX = 'modhub-game-';
     const fail = message => { throw new Error(message); };
     const errorText = error => error?.name && error?.message ? error.name + ': ' + error.message : String(error);
+    const t = value => window.modHubT?.(value) || value;
 
     function validate(payload) {
         if (!payload || typeof payload !== 'object' || Array.isArray(payload)) fail('JS 操作内容无效。');
@@ -55,8 +56,8 @@
         if (!sameState(state, snapshot(game()))) fail('游戏状态已变化，请重新预览 JS 操作。');
         return {
             text: '操作说明\n' + value.summary + '\n\n纯 JS 脚本\n' + value.script + '\n\n验证步骤\n' + value.verification
-                + '\n\n执行前将保存原生正常游戏存档，可下载 .save 后通过游戏存档界面导入。备份遵循原生存档范围，不覆盖整页、浏览器环境或所有即时副作用。'
-                + '\n仅运行纯 JS，不解释 Twine 宏。异步任务不受控，不能保证完成；执行后请按验证步骤核验。',
+                + '\n\n' + t('执行前将保存原生正常游戏存档，可下载 .save 后通过游戏存档界面导入。备份用于恢复游戏存档，运行前请核对涉及的页面数据和网络操作。')
+                + '\n' + t('仅运行纯 JS，不解释 Twine 宏。异步任务可能在脚本返回后继续执行，请按验证步骤核对结果。'),
             stamp
         };
     }
@@ -144,7 +145,7 @@
             if (!sameState(savedState, snapshot(game()))) fail('游戏状态已变化，JS 未运行。');
             started = true;
             window.SugarCube.Scripting.evalJavaScript(value.script);
-            return { ok: true, backupId, message: 'JS 已运行。异步任务不受控，不能保证完成；请按验证步骤核验。' };
+            return { ok: true, backupId, message: 'JS 已运行。异步任务可能仍在执行，请按验证步骤核对结果。' };
         } catch (error) {
             return {
                 ok: false, backupId,

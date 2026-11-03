@@ -6977,12 +6977,9 @@
                     return failBatch(reason || '安装未完成');
                 }
             } else if (typeof window.modHubInstallFilesViaIndexDB === 'function') {
-                await window.modHubInstallFilesViaIndexDB(filesToImport);
-            } else if (typeof gui.loadAndAddMod === 'function') {
-                await gui.loadAndAddMod(dummyInput);
-                invalidateLocalPackageProfiles();
+                await window.modHubInstallFilesViaIndexDB(filesToImport, { restoreContext: options.restoreContext });
             } else {
-                throw new Error('未找到 ModLoader 导入执行接口');
+                throw new Error('未找到可用的原子安装接口，请重新载入游戏后重试。');
             }
             if (options.restoreContext?.reloadOnChange) window.modHubRegisterOperationReload(options.restoreContext,
                 `模组【${mod.name}】已成功安装并载入配置。`, { isFramework: window.modHubIsFrameworkMod?.(mod.name) });

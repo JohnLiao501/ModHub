@@ -12,7 +12,7 @@
         ['本机数据相关文本', /\b(?:localStorage|sessionStorage|indexedDB|caches)\b|\bdocument\s*(?:\.\s*cookie|\[\s*['"]cookie['"]\s*\])/, '文本中包含浏览器存储或 Cookie 相关名称，可能涉及本机数据。'],
         ['动态求值文本', /\b(?:eval|Function)\b|\bimport\s*\(/, '文本中包含动态执行或加载代码相关名称。'],
         ['脚本或 HTML 注入文本', /\b(?:innerHTML|outerHTML|insertAdjacentHTML)\b|\bdocument\s*\.\s*write(?:ln)?\s*\(|<\s*script\b|\bon[a-z]+\s*=|\bjavascript\s*:|\bcreateElement\s*\(\s*['"`]script['"`]/i, '文本中包含页面内容写入、脚本或事件处理相关特征。'],
-        ['异步调度文本', /\b(?:setTimeout|setInterval|requestAnimationFrame|queueMicrotask|Promise|async|await)\b|\.\s*then\s*\(/, '文本中包含异步执行相关名称；同步返回不能证明后续任务已完成。']
+        ['异步调度文本', /\b(?:setTimeout|setInterval|requestAnimationFrame|queueMicrotask|Promise|async|await)\b|\.\s*then\s*\(/, '文本中包含异步执行相关名称；后续任务可能仍在运行，请按验证步骤核对结果。']
     ];
 
     function inspectCodeSources(files) {

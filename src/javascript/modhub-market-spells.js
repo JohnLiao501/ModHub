@@ -205,8 +205,8 @@
                     ['使用步骤', entry.spell.instructions], ['参数', entry.spell.parameters], ['前提条件', entry.spell.prerequisites],
                     ['适配 DoL', entry.spell.gameVersionRange || t('未知，请核对原帖')], ['适用模组及版本', entry.spell.modVersions],
                     ['验证方法', entry.spell.verificationMethod], ['核验说明', t(entry.spell.submittedEnvironmentVerified === true
-                        ? '提交者自述已在所列环境验证；通用适配尚未验证，不代表审核者完成游戏实测。'
-                        : '语法与使用资料已核验，未游戏实测')]];
+                        ? '提交者确认已在所列环境中验证。使用前请核对游戏和模组版本。'
+                        : '语法与使用资料已核对，使用前请核对适用环境。')]];
                 fields.forEach(([label, value]) => {
                     if (!value) return;
                     const paragraph = document.createElement('p');

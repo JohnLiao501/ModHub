@@ -54,8 +54,28 @@
         const enabledKey = schema.modDataIndexDBZipList;
         const disabledKey = schema.modDataIndexDBZipListHidden;
         const prefix = schema.calcModNameKey('');
-        if (![enabledKey, disabledKey, prefix, schema.dbName, schema.storeName].every(value => typeof value === 'string' && value.length > 0) || enabledKey === disabledKey || MODHUB_POINTS_KEY.startsWith(prefix) || MODHUB_CONFIG_PREFIX.startsWith(prefix)) fail('ModLoader 存储结构未知，已停止还原写入');
+        const reserved = [MODHUB_POINTS_KEY, MODHUB_JOURNAL_KEY, MODHUB_SUCCESS_KEY, MODHUB_STARTUP_KEY, MODHUB_CONFIG_PREFIX, MODHUB_BLOB_PREFIX];
+        const overlaps = (left, right) => left.startsWith(right) || right.startsWith(left);
+        if (![enabledKey, disabledKey, prefix, schema.dbName, schema.storeName].every(value => typeof value === 'string' && value.length > 0)
+            || enabledKey === disabledKey || reserved.some(key => overlaps(prefix, key))
+            || [enabledKey, disabledKey].some(key => key.startsWith(prefix) || reserved.some(metadata => overlaps(key, metadata)))) fail('ModLoader 存储结构未知，已停止还原写入');
         return { utils, modLoader, loader, enabledKey, disabledKey, prefix, dbName: schema.dbName, storeName: schema.storeName };
+    }
+
+    // 普通变更须保留真实包体的完整登记，救援快照仍按原始状态读取。
+    function validateOperationSource(env, rows, packageKeys = rows.keys()) {
+        const enabled = parseNames(rows.get(env.enabledKey));
+        const disabled = parseNames(rows.get(env.disabledKey));
+        const names = [...enabled, ...disabled];
+        if (names.some(name => name !== name.trim())) fail('模组列表格式未知，已停止还原写入');
+        if (new Set(names.map(name => name.toLowerCase())).size !== names.length) fail('模组启用与禁用列表重复，无法核对当前状态');
+        const registered = new Set(names);
+        for (const key of packageKeys) {
+            if (typeof key !== 'string' || !key.startsWith(env.prefix)) continue;
+            const name = key.slice(env.prefix.length);
+            if (!name || env.loader.constructor.calcModNameKey(name) !== key) fail('模组包体键格式未知');
+            if (!registered.has(name)) fail('模组启禁登记不完整，已停止写入。请先在原生模组管理器核对。');
+        }
     }
 
     function transaction(env, mode, action) {
@@ -390,7 +410,8 @@
     function garbage(rows, points, journal) {
         const used = new Set(points.flatMap(point => point.state.packages.map(item => item.hash)));
         journal?.target?.packages?.forEach(item => used.add(item.hash));
-        return [...rows.keys()].filter(key => typeof key === 'string' && key.startsWith(MODHUB_BLOB_PREFIX) && !used.has(key.slice(MODHUB_BLOB_PREFIX.length)));
+        return [...rows.keys()].filter(key => typeof key === 'string' && key.startsWith(MODHUB_BLOB_PREFIX)
+            && /^[a-f0-9]{64}$/.test(key.slice(MODHUB_BLOB_PREFIX.length)) && !used.has(key.slice(MODHUB_BLOB_PREFIX.length)));
     }
 
     const createOperation = (meta = {}) => {
@@ -424,10 +445,16 @@
         if (gameReady()) await markStartupSuccess();
         if (!claim(context)) return false;
         if (context.prepared) return true;
+        let verifySource;
         try {
             const env = environment();
             await storageLock(env, context);
             const rows = await entries(env);
+            validateOperationSource(env, rows);
+            verifySource = () => {
+                if (owner !== context || context.finished || context.cancelled || configKey(environment()) !== configKey(env)) throw busy('操作期间模组存储位置或操作锁已变化，已停止写入');
+                return guardedValues(env, rows, [], []);
+            };
             if (rows.get(MODHUB_JOURNAL_KEY)) throw busy('上次恢复尚未完成，请先完成恢复');
             const points = readPoints(rows);
             const active = rows.get(MODHUB_STARTUP_KEY);
@@ -453,11 +480,7 @@
             try { await guardedValues(env, before.rows, values, garbage(before.rows, next, null)); }
             catch (error) {
                 if (error?.name !== 'QuotaExceededError') throw error;
-                const unused = garbage(before.rows, points, null);
-                if (unused.length) {
-                    await guardedValues(env, before.rows, [], unused);
-                    unused.forEach(key => before.rows.delete(key));
-                }
+                // 淘汰仅更新候选目录，与新点和包体清理一起提交。
                 let retained = [...points];
                 const protectedIds = protectedPointIds(points);
                 const candidates = points.filter(item => !protectedIds.has(item.id)).reverse();
@@ -471,10 +494,6 @@
                         if (retryError?.name !== 'QuotaExceededError' || !candidates.length) throw retryError;
                         const dropped = candidates.shift();
                         retained = retained.filter(item => item.id !== dropped.id);
-                        const remove = garbage(before.rows, [point, ...retained], null);
-                        await guardedValues(env, before.rows, [[MODHUB_POINTS_KEY, retained]], remove);
-                        before.rows.set(MODHUB_POINTS_KEY, retained);
-                        remove.forEach(key => before.rows.delete(key));
                     }
                 }
             }
@@ -493,17 +512,22 @@
                 release(context);
                 throw error;
             }
-            if (error.code === 'MODHUB_BUSY') {
+            try {
+                if (!verifySource || error.code === 'MODHUB_BUSY') throw error;
+                await verifySource();
+                const proceed = await window.modHubConfirm?.({ title: '未能建立还原点', message: `无法进行自动备份，备份尚未执行。\n\n继续进行将跳过本次备份。如果后续出现问题，可能无法恢复到本次操作前的状态。\n\n建议取消操作然后重试。如果问题持续存在，请提供以下错误详情以便排查。\n\n错误详情：${error.message}`, confirmText: '不建立还原点，继续操作', cancelText: '取消操作', confirmType: 'danger' });
+                if (!proceed) { context.cancelled = true; release(context); return false; }
+                await verifySource();
+                context.prepared = true;
+                context.withoutPoint = true;
+                return true;
+            } catch (sourceError) {
+                context.prepareError = sourceError;
                 context.cancelled = true;
                 release(context);
-                await window.modHubConfirm?.({ title: '模组操作正被占用', message: error.message, cancelText: '' });
+                await window.modHubConfirm?.({ title: sourceError.code === 'MODHUB_BUSY' ? '模组操作正被占用' : '模组状态无法核对', message: sourceError.code === 'MODHUB_BUSY' ? sourceError.message : `未能完整读取已保存的模组状态，本次操作已停止。\n\n错误详情：${sourceError.message}`, cancelText: '' });
                 return false;
             }
-            const proceed = await window.modHubConfirm?.({ title: '未能建立还原点', message: `无法进行自动备份，备份尚未执行。\n\n继续进行将跳过本次备份。如果后续出现问题，可能无法恢复到本次操作前的状态。\n\n建议取消操作然后重试。如果问题持续存在，请提供以下错误详情以便排查。\n\n错误详情：${error.message}`, confirmText: '不建立还原点，继续操作', cancelText: '取消操作', confirmType: 'danger' });
-            if (!proceed) { context.cancelled = true; release(context); return false; }
-            context.prepared = true;
-            context.withoutPoint = true;
-            return true;
         }
     }
 
@@ -753,7 +777,7 @@
     }
 
     /** 限定安装只增改本次包体，并与两份启禁列表在真实仓库中一起提交。 */
-    async function commitPackageChanges({ context, packages, guardedPackages = [], expectedEnabled, expectedDisabled, enabled, disabled } = {}) {
+    async function commitPackageChanges({ context, packages, guardedPackages = [], profiles, expectedEnabled, expectedDisabled, enabled, disabled } = {}) {
         if (!contexts.has(context) || owner !== context || !context.prepared || context.finished || context.cancelled || restoring) {
             throw busy('安装保护及操作锁尚未就绪，已停止写入');
         }
@@ -772,6 +796,14 @@
         names(packages.map(item => item?.name));
         if (!Array.isArray(guardedPackages)) fail('保留包体核验清单无效');
         names(guardedPackages.map(item => item?.name));
+        if (packages.length && profiles === undefined) fail('安装包变更缺少完整目标模组档案，已停止写入');
+        if (profiles !== undefined) {
+            if (!Array.isArray(profiles) || profiles.some(item => !item || typeof item.name !== 'string' || !item.name.trim() || item.name !== item.name.trim()
+                || !item.bootJson || typeof item.bootJson !== 'object' || Array.isArray(item.bootJson) || item.bootJson.name !== item.name)) fail('安装目标模组档案格式或技术名不一致，已停止写入');
+            if (new Set(profiles.map(item => item.name.toLowerCase())).size !== profiles.length) fail('安装目标模组档案包含重复技术名，已停止写入');
+            if (nextEnabled.some(name => !profiles.some(item => item.name === name))) fail('安装目标模组档案缺少已启用模组，已停止写入');
+        }
+        const targetProfiles = profiles?.map(item => ({ name: item.name, bootJson: JSON.parse(JSON.stringify(item.bootJson)) }));
         const copyPackage = value => {
             if (value === undefined) return undefined;
             equalPackage(value, value);
@@ -790,7 +822,7 @@
         const previousKeys = new Set(beforeNames.map(name => name.toLowerCase()));
         const changedKeys = new Set(changes.map(item => item.name.toLowerCase()));
         if (nextNames.some(name => !previousKeys.has(name.toLowerCase()) && !changedKeys.has(name.toLowerCase()))) fail('目标列表包含未提供安装包的新模组');
-        if (!same(recoveryOrder(nextEnabled), nextEnabled)) fail('目标列表不符合恢复工具及必要前置的加载顺序');
+        if (!same(recoveryOrder(nextEnabled, targetProfiles), nextEnabled)) fail('目标列表不符合恢复工具及必要前置的加载顺序');
         const env = environment();
         const packageKeys = changes.map(item => env.loader.constructor.calcModNameKey(item.name));
         const guardKeys = guards.map(item => env.loader.constructor.calcModNameKey(item.name));
@@ -801,39 +833,52 @@
         const transact = write => transaction(env, write ? 'readwrite' : 'readonly', (store, done) => {
             const rows = new Map();
             const keys = [env.enabledKey, env.disabledKey, ...checkedKeys];
+            const storedPackages = new Set();
+            let loaded = 0, scanned = false;
+            const complete = () => {
+                try {
+                    if (loaded !== keys.length || !scanned) return;
+                    if (!same(parseNames(rows.get(env.enabledKey)), write ? beforeEnabled : nextEnabled)
+                        || !same(parseNames(rows.get(env.disabledKey)), write ? beforeDisabled : nextDisabled)) {
+                        fail(write ? '安装前启禁配置已被其他操作更改，已停止覆盖' : '安装提交后的启禁配置回读不一致');
+                    }
+                    changes.forEach((item, index) => {
+                        const actual = rows.get(packageKeys[index]), expected = write ? item.expectedData : item.data;
+                        if (expected === undefined ? actual !== undefined : actual === undefined || !equalPackage(actual, expected)) {
+                            fail(write ? `模组【${item.name}】包体已被其他操作更改，已停止覆盖` : `模组【${item.name}】安装包提交后回读不一致`);
+                        }
+                    });
+                    guards.forEach((item, index) => {
+                        if (!write && changedKeys.has(item.name.toLowerCase())) return;
+                        const actual = rows.get(guardKeys[index]);
+                        if (actual === undefined || !equalPackage(actual, item.expectedData)) {
+                            fail(write ? `保留模组【${item.name}】包体已被其他操作更改，已停止切换` : `保留模组【${item.name}】提交后包体回读不一致`);
+                        }
+                    });
+                    validateOperationSource(env, rows, storedPackages);
+                    if (write) {
+                        if (owner !== context || context.finished || context.cancelled || restoring) throw busy('安装已取消或操作锁已改变，未写入数据');
+                        changes.forEach((item, index) => store.put(item.data, packageKeys[index]));
+                        store.put(JSON.stringify(nextEnabled), env.enabledKey);
+                        store.put(JSON.stringify(nextDisabled), env.disabledKey);
+                    }
+                    done(true);
+                } catch (error) { done.fail(error); }
+            };
             for (const key of keys) {
                 const request = store.get(key);
                 request.onsuccess = () => {
-                    try {
-                        rows.set(key, request.result);
-                        if (rows.size !== keys.length) return;
-                        if (!same(parseNames(rows.get(env.enabledKey)), write ? beforeEnabled : nextEnabled)
-                            || !same(parseNames(rows.get(env.disabledKey)), write ? beforeDisabled : nextDisabled)) {
-                            fail(write ? '安装前启禁配置已被其他操作更改，已停止覆盖' : '安装提交后的启禁配置回读不一致');
-                        }
-                        changes.forEach((item, index) => {
-                            const actual = rows.get(packageKeys[index]), expected = write ? item.expectedData : item.data;
-                            if (expected === undefined ? actual !== undefined : actual === undefined || !equalPackage(actual, expected)) {
-                                fail(write ? `模组【${item.name}】包体已被其他操作更改，已停止覆盖` : `模组【${item.name}】安装包提交后回读不一致`);
-                            }
-                        });
-                        guards.forEach((item, index) => {
-                            if (!write && changedKeys.has(item.name.toLowerCase())) return;
-                            const actual = rows.get(guardKeys[index]);
-                            if (actual === undefined || !equalPackage(actual, item.expectedData)) {
-                                fail(write ? `保留模组【${item.name}】包体已被其他操作更改，已停止切换` : `保留模组【${item.name}】提交后包体回读不一致`);
-                            }
-                        });
-                        if (write) {
-                            if (owner !== context || context.finished || context.cancelled || restoring) throw busy('安装已取消或操作锁已改变，未写入数据');
-                            changes.forEach((item, index) => store.put(item.data, packageKeys[index]));
-                            store.put(JSON.stringify(nextEnabled), env.enabledKey);
-                            store.put(JSON.stringify(nextDisabled), env.disabledKey);
-                        }
-                        done(true);
-                    } catch (error) { done.fail(error); }
+                    rows.set(key, request.result); loaded++; complete();
                 };
             }
+            const cursor = typeof store.openKeyCursor === 'function' ? store.openKeyCursor() : store.openCursor();
+            cursor.onsuccess = () => {
+                if (cursor.result) {
+                    const key = cursor.result.key;
+                    if (typeof key === 'string' && key.startsWith(env.prefix)) storedPackages.add(key);
+                    cursor.result.continue();
+                } else { scanned = true; complete(); }
+            };
         });
         await transact(true);
         try { await transact(false); }
@@ -847,7 +892,7 @@
     }
 
     function guardedValues(env, expected, values, deletes = []) {
-        return transaction(env, 'readwrite', (store, done) => {
+        return transaction(env, values.length || deletes.length ? 'readwrite' : 'readonly', (store, done) => {
             const packageKeys = new Set([...expected.keys()].filter(key => typeof key === 'string' && key.startsWith(env.prefix)));
             const seen = new Set();
             const checkedKeys = [env.enabledKey, env.disabledKey, MODHUB_POINTS_KEY, MODHUB_JOURNAL_KEY, MODHUB_STARTUP_KEY, configKey(env)];
@@ -876,8 +921,8 @@
                         cursor.continue();
                     } else {
                         if (seen.size !== packageKeys.size) throw busy('建立还原点前包体被其他页面删除，已停止操作');
-                        values.forEach(([key, value]) => store.put(value, key));
                         deletes.forEach(key => store.delete(key));
+                        values.forEach(([key, value]) => store.put(value, key));
                     }
                 } catch (error) { done.fail(error); }
             };

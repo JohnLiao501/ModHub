@@ -243,7 +243,7 @@
             Object.assign(snapshot, { runtime: metadata.runtime, loaderVersion: metadata.loaderVersion,
                 builtins: metadata.builtins, builtinKnown: metadata.builtinKnown });
             if (!metadata.runtimeKnown) addIssue(snapshot, 'runtime-unknown', 'review', '本次运行清单未能完整核对',
-                '当前加载器未提供实际运行顺序，下面仅列可读取的运行档案。', '请结合加载日志核对，不将缓存清单视为全部成功加载的模组。');
+                '当前加载器未提供实际运行顺序，下面仅列可读取的运行档案。', '请查看加载日志，核对各模组是否成功加载。');
             snapshot.lists = await window.modHubReadIndexDBModLists();
             if (!snapshot.lists.ok) throw snapshot.lists.error || new Error('当前无法读取已保存的启禁配置');
             const overlap = snapshot.lists.enabled.filter(name => snapshot.lists.disabled.some(disabled => key(name) === key(disabled)));
@@ -567,7 +567,7 @@
             + '<label class="modhub-ai-remember"><input id="modHubAiAutoContinue" type="checkbox" checked aria-describedby="modHubAiAutoScope">自动补充相关源码，持续定位</label><p id="modHubAiAutoScope" class="grey modhub-ai-send-notice"></p><details id="modHubAiAutoScopeDetails" class="modhub-help-topic"><summary>查看允许补充的源码范围</summary><div id="modHubAiAutoScopeList"></div></details>'
             + '<p class="grey modhub-ai-send-notice">点击“发送并分析”即同意发送上述材料及勾选的补充范围。服务可能收费；代码修改需另行确认。</p>'
             + '<div class="modhub-help-actions modhub-help-actions-primary">' + button('Analyze', '发送并分析', true) + '</div></div></div></section>'
-            + '<details id="modHubAiScopeDetails" class="modhub-help-topic modhub-ai-selection"><summary>高级选项：调整分析范围</summary><p class="grey">通常无需更改。日志提及的模组不一定是问题原因；只有预览并确认修改后才会保存代码。</p>'
+            + '<details id="modHubAiScopeDetails" class="modhub-help-topic modhub-ai-selection"><summary>高级选项：调整分析范围</summary><p class="grey">通常无需更改。可先分析日志，再根据结果调整范围；代码修改均需预览确认后保存。</p>'
             + '<p id="modHubAiSelectionReason" class="grey"></p>'
             + '<label class="modhub-ai-field">分析对象<select id="modHubAiTarget"><option value="">不确定，先分析日志</option></select></label>'
             + '<div class="modhub-help-actions modhub-help-actions-links">' + button('Prepare', '重新整理材料') + button('Refresh', '刷新日志与模组') + '</div>'
@@ -736,7 +736,7 @@
             el('LogSummary').innerHTML = ui('<details class="modhub-help-topic"><summary>加载日志：' + (analysis.errorCount || 0) + ' 条错误，' + (analysis.warnCount || 0) + ' 条警告</summary>'
                 + (aiDraft.error ? '<p class="grey">已保留您选择的完整错误。</p>' : '')
                 + (excerpts.length ? excerpts.slice(0, 3).map(item => '<pre class="modhub-ai-error">' + escape(item.message) + '</pre>').join('') : '<p class="grey">暂无错误或警告，将结合您的描述与环境清单分析。</p>')
-                + '<p class="grey">日志提及的模组不一定是问题原因；本次日志不能验证尚未重新载入的配置。</p></details>');
+                + '<p class="grey">请从具体错误和相关模组开始排查。配置更改后，重新载入游戏再查看最新日志。</p></details>');
         };
         const allowedSources = next => {
             const scope = new Map((next.sourceCatalog || []).map(source => [source.name, new Set(source.files.map(file => file.path))]));
@@ -759,7 +759,7 @@
             el('MaterialDetails').open = false;
             setText(el('TargetSummary'), next.name ? '【' + next.name + '】' + (next.bootJson?.version ? ' ' + next.bootJson.version : '') + '（待核对）' : '问题描述、环境清单与加载日志');
             const selectionText = next.files.length ? next.files.length + ' 个相关文件。可展开查看完整内容。'
-                : evidenceCount ? evidenceCount + ' 份只读源码证据；不能直接应用修改。'
+                : evidenceCount ? evidenceCount + ' 份只读源码证据，供后续分析。'
                 : next.sourceCatalog?.length ? '已整理文件清单和补丁声明。分析时可补充相关源码。' : '本次不提供源码。';
             setText(el('SelectionSummary'), selectionText + (gameEvidence.length ? ' 另附 ' + gameEvidence.length + ' 份游戏段落只读证据，可在完整材料中查看。' : ''));
             const scope = allowedSources(next);
@@ -768,7 +768,7 @@
                 : '本次没有可补充的已核验源码。将分析当前材料，不自动扩大范围。');
             el('AutoScopeDetails').hidden = !scope.size && !gameEvidence.length;
             el('AutoScopeList').innerHTML = ui([...scope].map(([name, paths]) => '<details class="modhub-help-topic"><summary>' + escape(name) + '（' + paths.size + ' 个文件）</summary><ul>' + [...paths].map(path => '<li>' + escape(path) + '</li>').join('') + '</ul></details>').join(''));
-            if (gameEvidence.length) el('AutoScopeList').innerHTML += ui('<details class="modhub-help-topic"><summary>游戏段落只读证据（' + gameEvidence.length + ' 份）</summary><ul>' + gameEvidence.map(item => '<li>' + escape(item.passage) + '（仅供核对，不能修改）</li>').join('') + '</ul></details>');
+            if (gameEvidence.length) el('AutoScopeList').innerHTML += ui('<details class="modhub-help-topic"><summary>游戏段落只读证据（' + gameEvidence.length + ' 份）</summary><ul>' + gameEvidence.map(item => '<li>' + escape(item.passage) + '（只读）</li>').join('') + '</ul></details>');
             el('ScopeDetails').open = false;
             el('Setup').hidden = false;
             if (review) {
@@ -1184,7 +1184,7 @@
         };
         el('Apply').onclick = () => run(async value => {
             if (!plan?.changes?.length) throw new Error('当前没有可应用的方案，请重新分析。');
-            if (!await window.modHubConfirm({ title: '确认应用 AI 代码修改', message: '将修改【' + plan.name + '】中的以下文件：\n' + [...new Set(plan.changes.map(item => item.path))].join('\n') + '\n\n保存前必须成功建立修复前时间点，启禁与顺序保留。AI 建议尚未验证，重新导入或更新模组会覆盖修改。是否应用已预览的方案？', confirmText: '建立还原点并应用', cancelText: '取消' })) return;
+            if (!await window.modHubConfirm({ title: '确认应用 AI 代码修改', message: '将修改【' + plan.name + '】中的以下文件：\n' + [...new Set(plan.changes.map(item => item.path))].join('\n') + '\n\n保存前必须成功建立修复前时间点，启禁与顺序保留。应用后请重新载入游戏并检查效果；重新导入或更新模组会覆盖修改。是否应用已预览的方案？', confirmText: '建立还原点并应用', cancelText: '取消' })) return;
             status('正在建立还原点、保存包体并回读核验。');
             const resultHash = plan.data ? await window.modHubAiPackage.hash(plan.data) : null;
             const result = await api.apply(plan);

@@ -334,7 +334,7 @@
         for (const item of previous.reverse()) {
             if (nextRecord.files.some(file => next.name === item.name && file.path === item.path) || seen.has(evidenceKey(item))) continue;
             if (size + byteLength(item.content) > MODHUB_AI_TOTAL_LIMIT) {
-                omitted.push({ name: item.name, path: item.path, reason: '累计源码证据超过 512 KiB，本轮未保留这份旧正文；已读记录不代表 AI 仍持有原文。' });
+                omitted.push({ name: item.name, path: item.path, reason: '累计源码证据超过 512 KiB，旧正文已移出本轮分析范围，需要时可重新读取。' });
                 continue;
             }
             current.push(copy(item)); seen.add(evidenceKey(item)); size += byteLength(item.content);
@@ -443,10 +443,10 @@
         const paths = chosen.map(file => file.path);
         let reason;
         if (!files.length) reason = '选定模组没有可读取的已声明源码，先分析日志。';
-        else if (matchedPaths.length && paths.length) reason = '根据' + (named.size ? '日志和问题描述中明确提到的文件' : '日志明确标识的段落及 TweeReplacer 声明') + '整理了 ' + paths.length + ' 个文件；这些是分析线索，不能据此确定错误原因。';
+        else if (matchedPaths.length && paths.length) reason = '根据' + (named.size ? '日志和问题描述中明确提到的文件' : '日志明确标识的段落及 TweeReplacer 声明') + '整理了 ' + paths.length + ' 个文件，供进一步分析具体错误。';
         else if (matchedPaths.length) reason = readable.length ? '明确相关的源码超过 20 个文件或 512 KiB，无法自动决定舍弃哪些文件。先分析日志，再缩小问题范围。'
             : '日志明确提到的源码单文件超过 256 KiB，不能截断发送。先分析日志，再核对可用的源码。';
-        else if (paths.length) reason = '日志未明确点名源码，已整理选定模组全部 ' + paths.length + ' 个声明文件供分析；这不代表该模组已被确定为错误来源。';
+        else if (paths.length) reason = '日志未明确点名源码，已整理选定模组的全部 ' + paths.length + ' 个声明文件，可继续分析以核对问题来源。';
         else reason = (ambiguousNames.length ? '日志中的同名文件无法唯一对应源码；' : '日志未提供可唯一对应源码的线索；') + '全部源码超过 20 个文件、512 KiB 或单文件 256 KiB 的上限。先分析日志，再缩小问题范围。';
         const omitted = files.filter(file => !paths.includes(file.path)).map(file => ({ path: file.path,
             reason: file.size > MODHUB_AI_FILE_LIMIT ? '单文件超过 256 KiB，不能截断发送' : matchedPaths.includes(file.path) ? '有明确线索，但相关文件合计超过本次上限' : '没有可唯一对应此文件的线索，未任意选取' }));

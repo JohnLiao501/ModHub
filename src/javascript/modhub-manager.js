@@ -187,6 +187,8 @@ window.modHubUniqueModNames = function(list) {
 window._modHubDisabledModInfo = window._modHubDisabledModInfo || new Map();
 window._modHubBatchMode = false;
 window._modHubSelectedMods = window._modHubSelectedMods || new Set();
+window._modHubManagerSearchText = window._modHubManagerSearchText || '';
+window.modHubIsManagerSearchActive = () => !!modHubManagerSearchQuery()?.tokens.length;
 
 const MODHUB_TABS = { manager: '模组管理', market: '模组市场', readme: '模组说明', log: '加载日志', help: '帮助中心' };
 window.modHubGetTabId = function(value) {
@@ -441,6 +443,11 @@ window.modHubSaveIndexDBModList = async function(enabledList, disabledList, opti
             console.warn('[ModHub] 检测到已安装但未登记的模组，保存时自动保留:', rescued);
             targetEnabled = window.modHubUniqueModNames([...targetEnabled, ...rescued]);
         }
+        const disabledRescued = current.disabled.filter(name => {
+            const key = name.trim().toLowerCase();
+            return key && !known.has(key) && !dropNames.has(key);
+        });
+        targetDisabled = window.modHubUniqueModNames([...targetDisabled, ...disabledRescued]);
     }
 
     targetEnabled = window.modHubKeepRecoveryOrder(targetEnabled);
@@ -1310,11 +1317,10 @@ window.modHubInitGlobalDragDrop = function() {
 // 立即在顶层启动全局拖拽安全拦截器
 window.modHubInitGlobalDragDrop();
 
-// 单模组安装核心方法：通过原生校验接口识别 Zip / ModPack，原样写入 IndexedDB。
-// 返回 { modName, bootJson, version, verified }；任一步骤无法确认落盘都会抛出可读异常。
-window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') {
+// Zip / ModPack 共用原生校验，包体保持原格式。
+async function modHubReadImportedPackage(fileOrBlob, preferredFileName = '') {
     const controller = window.modHubGetController();
-    if (!controller || typeof controller.addModIndexDB !== 'function') {
+    if (!controller) {
         throw new Error('未找到 ModLoadController 存储接口');
     }
 
@@ -1324,8 +1330,10 @@ window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') 
     const u8Data = new Uint8Array(arrayBuffer);
     const fileName = preferredFileName || fileOrBlob.name || '';
     const isNativePackage = MODHUB_NATIVE_PACKAGE_EXTENSION.test(fileName);
-    if (!MODHUB_ZIP_PACKAGE_EXTENSION.test(fileName) && typeof controller.checkModZipFileIndexDB !== 'function') {
-        throw new Error('当前 ModLoader 未提供 ModPack 校验接口，无法核验此二进制安装包；请使用支持该格式的加载器或作者提供的 Zip 包。');
+    if (typeof controller.checkModZipFileIndexDB !== 'function') {
+        throw new Error(MODHUB_ZIP_PACKAGE_EXTENSION.test(fileName)
+            ? '当前 ModLoader 未提供安装包校验接口，请更新 ModLoader 后重试。'
+            : '当前 ModLoader 未提供 ModPack 校验接口，无法核验此二进制安装包；请使用支持该格式的加载器或作者提供的 Zip 包。');
     }
 
     // 官方接口先尝试 ModPack 适配器，再回退 Zip；不转换格式或自行解码。
@@ -1356,58 +1364,56 @@ window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '') 
         throw new Error(`安装包校验失败（${checkFailed}）。${hint}`);
     }
 
-    // 旧加载器缺少校验接口时仅保留原有 Zip 名称回退，其余格式必须经过原生校验。
-    if (!modName) {
-        modName = fileName.replace(MODHUB_PACKAGE_EXTENSION, '') || 'UnknownMod';
-    }
+    return { name: modName, bootJson, data: u8Data };
+}
 
-    // 3. 写入 IndexedDB（addModIndexDB 同时将模组追加到启用列表）
-    await controller.addModIndexDB(modName, u8Data);
-    window.modHubMarket?.invalidateLocalPackageProfiles?.();
-
-    // 4. 从禁用列表中移除（若此前被禁用），确保新安装模组处于启用状态
-    try {
-        const hiddenList = await controller.loadHiddenModList() || [];
-        const key = modName.trim().toLowerCase();
-        if (hiddenList.some(name => String(name).trim().toLowerCase() === key)) {
-            const newHidden = hiddenList.filter(name => String(name).trim().toLowerCase() !== key);
-            await controller.overwriteModIndexDBHiddenModList(newHidden);
-        }
-    } catch (_) {}
-
-    // 5. 落盘强校验：确认包体已登记进启用列表
-    // 这是「点击安装、重启后却显示未安装」的直接防线：
-    // 只要启用列表里缺少这个名字，ModLoader 启动时就完全不会加载该包体。
-    if (bootJson) window._modHubDisabledModInfo.set(modName.trim().toLowerCase(), { name: modName, bootJson });
-    const ensured = await window.modHubEnsureModInEnabledList(modName);
-    if (!ensured.ok && !ensured.skipped) {
-        throw new Error(`模组【${modName}】包体已写入，但未能登记到启用列表：${ensured.reason || '未知原因'}`);
-    }
-    if (ensured.skipped) {
-        console.warn('[ModHub] 当前环境无法回读模组列表，跳过安装落盘校验:', ensured.reason);
-    }
-
-    return {
-        modName,
-        bootJson,
-        version: bootJson?.version ? String(bootJson.version) : '',
-        verified: ensured.ok === true
-    };
+// 返回已核验的真实身份；不调用会隐式切换存储的原生 GUI 导入。
+window.modHubInstallModZip = async function(fileOrBlob, preferredFileName = '', options = {}) {
+    const file = { name: preferredFileName || fileOrBlob?.name || '', arrayBuffer: () =>
+        typeof fileOrBlob.arrayBuffer === 'function' ? fileOrBlob.arrayBuffer() : Promise.resolve(fileOrBlob) };
+    return (await window.modHubInstallFilesViaIndexDB([file], options))[0];
 };
 
-// 批量安装文件流至 IndexedDB
-window.modHubInstallFilesViaIndexDB = async function(fileInputOrFiles) {
+// 本次安装的包体和两份启禁登记一起提交，失败时整笔回滚。
+window.modHubInstallFilesViaIndexDB = async function(fileInputOrFiles, options = {}) {
     const files = Array.isArray(fileInputOrFiles)
         ? fileInputOrFiles
         : Array.from(fileInputOrFiles?.files || []);
-    if (!files.length) return [];
-
-    const results = [];
-    for (const file of files) {
-        const res = await window.modHubInstallModZip(file, file.name);
-        results.push(res);
+    if (!files.length && !options.atomicPackageChanges?.switchGroup && !Object.keys(options.atomicPackageChanges?.desiredEnabled || {}).length) return [];
+    const prepared = [];
+    for (const file of files) prepared.push(await modHubReadImportedPackage(file, file.name));
+    const restore = window.modHubRestore;
+    if (!restore || ['createOperation', 'prepare', 'finish', 'commitPackageChanges'].some(key => typeof restore[key] !== 'function')) {
+        throw new Error('当前环境无法原子提交所选安装包与启禁配置，已停止安装');
     }
-    return results;
+    const context = options.restoreContext || restore.createOperation({ label: files.length > 1 ? '批量导入模组' : '导入模组' });
+    const ownContext = !options.restoreContext;
+    let committed = false;
+    let installError;
+    try {
+        if (!context.prepared && !await restore.prepare(context)) throw context.prepareError || new Error('已取消模组安装');
+        const names = await modHubCommitImportedPackages(prepared, options.atomicPackageChanges || {}, context);
+        committed = true;
+        return names.map(modName => {
+            const bootJson = prepared.find(item => item.name === modName)?.bootJson || window._modHubDisabledModInfo.get(modName.toLowerCase())?.bootJson;
+            return { modName, bootJson, version: bootJson?.version ? String(bootJson.version) : '', verified: true };
+        });
+    } catch (error) {
+        installError = error;
+        committed = committed || error.committed === true;
+        throw error;
+    } finally {
+        if (ownContext) {
+            await restore.finish(context);
+            if (context.finishError) {
+                const detail = '安装操作的还原点整理未完成：' + context.finishError.message;
+                if (installError) {
+                    installError.finishError = context.finishError;
+                    Object.defineProperty(installError, 'message', { value: installError.message + '\n\n' + detail, configurable: true, writable: true });
+                } else throw Object.assign(new Error(detail), { committed });
+            }
+        }
+    }
 };
 
 // 触发顶部导入模组选择
@@ -1435,7 +1441,7 @@ window.modHubFormatReloadMessage = function(message) {
         .replace(/\n/g, '<br>');
 };
 
-async function modHubCommitImportedPackages(files, options, context) {
+async function modHubCommitImportedPackages(prepared, options, context) {
     if (!options || typeof options !== 'object' || Array.isArray(options)) throw new Error('原子安装选项无效');
     const restore = window.modHubRestore, controller = window.modHubGetController();
     if (typeof restore?.commitPackageChanges !== 'function' || typeof controller?.checkModZipFileIndexDB !== 'function') {
@@ -1446,8 +1452,7 @@ async function modHubCommitImportedPackages(files, options, context) {
             || new Set(value.map(name => name.toLowerCase())).size !== value.length) throw new Error('安装配置包含无效或重复技术名');
         return [...value];
     };
-    const lists = await window.modHubReadIndexDBModLists();
-    if (!lists.ok) throw lists.error || new Error('无法核验安装前启禁配置');
+    const lists = await modHubReadReloadLists();
     const enabled = readNames(lists.enabled), disabled = readNames(lists.disabled);
     readNames([...enabled, ...disabled]);
     const key = name => name.toLowerCase();
@@ -1483,11 +1488,8 @@ async function modHubCommitImportedPackages(files, options, context) {
         if (registeredTarget && !switchGroup.snapshot.some(item => key(item.name) === key(targetName))) throw new Error('所选分支安装状态已改变，请重新生成安装计划');
     }
     const packages = [], boots = [];
-    for (const file of files) {
-        const data = new Uint8Array(await file.arrayBuffer());
-        const boot = await controller.checkModZipFileIndexDB(data);
-        const name = typeof boot?.name === 'string' ? boot.name.trim() : '';
-        if (!name || typeof boot !== 'object' || Array.isArray(boot)) throw new Error(`【${file.name || '所选文件'}】未提供有效模组清单，已停止安装`);
+    for (const item of prepared) {
+        const { name, data, bootJson: boot } = item;
         if (boots.some(item => key(item.name) === key(name))) throw new Error(`所选安装包重复提供【${name}】`);
         const previous = await window.modHubReadInstalledModPackage(name);
         if (previous.error) throw previous.error;
@@ -1513,17 +1515,25 @@ async function modHubCommitImportedPackages(files, options, context) {
     }
     const desiredDisabled = stateNames.filter(name => desiredEnabled[name] === false);
     const toDisable = new Set([...preserveDisabled, ...disabledNames, ...desiredDisabled].map(key));
-    const nextEnabled = window.modHubKeepRecoveryOrder(window.modHubUniqueModNames([
+    const requestedEnabled = window.modHubUniqueModNames([
         ...enabled.filter(name => !toDisable.has(key(name))),
         ...packages.map(item => item.name).filter(name => !toDisable.has(key(name))),
         ...stateNames.filter(name => desiredEnabled[name]),
         ...(targetName ? [targetName] : [])
-    ]), boots.map(bootJson => ({ name: bootJson.name, bootJson })));
+    ]);
+    const profiles = boots.map(bootJson => ({ name: bootJson.name, bootJson }));
+    for (const name of requestedEnabled) {
+        if (profiles.some(item => key(item.name) === key(name))) continue;
+        const installed = await window.modHubReadInstalledModPackage(name);
+        if (installed.error || installed.missing || installed.bootJson?.name !== name) throw installed.error || new Error(`无法核验已安装模组【${name}】`);
+        profiles.push({ name, bootJson: installed.bootJson });
+    }
+    const nextEnabled = window.modHubKeepRecoveryOrder(requestedEnabled, profiles);
     const enabledKeys = new Set(nextEnabled.map(key));
     const nextDisabled = window.modHubUniqueModNames([...disabled, ...disabledNames, ...preserveDisabled, ...desiredDisabled])
         .filter(name => !enabledKeys.has(key(name)));
     try {
-        await restore.commitPackageChanges({ context, packages, guardedPackages, expectedEnabled: enabled, expectedDisabled: disabled,
+        await restore.commitPackageChanges({ context, packages, guardedPackages, profiles, expectedEnabled: enabled, expectedDisabled: disabled,
             enabled: nextEnabled, disabled: nextDisabled });
     } catch (error) {
         if (error.committed) window.modHubMarket?.invalidateLocalPackageProfiles?.();
@@ -1558,38 +1568,22 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
                 ...(gui.listSideLoadModNameOnly ? await gui.listSideLoadModNameOnly() : []),
                 ...(gui.listSideLoadHiddenModNameOnly ? await gui.listSideLoadHiddenModNameOnly() : [])
             ]);
-            // 旧 GUI 可能仅支持 Zip；ModPack 及移动端 BIN 等文件统一走原生校验接口。
+            // ModPack 及移动端 BIN 等文件依赖加载器原生校验能力。
             const needsNativeCheck = files.some(file => !MODHUB_ZIP_PACKAGE_EXTENSION.test(file.name || ''));
             if (needsNativeCheck && typeof window.modHubGetController()?.checkModZipFileIndexDB !== 'function') {
                 throw new Error('当前 ModLoader 未提供 ModPack 校验接口，无法核验此二进制安装包；请使用支持该格式的加载器或作者提供的 Zip 包。');
             }
             // 市场前置状态在统一操作锁内再次核验，检查失败不能写入包体。
             if (typeof options.beforeImport === 'function') await options.beforeImport();
-            if (options.atomicPackageChanges) {
-                installedNames = await modHubCommitImportedPackages(files, options.atomicPackageChanges, atomicContext);
-            } else if (fileCount === 1 && !needsNativeCheck && typeof gui.loadAndAddMod === 'function') {
-                await gui.loadAndAddMod(fileInput);
-                window.modHubMarket?.invalidateLocalPackageProfiles?.();
-                const lists = await window.modHubReadIndexDBModLists();
-                if (!lists.ok) throw new Error('导入后无法核验模组加载顺序');
-                await window.modHubLoadDisabledModInfo(lists.enabled);
-                if (JSON.stringify(lists.enabled) !== JSON.stringify(window.modHubKeepRecoveryOrder(lists.enabled))) {
-                    await window.modHubSaveIndexDBModList(lists.enabled, lists.disabled);
-                }
-            } else if (typeof window.modHubInstallFilesViaIndexDB === 'function') {
-                const installed = await window.modHubInstallFilesViaIndexDB(files);
-                installedNames = (installed || []).map(result => result.modName).filter(Boolean);
-            } else {
-                throw new Error('未找到可用的模组安装接口');
-            }
-            // 安装已经落盘，后续状态刷新与美化扫描属于「尽力而为」，
-            // 绝不允许它们的异常把一次成功的安装回判成失败（否则市场会给出误导性结论并跳过版本确权）。
+            const installed = await window.modHubInstallFilesViaIndexDB(files, { restoreContext: atomicContext, atomicPackageChanges: options.atomicPackageChanges });
+            installedNames = installed.map(result => result.modName);
+            // 包体已经提交；管理状态读取失败保留待核实状态，美化扫描单独处理。
             let state = null;
             try {
                 state = await window.modHubLoadModManageState(true);
+                if (!state) throw new Error('未读取到安装后的管理配置');
             } catch (error) {
-                if (options.atomicPackageChanges) throw Object.assign(new Error(`安装已经提交，但管理配置回读未完成：${error.message}`), { committed: true });
-                console.warn('[ModHub] 安装后刷新模组列表失败，可稍后手动刷新:', error);
+                throw Object.assign(new Error(`安装已经提交，但管理配置回读未完成：${error.message}`), { committed: true });
             }
             try {
                 await window.modHubLoadBeautyState();
@@ -1604,7 +1598,7 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
             };
         }, '正在导入模组，请稍候...', { busyKey: 'modHubImportModBtn', restoreContext: options.restoreContext, restoreLabel: isBatch ? '批量导入模组' : '导入模组',
             onRestoreContext: context => { atomicContext = context; },
-            onError: error => { if (options.atomicPackageChanges) window._modHubLastInstallError = error.message || String(error); }
+            onError: error => { window._modHubLastInstallError = error.message || String(error); }
         });
         if (!imported) {
             // 记录可读原因供市场端展示，避免只抛出含糊的「安装未完成」
@@ -1627,6 +1621,12 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
         const targetModName = exactExpected || verifiedNames[verifiedNames.length - 1] || newlyAdded[newlyAdded.length - 1] ||
             window.modHubResolveImportedModName(sourceFileName, afterAll, options.displayName || expectedName);
         const targetDisplayName = String(options.displayName || '').trim() || targetModName;
+
+        if (!options.keepCurrentTab) {
+            window.modHubSetManagerSearch('');
+            const section = document.getElementById('modHubModManageContainer')?.querySelector('details[data-section="side"]');
+            if (section) section.open = true;
+        }
 
         if (fileInput && typeof fileInput === 'object' && 'value' in fileInput) {
             fileInput.value = '';
@@ -1787,6 +1787,10 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
 
 // 重新排列列表项并持久化保存
 window.modHubReorderList = async function(listType, fromIndex, targetIndex, isAfter) {
+    if (listType === 'side' && window.modHubIsManagerSearchActive()) {
+        window.modHubShowToast('清空搜索后可调整顺序。', 'info');
+        return false;
+    }
     let moved, toIndex;
     return window.modHubRunManagerAction(async () => {
         if (listType === 'side') {
@@ -1951,6 +1955,8 @@ window.modHubUpdateManagerStatus = function() {
             window.modHubSetButtonBusy(button, busy && button.dataset.modhubBusyKey === window._modHubManagerBusyKey);
         });
     }
+    const smartSort = document.getElementById('modHubSmartSortAllBtn');
+    if (smartSort) smartSort.disabled = busy || window.modHubIsManagerSearchActive();
     const toolsMenu = document.getElementById('modHubManagerToolsMenu');
     toolsMenu?.querySelectorAll('button').forEach(button => {
         if (button.dataset.modhubBusyKey) window.modHubSetButtonBusy(button, busy && button.dataset.modhubBusyKey === window._modHubManagerBusyKey);
@@ -1999,7 +2005,13 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
     const beforeReload = modHubReloadConfigSnapshot(beforeMod, beforeBeauty);
     const previousStatus = window._modHubManagerStatus;
     window._modHubReloadBaselineRevision = (window._modHubReloadBaselineRevision || 0) + 1;
+    let actionError;
     const reportError = error => {
+        if (actionError && error !== actionError) {
+            actionError.finishError = error;
+            Object.defineProperty(actionError, 'message', { value: actionError.message + '\n\n' + error.message, configurable: true, writable: true });
+            error = actionError;
+        } else actionError = error;
         // 错误收集不能阻止原有失败恢复及锁释放。
         try { options.onError?.(error); } catch (_) {}
     };
@@ -2076,6 +2088,7 @@ window.modHubRunManagerAction = async function(action, message = '正在保存�
         window.modHubRenderModManageUI();
         window.modHubUpdateManagerStatus();
         if (window._modHubReloadExitPending && !options.immediateReload) window.modHubPromptPendingReload();
+        if (ownRestoreContext && restoreContext?.finishError) return false;
     }
 };
 
@@ -2263,6 +2276,61 @@ function modHubBindManagerTools(container) {
     }, true);
 }
 
+function modHubManagerSearchQuery() {
+    const text = window._modHubManagerSearchText || '';
+    return text.trim() ? window.modHubSearch?.compile(text) : null;
+}
+
+function modHubManagerMatchesSearch(item, query) {
+    if (!query?.tokens.length) return true;
+    const boot = window.modHubGetModInfo(item.name)?.bootJson || {};
+    const nickNames = typeof boot.nickName === 'string' ? [boot.nickName] : Object.values(boot.nickName || {});
+    const aliases = Array.isArray(boot.alias) ? boot.alias : [boot.alias];
+    return window.modHubSearch.score({ name: item.name, aliases: [boot.name, ...nickNames, ...aliases,
+        window.modHubFindKnownAlias(item.name, false)].filter(value => typeof value === 'string') }, query) >= 0;
+}
+
+function modHubApplyManagerSearch() {
+    const container = document.getElementById('modHubModManageContainer');
+    if (!container) return;
+    const mods = window._modHubModState?.sideMods || [];
+    const query = modHubManagerSearchQuery(), active = !!query?.tokens.length;
+    const visible = new Set(mods.filter(item => modHubManagerMatchesSearch(item, query)).map(item => item.name));
+    const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
+    container.querySelectorAll('li[data-mod-name][data-drag-type="side"]').forEach(row => {
+        row.hidden = !visible.has(row.dataset.modName);
+        const protectedMod = recoveryNames.has(row.dataset.modName.toLowerCase());
+        row.draggable = !active && !window._modHubBatchMode && !protectedMod;
+        row.querySelectorAll('.modhub-side-move-up, .modhub-side-move-down').forEach(button => {
+            button.disabled = active || protectedMod;
+        });
+    });
+    const clear = document.getElementById('modHubManagerSearchClear');
+    if (clear) clear.hidden = !window._modHubManagerSearchText;
+    const status = document.getElementById('modHubManagerSearchStatus');
+    window.modHubBindText?.(status, '显示 {count} / {total} 个模组', { count: visible.size, total: mods.length });
+    const empty = document.getElementById('modHubManagerSearchEmpty');
+    if (empty) empty.hidden = visible.size > 0 || !mods.length;
+    const hint = document.getElementById('modHubManagerSearchSortHint');
+    if (hint) hint.hidden = !active;
+    const sort = document.getElementById('modHubSmartSortAllBtn');
+    if (sort) sort.disabled = active || !!(window._modHubManagerBusy || window._modHubModLoading || window._modHubManagerInit);
+    window.modHubUpdateBatchToolbar();
+}
+
+window.modHubSetManagerSearch = function(query) {
+    const text = String(query ?? '');
+    if (text.trim() && !window.modHubSearch) {
+        window.modHubShowToast('搜索功能尚未就绪，请等待模组加载完成后重试。', 'info');
+        return false;
+    }
+    window._modHubManagerSearchText = text;
+    const input = document.getElementById('modHubManagerSearch');
+    if (input && input.value !== text) input.value = text;
+    modHubApplyManagerSearch();
+    return true;
+};
+
 window.modHubRenderModManageUI = function() {
     window.modHubCloseManagerTools?.(false);
     const container = document.getElementById('modHubModManageContainer');
@@ -2272,6 +2340,9 @@ window.modHubRenderModManageUI = function() {
     const sectionStates = new Map([...container.querySelectorAll('details[data-section]')].map(detail => [detail.dataset.section, detail.open]));
     const isSectionOpen = (name, defaultOpen = false) => sectionStates.has(name) ? sectionStates.get(name) : defaultOpen;
     const languageControl = container.querySelector('[data-modhub-language-control]');
+    const previousSearch = container.querySelector('#modHubManagerSearch');
+    const restoreSearchFocus = previousSearch && document.activeElement === previousSearch;
+    const searchSelection = restoreSearchFocus ? [previousSearch.selectionStart, previousSearch.selectionEnd] : [];
     const gui = window.modHubGetGui();
     const { sideMods, builtInMods } = window._modHubModState;
     const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
@@ -2326,10 +2397,11 @@ window.modHubRenderModManageUI = function() {
                 <div id="modHubBatchToolbar" class="modhub-batch-toolbar">
                     <div class="modhub-batch-info">
                         已选择 <span id="modHubBatchCount" class="gold">${window._modHubSelectedMods ? window._modHubSelectedMods.size : 0}</span> 个模组
+                        <span id="modHubBatchHiddenCount" class="grey" hidden></span>
                     </div>
                     <div class="modhub-batch-actions">
-                        <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchSelectAll()">全选</button>
-                        <button class="macro-button modhub-btn-primary modhub-batch-btn" type="button" onclick="window.modHubBatchInvertSelect()">反选</button>
+                        <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-selection="all" type="button" onclick="window.modHubBatchSelectAll()">全选当前结果</button>
+                        <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-selection="invert" type="button" onclick="window.modHubBatchInvertSelect()">反选当前结果</button>
                         <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="enable" data-modhub-busy-key="batch:enable" type="button" onclick="window.modHubBatchEnable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量启用</button>
                         <button class="macro-button modhub-btn-primary modhub-batch-btn" data-batch-action="disable" data-modhub-busy-key="batch:disable" type="button" onclick="window.modHubBatchDisable()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}>批量禁用</button>
                         <button class="macro-button modhub-btn-delete modhub-batch-btn" data-batch-action="delete" data-modhub-busy-key="batch:delete" type="button" onclick="window.modHubBatchDelete()" ${(window._modHubSelectedMods && window._modHubSelectedMods.size > 0) ? '' : 'disabled'}><span class="red">批量删除</span></button>
@@ -2342,11 +2414,17 @@ window.modHubRenderModManageUI = function() {
         <details class="modhub-collapsible-section" data-section="side"${isSectionOpen('side', true) ? ' open' : ''}>
             <summary class="modhub-section-summary">已安装模组 - 共 ${totalSideCount} 个</summary>
             <div class="modhub-section-content">
-                ${totalSideCount > 0 && !window._modHubBatchMode ? `
-                    <div class="modhub-list-toolbar">
-                        <button id="modHubBatchToggleBtn" class="macro-button modhub-btn-primary" type="button" title="进入批量多选模式，支持批量启用、禁用与删除" onclick="window.modHubToggleBatchMode(true)">多选操作</button>
+                <div class="modhub-list-toolbar modhub-manager-search-row">
+                    <div class="modhub-manager-search-field">
+                        <input id="modHubManagerSearch" class="modhub-search-input" type="search" placeholder="搜索已安装模组……" aria-label="搜索已安装模组" aria-controls="modHubManagerInstalledList" />
+                        <button id="modHubManagerSearchClear" type="button" aria-label="清空搜索输入" title="清空搜索输入" hidden><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true" focusable="false"><path d="m6 6 12 12M18 6 6 18"/></svg></button>
                     </div>
-                ` : ''}
+                    ${totalSideCount > 0 && !window._modHubBatchMode ? '<button id="modHubBatchToggleBtn" class="macro-button modhub-btn-primary" type="button" title="进入批量多选模式，支持批量启用、禁用与删除" onclick="window.modHubToggleBatchMode(true)">多选操作</button>' : ''}
+                </div>
+                <div id="modHubManagerSearchStatus" class="modhub-manager-search-status grey" role="status" aria-live="polite"></div>
+                <div id="modHubManagerSearchSortHint" class="modhub-manager-search-hint grey" hidden>清空搜索后可调整顺序。</div>
+                <div id="modHubManagerInstalledList">
+                <div id="modHubManagerSearchEmpty" class="mod-empty grey" hidden>没有匹配的已安装模组。</div>
     `;
 
     // 旁加载模组（启用与禁用归入同排序组，全量参与排序）
@@ -2409,7 +2487,7 @@ window.modHubRenderModManageUI = function() {
         });
         html += '</ul>';
     }
-    html += '</div></details>';
+    html += '</div></div></details>';
 
     // 分组 2: 美化图像包（来自旁加载模组，可独立控制覆盖顺序）
     html += `
@@ -2455,6 +2533,29 @@ window.modHubRenderModManageUI = function() {
     `;
 
     container.innerHTML = modHubTranslateManagerHtml(html + '</fieldset>');
+    const searchInput = document.getElementById('modHubManagerSearch');
+    if (searchInput) {
+        searchInput.value = window._modHubManagerSearchText;
+        searchInput.disabled = !window.modHubSearch;
+        let composing = false;
+        searchInput.addEventListener('compositionstart', () => { composing = true; });
+        searchInput.oninput = event => {
+            if (!composing && !event?.isComposing) window.modHubSetManagerSearch(searchInput.value);
+        };
+        searchInput.addEventListener('compositionend', () => {
+            composing = false;
+            window.modHubSetManagerSearch(searchInput.value);
+        });
+        if (restoreSearchFocus) {
+            searchInput.focus({ preventScroll: true });
+            if (searchSelection.every(Number.isInteger)) searchInput.setSelectionRange?.(...searchSelection);
+        }
+    }
+    const clearSearch = document.getElementById('modHubManagerSearchClear');
+    if (clearSearch) clearSearch.onclick = () => {
+        window.modHubSetManagerSearch('');
+        searchInput?.focus();
+    };
     const languageSlot = container.querySelector('#modHubManagerLanguageControl');
     if (languageSlot) {
         const control = languageControl || window.modHubCreateLanguageSelector?.();
@@ -2563,6 +2664,7 @@ window.modHubRenderModManageUI = function() {
     if (typeof window.modHubBindAllMoveButtons === 'function') {
         window.modHubBindAllMoveButtons(container);
     }
+    modHubApplyManagerSearch();
 
     // 模组高亮与自动平滑滚动定位
     const highlightSet = window._modHubHighlightMods;
@@ -2630,7 +2732,7 @@ window.modHubIsFrameworkMod = function(modName) {
     return false;
 };
 
-// 重载询问按操作批次去重；变更清单独立对比本页实际运行状态。
+// 重载询问按操作批次去重；变更清单对比本次启动时的保存配置。
 window._modHubReloadRevision = window._modHubReloadRevision || 0;
 window._modHubReloadPromptedRevision = window._modHubReloadPromptedRevision || 0;
 
@@ -2679,27 +2781,18 @@ function modHubCaptureReloadBaseline() {
     const unknown = reason => { window._modHubReloadBaseline = { available: false, reason }; };
     const revision = window._modHubReloadBaselineRevision || 0;
     try {
-        const utils = window.modHubGetGui()?.gModUtils || window.modUtils;
-        const cache = utils?.getModLoader?.()?.getModCacheArray?.();
-        const sources = new Set(['Remote', 'Local', 'LocalStorage', 'IndexDB', 'SideLazy']);
-        if (!Array.isArray(cache) || cache.some(item => !sources.has(item?.from)
-            || typeof (item.mod?.name || item.name) !== 'string' || !(item.mod?.name || item.name).trim())) {
-            throw new Error('无法核对本页实际运行清单，请沿用现有重载提示。');
-        }
-        const enabled = cache.filter(item => item.from === 'IndexDB').map(item => item.mod?.name || item.name);
-        if (window.modHubUniqueModNames(enabled).length !== enabled.length) throw new Error('无法核对本页实际运行清单，请沿用现有重载提示。');
-        // 运行清单立即冻结；迟到的初始登记不得冒充操作前配置。
+        // 运行缓存会被懒加载、依赖排序或加载失败改变，配置基准只取启动时的保存登记。
         window._modHubReloadBaselinePromise = modHubReadReloadLists().then(lists => {
             if (revision !== (window._modHubReloadBaselineRevision || 0)) {
                 unknown('本页初始配置未能完成核对，无法生成变更清单。');
                 return;
             }
-            window._modHubReloadBaseline = { available: true, enabled,
-                installed: window.modHubUniqueModNames([...enabled, ...lists.enabled, ...lists.disabled]) };
+            window._modHubReloadBaseline = { available: true, enabled: [...lists.enabled],
+                installed: window.modHubUniqueModNames([...lists.enabled, ...lists.disabled]) };
             if (!window._modHubReloadSavedLists) modHubRememberSavedReloadLists(lists.enabled, lists.disabled);
         }).catch(() => unknown('本页初始配置未能完成核对，无法生成变更清单。'));
     } catch (_) {
-        unknown('无法核对本页实际运行清单，请沿用现有重载提示。');
+        unknown('本页初始配置未能完成核对，无法生成变更清单。');
         window._modHubReloadBaselinePromise = Promise.resolve();
     }
     return window._modHubReloadBaselinePromise;
@@ -2742,14 +2835,13 @@ window.modHubShowPendingReloadChanges = async function() {
     const escape = window.modHubEscapeHtml;
     const named = name => `<strong class="gold" data-modhub-i18n-ignore>${escape(name)}</strong>`;
     const group = (title, items) => items.length ? `<section><h3>${escape(window.modHubT(title))}</h3><ul>${items.map(item => `<li>${item}</li>`).join('')}</ul></section>` : '';
-    const html = '<p>' + escape(window.modHubT('对比本页实际运行清单与当前已保存配置，仅列出旁加载登记、启禁和加载顺序差异。')) + '</p>'
-        + '<p class="grey">' + escape(window.modHubT('同名包体的内容变化不在此清单中；没有配置差异不代表无需重新载入。')) + '</p>'
+    const html = '<p>' + escape(window.modHubT('以下是本次启动后保存的模组安装、启禁和加载顺序变更。保存游戏进度并重新载入后生效。')) + '</p>'
         + (changes.count ? `<div class="modhub-reload-change-list" tabindex="0" role="region" aria-label="${escape(window.modHubT('待重载变更清单'))}">`
             + group('新增登记', changes.added.map(named)) + group('移除登记', changes.removed.map(named))
             + group('启用', changes.enabled.map(named)) + group('禁用', changes.disabled.map(named))
             + group('加载顺序调整', changes.orderChanges.map(item => named(item.name) + '<span>'
-                + escape(window.modHubT('本页第 {current} 位；已保存第 {target} 位', { current: item.currentIndex, target: item.targetIndex })) + '</span>')) + '</div>'
-            : '<p>' + escape(window.modHubT('当前没有可核实的配置差异。')) + '</p>');
+                + escape(window.modHubT('启动时第 {current} 位；已保存第 {target} 位', { current: item.currentIndex, target: item.targetIndex })) + '</span>')) + '</div>'
+            : '<p>' + escape(window.modHubT('当前没有待重载的配置变更。')) + '</p>');
     await window.modHubConfirm({ title: '待重载变更清单', trustedMessageHtml: html, confirmText: '关闭', cancelText: '', dialogClass: 'modhub-reload-changes-dialog' });
     return true;
 };
@@ -2984,6 +3076,10 @@ window.modHubBuildSmartOrder = async function(nodes, gui, dependentsFirst = fals
 };
 
 window.modHubSmartSortAll = async function() {
+    if (window.modHubIsManagerSearchActive()) {
+        window.modHubShowToast('清空搜索后可调整顺序。', 'info');
+        return false;
+    }
     let sideChanged = false, beautyChanged = false;
     return window.modHubRunManagerAction(async () => {
         if (sideChanged && !await window.modHubSaveModManageState(false)) throw new Error('模组配置保存失败');
@@ -3296,6 +3392,10 @@ window.modHubApplyAiPackage = async function(plan, { onPrepared } = {}) {
 
 // 旁加载模组移动（支持短按步进与长按置顶/置底）
 window.modHubMoveSideMod = async function(index, deltaOrPosition) {
+    if (window.modHubIsManagerSearchActive()) {
+        window.modHubShowToast('清空搜索后可调整顺序。', 'info');
+        return false;
+    }
     let movedName;
     return window.modHubRunManagerAction(async () => {
         if (!await window.modHubSaveModManageState(false)) throw new Error('模组配置保存失败');
@@ -3732,6 +3832,15 @@ window.modHubUpdateBatchToolbar = function() {
     const selectedCount = window._modHubSelectedMods ? window._modHubSelectedMods.size : 0;
     const countEl = document.getElementById('modHubBatchCount');
     if (countEl) countEl.textContent = String(selectedCount);
+    const query = modHubManagerSearchQuery();
+    const visible = (window._modHubModState?.sideMods || []).filter(item => modHubManagerMatchesSearch(item, query));
+    const visibleNames = new Set(visible.map(item => item.name));
+    const hiddenCount = [...(window._modHubSelectedMods || [])].filter(name => !visibleNames.has(name)).length;
+    const hidden = document.getElementById('modHubBatchHiddenCount');
+    if (hidden) {
+        hidden.hidden = !hiddenCount;
+        window.modHubBindText?.(hidden, '其中 {count} 项不在当前结果中', { count: hiddenCount });
+    }
 
     const toolbar = document.getElementById('modHubBatchToolbar');
     if (toolbar) {
@@ -3739,6 +3848,9 @@ window.modHubUpdateBatchToolbar = function() {
         toolbar.querySelectorAll('button[data-batch-action]').forEach(btn => {
             btn.disabled = !hasSelected;
         });
+        const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
+        const hasSelectable = visible.some(item => !recoveryNames.has(item.name.toLowerCase()));
+        toolbar.querySelectorAll('button[data-batch-selection]').forEach(button => { button.disabled = !hasSelectable; });
     }
 
     const container = document.getElementById('modHubModManageContainer');
@@ -3755,7 +3867,8 @@ window.modHubUpdateBatchToolbar = function() {
 
 window.modHubBatchSelectAll = function() {
     const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
-    const sideMods = window._modHubModState?.sideMods || [];
+    const query = modHubManagerSearchQuery();
+    const sideMods = (window._modHubModState?.sideMods || []).filter(item => modHubManagerMatchesSearch(item, query));
     if (!window._modHubSelectedMods) window._modHubSelectedMods = new Set();
     for (const item of sideMods) {
         if (!recoveryNames.has(item.name.toLowerCase())) {
@@ -3767,7 +3880,8 @@ window.modHubBatchSelectAll = function() {
 
 window.modHubBatchInvertSelect = function() {
     const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
-    const sideMods = window._modHubModState?.sideMods || [];
+    const query = modHubManagerSearchQuery();
+    const sideMods = (window._modHubModState?.sideMods || []).filter(item => modHubManagerMatchesSearch(item, query));
     if (!window._modHubSelectedMods) window._modHubSelectedMods = new Set();
     for (const item of sideMods) {
         if (recoveryNames.has(item.name.toLowerCase())) continue;
@@ -3857,8 +3971,10 @@ window.modHubBatchDisable = async function() {
     const selfNotice = isModHubIncluded ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。可通过加载器原生管理界面重新启用 ModHub。游戏存档和已有还原点保留。' : '';
     const selfNoticeHtml = isModHubIncluded ? modHubSelfRemovalNoticeHtml(false) : '';
 
+    const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
+    const targetListHtml = `<div class="grey">本次操作的模组</div><div class="modhub-modal-affected-box" tabindex="0" style="max-height:140px;overflow-y:auto;">${toDisable.map(name => `<div class="gold" data-modhub-no-translate>${escape(name)}</div>`).join('')}</div>`;
+
     if (affectedMap.size > 0 || isModHubIncluded) {
-        const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
         const affectedList = Array.from(affectedMap.values());
         const modItemsHtml = affectedList.map(m => `
             <div class="modhub-modal-affected-item">
@@ -3871,6 +3987,7 @@ window.modHubBatchDisable = async function() {
             title: `确认批量禁用 ${toDisable.length} 个模组？`,
             message: `禁用选中的 ${toDisable.length} 个模组后，以下依赖它们的模组可能会受到影响或无法正常运行：\n\n${modLinesText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}是否仍然确认禁用？`,
             trustedMessageHtml: `
+                ${targetListHtml}
                 <div class="modhub-modal-intro">禁用选中的 <span class="gold">${toDisable.length}</span> 个模组后，以下依赖它们的模组可能会受到影响或无法正常运行：</div>
                 <div class="modhub-modal-affected-box" style="max-height: 140px; overflow-y: auto;">
                     ${modItemsHtml}
@@ -3884,9 +4001,11 @@ window.modHubBatchDisable = async function() {
         });
         if (!ok) return false;
     } else {
+        const message = `确定要禁用选中的 ${toDisable.length} 个模组吗？\n禁用后相关模组将在下次游戏启动时暂停加载。\n\n是否确认禁用？`;
         const ok = await window.modHubConfirm({
             title: `确认批量禁用 ${toDisable.length} 个模组？`,
-            message: `确定要禁用选中的 ${toDisable.length} 个模组吗？\n禁用后相关模组将在下次游戏启动时暂停加载。\n\n是否确认禁用？`,
+            message,
+            trustedMessageHtml: `<div style="white-space:pre-line;">${escape(message)}</div>${targetListHtml}`,
             confirmText: '确认禁用',
             cancelText: '取消',
             confirmType: 'warning'
@@ -4045,6 +4164,7 @@ window.addEventListener?.('modhub:languagechange', () => {
             if (alias) alias.textContent = window.modHubGetModSubtext(row.dataset.modName, window.modHubGetModInfo(row.dataset.modName), false);
         }
         window.modHubNotifyUpdateState(window._modHubUpdatableCount || 0, window._modHubUpdatableMods || []);
+        modHubApplyManagerSearch();
     } else window.modHubUpdateMarketTabBadge();
 });
 

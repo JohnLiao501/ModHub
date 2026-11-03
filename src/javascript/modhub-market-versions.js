@@ -56,9 +56,9 @@
 
     function getGameCompatibilityWarning() {
         const identity = getGameIdentity();
-        if (identity.branch === 'dolp') return '当前为 DoLP，作者的 DoL 版本范围不能证明 DoLP 适配，请查看作者说明。';
-        if (identity.branch === 'dolx') return '当前为 DoLX，作者的 DoL 或 DoLP 版本说明不能证明 DoLX 适配，请查看作者说明。';
-        return identity.distribution === 'lyra' ? '当前为 Lyra 系整合包，DoL 基线版本相同不能证明整合模组与图像兼容，请查看作者说明。' : '';
+        if (identity.branch === 'dolp') return '当前为 DoLP，DoLP 适配尚未确认，请查看作者说明。';
+        if (identity.branch === 'dolx') return '当前为 DoLX，DoLX 适配尚未确认，请查看作者说明。';
+        return identity.distribution === 'lyra' ? '当前为 Lyra 系整合包，整合模组与图像的兼容性尚未确认，请查看作者说明。' : '';
     }
 
     function isNativeRangeSyntaxSupported(range) {
@@ -609,7 +609,7 @@
             const matches = Boolean(gameVersion && window.modHubMarket.compareVersions(target, gameVersion) === 0);
             if (getGameCompatibilityWarning() && (assetBranch !== identity.branch || identity.distribution)) return {
                 status: 'unknown', evidence: 'filename', gameVersion, gameBranch: assetBranch, branchUnverified: true,
-                targetGameVersion: target, reason: identity.branch === 'dolp' ? '安装包名称仅标注 DoL 版本，尚未确认 DoLP 适配，请查看作者说明。' : getGameCompatibilityWarning()
+                targetGameVersion: target, reason: identity.branch === 'dolp' ? '安装包名称标注了 DoL 版本，DoLP 适配尚未确认，请查看作者说明。' : getGameCompatibilityWarning()
             };
             const gameName = assetBranch === 'dolx' ? 'DoLX 的 DoL 基线' : assetBranch === 'dolp' ? 'DoLP 的 DoL 基线' : 'DoL';
             return { status: 'unknown', evidence: 'filename', referenceMismatch: Boolean(gameVersion && !matches), gameVersion,
@@ -621,7 +621,7 @@
         }
         return { status: 'unknown', evidence: 'unknown', gameVersion, gameBranch: assetBranch === 'dol' ? identity.branch : assetBranch,
             ...(getGameCompatibilityWarning() ? { branchUnverified: true } : {}), reason: identity.branch === 'dolp'
-                ? '当前为 DoLP，模组是否适用于此分支尚未确认，请查看作者说明。' : getGameCompatibilityWarning() || (gameVersion
+                ? '当前为 DoLP，DoLP 适配尚未确认，请查看作者说明。' : getGameCompatibilityWarning() || (gameVersion
             ? '支持的游戏版本将在下载后检查'
             : '当前游戏版本未能识别，请查看作者说明') };
     }
