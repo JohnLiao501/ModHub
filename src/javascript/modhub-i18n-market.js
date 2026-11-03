@@ -4,6 +4,7 @@
     window.modHubRegisterTranslations?.({
         "制作中": ["製作中", "In development"],
         "预发布": ["預發佈", "Preview"],
+        "预发布版本": ["預發佈版本", "Prerelease version"],
         "已发布": ["已發佈", "Released"],
         "发布状态未确认": ["發佈狀態未確認", "Release status unconfirmed"],
         "查看原文": ["查看原文", "View original"],

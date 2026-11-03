@@ -801,7 +801,7 @@ export async function fetchModRelease(mod, options = {}) {
   const sharedRepository = !parsed.tag && Boolean(mod.sharedRepository || trackingSource || modHubNormalizeVariant(mod.variant)
     || modHubNormalizePackageEditions(mod.packageEditions).length);
   const releasePath = parsed.tag ? `tags/${encodeURIComponent(parsed.tag)}` : 'latest';
-  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], mod.variant || null, mod.releaseProductScoped === true, modHubNormalizeReleaseProductMetadata(mod), mod.verifiedReleaseAssets || [], 'modpack-v1', 'asset-version-v3', 'asset-series-v3']))}`;
+  const cacheKey = `${CACHE_PREFIX}${parsed.owner}/${parsed.repo}/${releasePath}/${encodeURIComponent(parsed.assetName || '')}/${encodeURIComponent(JSON.stringify([mod.identityId || mod.id || mod.name || '', sharedRepository, mod.bootNames || [], mod.aliases || [], mod.variant || null, mod.releaseProductScoped === true, modHubNormalizeReleaseProductMetadata(mod), mod.verifiedReleaseAssets || [], 'modpack-v1', 'asset-version-v3', 'asset-series-v3', 'prerelease-v1']))}`;
 
   if (useCache) {
     const cached = readCache(cacheKey);
@@ -811,26 +811,20 @@ export async function fetchModRelease(mod, options = {}) {
   const headers = { Accept: 'application/vnd.github+json' };
   const baseUrl = `https://api.github.com/repos/${parsed.owner}/${parsed.repo}`;
 
-  const latestRes = await fetch(sharedRepository ? `${baseUrl}/releases?per_page=100` : `${baseUrl}/releases/${releasePath}`, { headers });
+  const latestRes = await fetch(!parsed.tag ? `${baseUrl}/releases?per_page=100` : `${baseUrl}/releases/${releasePath}`, { headers });
   if (latestRes.status === 429 || latestRes.status === 403) throw rateLimitError(latestRes);
 
   let releaseData = null;
 
-  if (latestRes.status === 404 && !parsed.tag && !sharedRepository) {
-    const listRes = await fetch(`${baseUrl}/releases?per_page=1`, { headers });
-    if (listRes.status === 429 || listRes.status === 403) throw rateLimitError(listRes);
-    if (!listRes.ok) throw new Error(`GitHub API 错误: ${listRes.status}`);
-    const list = await listRes.json();
-    if (!Array.isArray(list) || !list.length) throw new Error('该仓库没有 Release');
-    releaseData = list[0];
-  } else if (!latestRes.ok) {
+  if (!latestRes.ok) {
     throw new Error(`GitHub API 错误: ${latestRes.status}`);
   } else {
     releaseData = await latestRes.json();
   }
 
-  if (sharedRepository) {
-    const candidates = Array.isArray(releaseData) ? [...releaseData] : [];
+  if (!parsed.tag) {
+    if (!Array.isArray(releaseData)) throw new Error('GitHub 发布列表格式异常');
+    const candidates = [...releaseData];
     let hasMore = /<[^>]+>;\s*rel="next"/.test(latestRes.headers?.get?.('Link') || '');
     // shortcut: 最多读取 400 个发布，超出范围由玩家核对作者主页。
     for (let page = 2; hasMore && page <= 4; page++) {
@@ -843,11 +837,12 @@ export async function fetchModRelease(mod, options = {}) {
       hasMore = /<[^>]+>;\s*rel="next"/.test(response.headers?.get?.('Link') || '');
     }
     if (hasMore) throw new Error('发布列表超出检查范围，请核对作者主页');
-    releaseData = candidates.filter(release => !release.draft && !release.prerelease
-      && (release.assets || []).some(asset => modHubIsModPackageName(asset.name) && matchesAssetIdentity(asset, mod)))
+    releaseData = candidates.filter(release => release && !release.draft
+      && (!sharedRepository || (release.assets || []).some(asset => modHubIsModPackageName(asset.name) && matchesAssetIdentity(asset, mod))))
       .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0];
-    if (!releaseData) throw new Error('共享仓库中未找到当前模组的发布，请前往原始主页核对');
+    if (!releaseData) throw new Error(sharedRepository ? '共享仓库中未找到当前模组的发布，请前往原始主页核对' : '该仓库没有公开 Release');
   }
+  if (!releaseData || releaseData.draft) throw new Error('该 Release 尚未公开发布');
   if (parsed.tag && releaseData.tag_name !== parsed.tag) throw new Error('返回的 Release 标签与模组来源不一致');
   const assets = (releaseData.assets || []).filter((a) => modHubIsModPackageName(a.name) && (!parsed.assetName || a.name === parsed.assetName)
     && (!sharedRepository || matchesAssetIdentity(a, mod) || modHubExtractorDeclaredAsset(a, mod, 'optionalResources'))).map((a) => {

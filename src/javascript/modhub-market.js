@@ -3658,7 +3658,7 @@
         const gameVersion = window.StartConfig?.version || '';
         const platform = (typeof window.modHubIsMobile === 'function' ? window.modHubIsMobile() : window.modHubIsMobile) ? 'mobile' : 'desktop';
         const source = JSON.stringify([repo.key, repo.releaseTag, repo.assetName, getModUpdateSignature(mod, gameVersion)]);
-        const isUsableCache = cached => cached?.assetPlanVersion === 6 && cached.assetPlanGameVersion === gameVersion
+        const isUsableCache = cached => cached?.assetPlanVersion === 7 && cached.assetPlanGameVersion === gameVersion
             && cached.assetPlanPlatform === platform && cached.assetPlanSource === source
             && (!mod.version || compareVersions(cached.version, mod.version) >= 0);
         if (useCache) {
@@ -3693,8 +3693,8 @@
                 }
                 releaseData = sharedRepository ? releases : selected;
             } else {
-                const latestRes = await fetch(sharedRepository ? `${baseUrl}/releases?per_page=100`
-                    : `${baseUrl}/releases/${repo.releaseTag ? `tags/${encodeURIComponent(repo.releaseTag)}` : 'latest'}`, { headers, signal });
+                const latestRes = await fetch(repo.releaseTag ? `${baseUrl}/releases/tags/${encodeURIComponent(repo.releaseTag)}`
+                    : `${baseUrl}/releases?per_page=100`, { headers, signal });
 
                 if (latestRes.status === 429 || latestRes.status === 403) {
                     const err = new Error('GitHub API 触发速率限制，请稍候再试');
@@ -3734,19 +3734,20 @@
                     releaseData = await latestRes.json();
                 }
             }
-            if (sharedRepository) {
+            if (!repo.releaseTag) {
                 const releases = Array.isArray(releaseData) ? releaseData : [releaseData];
                 // ponytail: 最多检索最近 100 个发布；超出范围时转作者主页，确有需求再增加分页。
                 // 共享仓库按产品身份找发布，不能把该仓库最后发布的另一个模组当成当前模组。
-                releaseData = releases.filter(release => !release.draft && !release.prerelease
-                    && (release.assets || []).some(asset => matchesAssetIdentity(asset, mod)))
+                releaseData = releases.filter(release => !release.draft
+                    && (!sharedRepository || (release.assets || []).some(asset => matchesAssetIdentity(asset, mod))))
                     .sort((a, b) => String(b.published_at || '').localeCompare(String(a.published_at || '')))[0];
                 if (!releaseData) {
-                    const err = new Error('共享仓库中未找到与当前模组身份一致的发布，请前往模组主页核对');
+                    const err = new Error(sharedRepository ? '共享仓库中未找到与当前模组身份一致的发布，请前往模组主页核对' : '该仓库未发布可下载的 Release');
                     err.code = 'MANUAL_SOURCE';
                     throw err;
                 }
             }
+            if (releaseData.draft) throw Object.assign(new Error('发布仍为草稿，不能下载安装'), { code: 'RELEASE_NOT_FOUND' });
             if (repo.releaseTag && releaseData.tag_name !== repo.releaseTag) {
                 const err = new Error('返回的发布标签与模组来源不一致，请前往模组主页核对');
                 err.code = 'RELEASE_NOT_FOUND';
@@ -3820,13 +3821,14 @@
             availableAssets: assetPlan.availableAssets,
             requiresManualSelection: assetPlan.needsChoice,
             selectionReason: assetPlan.reason,
-            assetPlanVersion: 6,
+            assetPlanVersion: 7,
             assetPlanGameVersion: gameVersion,
             assetPlanPlatform: platform,
             assetPlanSource: source,
             version,
             versionLabel: version ? '' : tagName,
             publishedAt: releaseData.published_at || null,
+            prerelease: typeof releaseData.prerelease === 'boolean' ? releaseData.prerelease : null,
             updateDate,
             updateDateSource: Number.isFinite(publishedTime) ? 'github' : mod.updateDateSource || null
         };
@@ -3843,7 +3845,7 @@
         if (!mod?.githubUrl) return [];
         const repo = parseGithubRepo(mod.githubUrl);
         if (!repo || repo.releaseTag || repo.sourcePath || mod.sharedRepository) return [];
-        const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}_companions_v4_${encodeURIComponent(mod.id || mod.name || '')}`;
+        const cacheKey = `${RELEASE_CACHE_PREFIX}${repo.owner}_${repo.repo}_companions_v5_${encodeURIComponent(mod.id || mod.name || '')}`;
         if (options.useCache !== false) {
             const cached = readLocalCache(cacheKey, RELEASE_CACHE_TTL);
             if (Array.isArray(cached)) return cached.slice(0, limit);
@@ -3866,7 +3868,7 @@
         }
         const companions = [];
         for (const release of Array.isArray(releases) ? releases : []) {
-            if (release.draft || release.prerelease) continue;
+            if (release.draft) continue;
             for (const asset of release.assets || []) {
                 if (!COMPANION_ASSET_PATTERN.test(asset.name || '') || !asset.browser_download_url
                     || !/\.(?:zip|mod|modpack(?:\.crypt)?)$/i.test(asset.name || '')
@@ -3877,6 +3879,7 @@
                     digest: asset.digest || '',
                     downloadUrl: asset.browser_download_url,
                     releaseTag: release.tag_name || '',
+                    prerelease: typeof release.prerelease === 'boolean' ? release.prerelease : null,
                     releaseDate: release.published_at ? release.published_at.slice(0, 10) : ''
                 });
                 if (companions.length >= limit) break;
@@ -3960,6 +3963,7 @@
         const modeText = selectedMirror?.browserOnly ? '浏览器下载后手动导入' : '自动导入 ModLoader';
         return `
             <div class="modhub-install-summary">
+                ${releaseInfo?.prerelease === true ? `<p class="gold">${modHubLabelHtml('预发布版本')}</p>` : ''}
                 <div class="modhub-install-overview"><strong>${escape(summaryTitle)}</strong><span>${escape(summaryMeta)}</span></div>
                 ${filesHtml ? `<div class="modhub-install-files">${filesHtml}</div>` : ''}
                 <dl class="modhub-install-meta">
@@ -4615,6 +4619,7 @@
                 contentType: 'package',
                 catalogLanguages: normalizeCatalogLanguages(mod.catalogLanguages),
                 releaseStatus: ['development', 'preview', 'released', 'unknown'].includes(mod.releaseStatus) ? mod.releaseStatus : 'unknown',
+                prerelease: typeof mod.prerelease === 'boolean' ? mod.prerelease : null,
                 isLanguageGroup: false,
                 variants: undefined,
                 sources: window.modHubMarketSpells?.normalizeSources(mod) || [],
@@ -4730,7 +4735,7 @@
 
     function getModUpdateSignature(mod, gameVersion) {
         return JSON.stringify([gameVersion, window.modHubMarketVersions?.getGameIdentity?.(), RELEASE_WORKER_API_BASE, mod.id, mod.githubUrl, mod.version,
-            mod.releaseUrl, mod.catalogSource, mod.autoInstall, mod.autoInstallScope, mod.revision, withdrawnRevision,
+            mod.releaseUrl, mod.prerelease, mod.catalogSource, mod.autoInstall, mod.autoInstallScope, mod.revision, withdrawnRevision,
             mod.identityId, mod.name, mod.sourceUrl, mod.repositoryKeys, mod.bootNames, mod.aliases,
             mod.sharedRepository, mod.releaseCompatibility, mod.dependencies, getRequiredDependencies(mod), mod.variant, mod.verifiedReleaseAssets, mod.verifiedReleaseAsset, mod._identityMetadataUnavailable,
             mod.packageEditions, mod.optionalResources, mod.releaseTrackingSourceUrl, mod.releaseProductScoped, mod._selectedPackageEdition,
@@ -5515,7 +5520,7 @@
                 issues.set(key, `前置【${mod.name}】的最终版本不满足全部要求：${[...new Set(requirements.map(item => formatDependencyRequirement(item.dependency)).filter(Boolean))].join('、')}`);
             }
             const role = targetKeys.has(key) ? '目标模组' : '前置依赖';
-            if (type) proposedActions.push({ type, mod, local, role, key, enableAfter: Boolean(needsEnable), dependencyRequirements: requirements.map(item => item.dependency) });
+            if (type) proposedActions.push({ type, mod, local, role, key, ...(release ? { release } : {}), enableAfter: Boolean(needsEnable), dependencyRequirements: requirements.map(item => item.dependency) });
             if (!type && needsEnable) {
                 proposedActions.push({ type: 'enable', mod, local, role, key });
             }
@@ -5742,6 +5747,7 @@
         const labels = { install: '将安装', update: '将更新', enable: '将启用' };
         const targets = originalTargets.map(mod => {
             const key = getMarketModKey(mod), reason = plan.blocked.get(key);
+            const release = plan.actions.find(action => action.key === key)?.release;
             const required = getModDependencies(mod).map(dependency => {
                 const entry = marketModList.find(item => [item.id, item.identityId].some(id => String(id || '').toLowerCase() === dependency.id.toLowerCase()));
                 const requirement = formatDependencyRequirement(dependency);
@@ -5750,7 +5756,7 @@
             for (const req of plan.requirements) {
                 if (req.key !== key && req.requiredBy.includes(mod.name) && !required.some(item => item.key === req.key)) required.push({ key: req.key, text: req.mod.name });
             }
-            return `<label class="modhub-dep-item modhub-dep-actionable"><input type="checkbox" class="modhub-dep-checkbox" name="modHubBatchTarget" data-key="${escape(key)}" ${activeTargets.has(key) ? 'checked' : ''}><span class="modhub-dep-content"><span class="gold" data-modhub-i18n-ignore>${escape(mod.name)}</span>${required.length ? `<span class="modhub-batch-target-dependencies grey">需要前置：${escape(required.map(item => item.text).join('、'))}</span>` : ''}${reason ? `<span class="red">${escape(reason)}</span>` : ''}</span></label>`;
+            return `<label class="modhub-dep-item modhub-dep-actionable"><input type="checkbox" class="modhub-dep-checkbox" name="modHubBatchTarget" data-key="${escape(key)}" ${activeTargets.has(key) ? 'checked' : ''}><span class="modhub-dep-content"><span class="gold" data-modhub-i18n-ignore>${escape(mod.name)}</span>${release?.prerelease === true ? `<span class="gold">${modHubLabelHtml('预发布版本')}</span>` : ''}${required.length ? `<span class="modhub-batch-target-dependencies grey">需要前置：${escape(required.map(item => item.text).join('、'))}</span>` : ''}${reason ? `<span class="red">${escape(reason)}</span>` : ''}</span></label>`;
         }).join('');
         const dependencies = plan.requirements.filter(req => !req.isTarget).map(req => {
             const action = plan.actions.find(item => item.key === req.key);
@@ -5759,7 +5765,7 @@
                 return `<div class="modhub-dep-item modhub-dep-satisfied"><span class="modhub-dep-bullet green" aria-hidden="true">•</span><span class="modhub-dep-content"><span class="modhub-dep-name" data-modhub-i18n-ignore>${escape(req.mod.name)}</span><span class="green">已满足，无需下载</span><span class="grey">影响：${escape(req.requiredBy.join('、'))}</span></span></div>`;
             }
             const status = req.skipped ? '自行处理，可能无法运行' : (problem?.reason || (action ? `${labels[action.type]}${action.enableAfter ? '并启用' : ''}` : '随所属目标跳过'));
-            return `<label class="modhub-dep-item modhub-dep-actionable"><input type="checkbox" class="modhub-dep-checkbox" name="modHubBatchDependency" data-key="${escape(req.key)}" ${req.skipped ? '' : 'checked'}><span class="modhub-dep-content"><span class="gold" data-modhub-i18n-ignore>${escape(req.mod.name)}</span><span class="grey">影响：${escape(req.requiredBy.join('、'))}</span><span class="${req.skipped || problem ? 'red' : 'grey'}">${escape(status)}</span></span></label>`;
+            return `<label class="modhub-dep-item modhub-dep-actionable"><input type="checkbox" class="modhub-dep-checkbox" name="modHubBatchDependency" data-key="${escape(req.key)}" ${req.skipped ? '' : 'checked'}><span class="modhub-dep-content"><span class="gold" data-modhub-i18n-ignore>${escape(req.mod.name)}</span>${action?.release?.prerelease === true ? `<span class="gold">${modHubLabelHtml('预发布版本')}</span>` : ''}<span class="grey">影响：${escape(req.requiredBy.join('、'))}</span><span class="${req.skipped || problem ? 'red' : 'grey'}">${escape(status)}</span></span></label>`;
         }).join('');
         return `${dependencies ? `<div class="modhub-install-dependencies"><strong class="gold">前置依赖（需要处理的项目默认勾选，可取消）</strong>${dependencies}</div>` : ''}<div class="modhub-install-dependencies"><strong class="gold">所选目标</strong><div class="modhub-batch-target-list" role="group" aria-label="所选目标，可上下滚动" tabindex="0">${targets}</div></div><div class="modhub-batch-summary grey"><div>将串行处理 <strong class="gold">${plan.actions.length} 项操作</strong>；不可执行的目标会跳过。</div><div>下载线路：<strong class="gold">${escape(modHubT(resolveMirrorServer(mirrorId).name))}</strong></div></div>`;
     }
@@ -6257,7 +6263,7 @@
     }
 
     function getPreparedPackageSource(mod, releaseInfo) {
-        return JSON.stringify([getMarketModKey(mod), mod.githubUrl, releaseInfo?.tagName || '', mod.packageEditions, mod.optionalResources,
+        return JSON.stringify([getMarketModKey(mod), mod.githubUrl, releaseInfo?.tagName || '', releaseInfo?.prerelease, mod.packageEditions, mod.optionalResources,
             releaseInfo?.packageEdition, mod._selectedPackageEdition,
             getReleaseInstallAssets(releaseInfo).map(asset => [asset.name, asset.downloadUrl, asset.size || 0, asset.digest || '', Boolean(asset.optional), asset.bootName || '', asset.packageRole || '', asset.version || '', officialPackageRevisions.get(asset.downloadUrl) || null])]);
     }
@@ -7341,11 +7347,11 @@
         const indexDate = mod.updateDate || '';
         if (mod._selectedPackageEdition && mod.packageEditions?.length) {
             return { version: latestRelease?.version || '', text: latestRelease?.version ? formatVersionDisplay(latestRelease.version) : currentUpdate?.pending ? '正在读取' : '未知',
-                updateDate: latestRelease?.updateDate || '', updateDateSource: latestRelease?.updateDateSource || 'github' };
+                updateDate: latestRelease?.updateDate || '', updateDateSource: latestRelease?.updateDateSource || 'github', prerelease: latestRelease?.prerelease };
         }
         if (latestRelease?.version && compareVersions(latestRelease.version, indexedVersion, mod) > 0) {
             return { version: latestRelease.version, text: formatVersionDisplay(latestRelease.version),
-                updateDate: latestRelease.updateDate || indexDate,
+                updateDate: latestRelease.updateDate || indexDate, prerelease: latestRelease.prerelease,
                 updateDateSource: latestRelease.updateDate ? latestRelease.updateDateSource || 'github' : mod.updateDateSource };
         }
         if (!indexedVersionSource) return { version: '', text: '未知' };
@@ -7354,13 +7360,14 @@
         const latestPublished = getPublishedVersion(mod) || mod.version;
         if (mod._matchedLocal?.packageDigest && published && getAssetPackageDigest(getReleaseInstallAssets(release)[0])
             && isSameVersion(published, latestPublished)) {
-            return { version: published, text: formatVersionDisplay(published), updateDate: indexDate,
+            return { version: published, text: formatVersionDisplay(published), updateDate: indexDate, prerelease: release?.prerelease,
                 updateDateSource: mod.updateDateSource };
         }
         const label = typeof mod.versionLabel === 'string' && mod.versionLabel.trim()
             ? mod.versionLabel.trim() : !indexedVersion && latestRelease ? latestRelease.versionLabel || latestRelease.tagName || '' : '';
         return { version: indexedVersion, text: indexedVersion ? formatVersionDisplay(indexedVersion)
             : label || '未知', updateDate: !indexedVersion && latestRelease?.updateDate || indexDate,
+            prerelease: latestRelease && isSameVersion(latestRelease.version, indexedVersion, mod) ? latestRelease.prerelease : mod.prerelease,
             updateDateSource: !indexedVersion && latestRelease?.updateDate ? latestRelease.updateDateSource || 'github' : mod.updateDateSource };
     }
 
@@ -7449,7 +7456,8 @@
     }
 
     function renderReleaseStatus(mod) {
-        const label = { development: '制作中', preview: '预发布' }[mod.releaseStatus];
+        const label = getLatestMarketVersionInfo(mod).prerelease === true ? '预发布版本'
+            : { development: '制作中', preview: '预发布' }[mod.releaseStatus];
         return label ? `<span class="modhub-market-tag" data-modhub-i18n-key="${label}">${modHubT(label)}</span>` : '';
     }
 
@@ -8037,7 +8045,7 @@
                     if (historicalCompanions.length) {
                         const historyLines = historicalCompanions.map(asset => {
                             const size = asset.size ? `，${(asset.size / 1024 / 1024).toFixed(1)} MB` : '';
-                            return `· ${asset.name}${asset.releaseTag ? `（${asset.releaseTag}${asset.releaseDate ? `，${asset.releaseDate}` : ''}${size}）` : ''}`;
+                            return `· ${asset.name}${asset.prerelease === true ? ` · ${modHubT('预发布版本')}` : ''}${asset.releaseTag ? `（${asset.releaseTag}${asset.releaseDate ? `，${asset.releaseDate}` : ''}${size}）` : ''}`;
                         });
                         installPlanText += `\n\n同仓库历史可选图包/资源包（旧版兼容性需玩家确认，不会默认安装）：\n${historyLines.join('\n')}`;
                     }
@@ -8072,7 +8080,7 @@
         const companionOptions = historicalCompanions.length
             ? [{ value: 'none', label: '不安装历史附属包' }, ...historicalCompanions.map((asset, index) => ({
                 value: `history:${index}`,
-                label: `${asset.name}${asset.releaseTag ? `（${asset.releaseTag}）` : ''}`
+                label: `${asset.name}${asset.prerelease === true ? ` · ${modHubT('预发布版本')}` : ''}${asset.releaseTag ? `（${asset.releaseTag}）` : ''}`
             }))]
             : [];
         const manualAssetOptions = releaseInfo?.requiresManualSelection ? getManualAssetOptions(releaseInfo) : [];
@@ -8798,7 +8806,7 @@
             return;
         }
 
-        const lines = updatables.map(u => `· ${u.name} (当前: ${formatVersionDisplay(u.currentVersion)} -> 最新: ${formatVersionDisplay(u.newVersion)})`).join('\n');
+        const lines = updatables.map(u => `· ${u.name} (当前: ${formatVersionDisplay(u.currentVersion)} -> 最新: ${formatVersionDisplay(u.newVersion)})${(getModUpdateInfo(u.marketMod).release?.prerelease ?? u.marketMod.prerelease) === true ? ` · ${modHubT('预发布版本')}` : ''}`).join('\n');
         const ok = await window.modHubConfirm({
             title: '一键全部更新',
             message: `检测到共有 ${updatables.length} 个模组可升级至最新版本：\n\n${lines}\n\n当前下载线路：${modHubT(selectedMirror.name)}\n是否立即开始批量下载并安装？`,

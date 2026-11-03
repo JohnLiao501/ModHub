@@ -273,8 +273,9 @@
 
     function candidateLabel(candidate, candidates) {
         const version = candidate.version || candidate.tagName || t('版本未知');
-        return candidates.filter(item => (item.version || item.tagName || t('版本未知')) === version).length > 1
+        const text = candidates.filter(item => (item.version || item.tagName || t('版本未知')) === version).length > 1
             ? `${version} · ${candidate.assetName || candidate.assets?.[0]?.name || t('安装包')}` : version;
+        return text + (candidate.prerelease === true ? ` · ${t('预发布版本')}` : '');
     }
 
     function groupCandidates(candidates, gameVersion, recommendedKey = '') {
@@ -350,7 +351,7 @@
             const status = versions().getCandidateStatus(candidate, { recommended: candidate.candidateKey === defaults.recommendedKey });
             return `<div class="modhub-version-option ${candidate.candidateKey === selectedKey ? 'modhub-version-selected' : ''}">
                 <input type="radio" name="modHubMarketVersion" aria-label="选择版本 ${escape(candidate.version || candidate.tagName)}" value="${escape(candidate.candidateKey)}" ${candidate.candidateKey === selectedKey ? 'checked' : ''}>
-                <span class="modhub-version-content"><span class="modhub-version-heading"><strong class="modhub-version-number gold">${escape(candidate.version || candidate.tagName || '版本未知')}</strong><span class="modhub-version-badge ${status.tone}">${escape(status.label)}</span>${matchesLocalVersion(candidate, localVersion) ? '<span class="modhub-version-badge gold">与已安装版本号相同</span>' : ''}</span>
+                <span class="modhub-version-content"><span class="modhub-version-heading"><strong class="modhub-version-number gold">${escape(candidate.version || candidate.tagName || '版本未知')}</strong>${candidate.prerelease === true ? `<span class="modhub-version-badge gold">${label('预发布版本')}</span>` : ''}<span class="modhub-version-badge ${status.tone}">${escape(status.label)}</span>${matchesLocalVersion(candidate, localVersion) ? '<span class="modhub-version-badge gold">与已安装版本号相同</span>' : ''}</span>
                     <span class="modhub-version-meta grey">${escape(candidate.updateDate || t('发布日期未知'))}${candidate.assets?.length ? '' : ` · ${Number(candidate.assetSize) ? escape(assetSizeText({ size: candidate.assetSize })) : escape(t('包体大小未知'))}`}</span>
                     <span class="modhub-version-description">${escape(t(status.reason))}</span>
                     ${candidate.candidateKey === selectedKey && candidate.candidateKey === defaults.defaultKey && defaults.defaultReason && defaults.defaultRisk ? `<span class="modhub-version-description gold">${escape(t(defaults.defaultReason))}</span>` : ''}
@@ -1389,6 +1390,7 @@
             };
             return `<div class="modhub-install-plan-item"><div class="modhub-install-plan-heading"><div class="modhub-install-plan-identity"><svg class="modhub-install-plan-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M12 3 3 7.5v9L12 21l9-4.5v-9L12 3Z"/><path d="m3 7.5 9 4.5 9-4.5M12 12v9M7.5 5.25l9 4.5"/></svg><strong class="modhub-install-plan-name" data-modhub-i18n-ignore>${escape(action.mod.name)}</strong></div><span class="modhub-install-plan-operation gold">${label(operation)} <span data-modhub-i18n-ignore>${escape(version)}</span></span></div>
                 ${action.local && action.type !== 'enable' ? `<div class="modhub-install-plan-meta">${label(recorded ? '安装前版本' : '当前已安装')}：<span data-modhub-i18n-ignore>${escape(action.local.version)}</span></div>` : ''}
+                ${action.release?.prerelease === true ? `<div class="modhub-install-plan-meta gold">${label('预发布版本')}</div>` : ''}
                 <p class="modhub-install-plan-meta ${status === 'incompatible' ? 'red' : ''}">${label(gameNote)}${gameRanges.length ? ` ${label('支持范围')}：DoL ${escape(gameRanges.map(item => t(rangeText(item.version))).join('；'))}。` : ''}</p>
                 ${assets.length ? `<div class="modhub-version-assets modhub-install-plan-files">${componentHtml}</div>` : ''}
                 ${action.switchGroup?.disabledNames.length ? `<div class="modhub-install-plan-warning gold">安装成功后停用：${escape(action.switchGroup.disabledNames.join('、'))}。保留旧安装包，可在模组管理中重新选择。</div>` : ''}
@@ -1419,6 +1421,7 @@
             return `<p>${label('【{name}】需要【{dependency}】{details}。', { name: action.mod.name, dependency: name, details: item.version && item.version !== '*' ? t('，版本要求：{range}', { range: t(rangeText(item.version)) }) : '' })}${item.evidence ? `<span class="modhub-install-plan-meta">${label('作者说明')}：<span data-modhub-i18n-ignore>${escape(item.evidence)}</span></span>` : ''}</p>`;
         }));
         if (inline) return `<div class="modhub-install-plan">${compatibilityHtml}<p class="modhub-install-plan-intro">${label('本次安装 {count} 项{details}。', { count: targets.length, details: dependencies.length ? t('，同时处理 {count} 项前置', { count: dependencies.length }) : '' })}</p>
+            ${plan.actions.filter(action => action.release?.prerelease === true).map(action => `<p class="modhub-install-plan-meta gold">${escape(action.mod.name)} ${escape(action.release.version || action.release.tagName || '')} · ${label('预发布版本')}</p>`).join('')}
             ${dependencies.length ? `<div class="modhub-install-plan-inline-dependencies grey">${dependencies.map(action => `<span>${escape(action.mod.name)} ${escape(action.release?.version || localBoot(action.local)?.version || '')} · ${label(action.type === 'enable' ? '启用' : action.local ? '更换版本' : '安装')}</span>`).join('')}</div>` : ''}
             ${plan.actions.filter(action => action.switchGroup?.disabledNames.length).map(action => `<p class="gold">安装【${escape(action.mod.name)}】后停用：${escape(action.switchGroup.disabledNames.join('、'))}。保留旧安装包，可在模组管理中重新选择。</p>`).join('')}
             ${warnings.length ? `<div class="modhub-install-plan-warning">${warnings.map(warning => `<p>${escape(t(warning))}</p>`).join('')}</div>` : ''}

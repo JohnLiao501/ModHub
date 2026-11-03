@@ -488,7 +488,7 @@ async function main() {
   const responses = new Map([
     [`${apiUrl}/tags/mod`, { tag_name: 'mod', assets: [{ name: 'AU.zip', browser_download_url: 'https://example.test/AU.zip' }] }],
     [`${apiUrl}/tags/face%2Fv1`, { tag_name: 'face/v1', assets: [] }],
-    [`${apiUrl}/latest`, { tag_name: 'latest-version', assets: [] }],
+    [`${apiUrl}?per_page=100`, [{ tag_name: 'latest-version', assets: [] }]],
   ]);
   global.fetch = async (url) => {
     requests.push(url);
@@ -511,7 +511,7 @@ async function main() {
       assert.equal(cached.tagName, tag, '同仓库各标签与最新版本必须使用独立缓存');
       assert.equal(cached.fromCache, true);
     }
-    assert.deepEqual(requests, [`${apiUrl}/tags/mod`, `${apiUrl}/tags/face%2Fv1`, `${apiUrl}/latest`]);
+    assert.deepEqual(requests, [`${apiUrl}/tags/mod`, `${apiUrl}/tags/face%2Fv1`, `${apiUrl}?per_page=100`]);
     assert.equal(cache.size, 3);
 
     requests.length = 0;
@@ -519,12 +519,17 @@ async function main() {
     assert.deepEqual(requests, [`${apiUrl}/tags/missing`], '指定标签不存在时不得回退最新版本或列表');
 
     requests.length = 0;
-    responses.delete(`${apiUrl}/latest`);
-    responses.set(`${apiUrl}?per_page=1`, [{ tag_name: 'preview', prerelease: true }]);
+    responses.set(`${apiUrl}?per_page=100`, [
+      { tag_name: 'draft', draft: true, published_at: '2026-11-03T00:00:00Z' },
+      { tag_name: 'stable', prerelease: false, published_at: '2026-11-01T00:00:00Z' },
+      { tag_name: 'preview', prerelease: true, published_at: '2026-11-02T00:00:00Z' },
+    ]);
     const fallback = await fetchModRelease(latestMod, { useCache: false });
     assert.equal(fallback.tagName, 'preview');
     assert.equal(fallback.prerelease, true);
-    assert.deepEqual(requests, [`${apiUrl}/latest`, `${apiUrl}?per_page=1`], '未指定标签时保留最新版本不存在的列表回退');
+    assert.deepEqual(requests, [`${apiUrl}?per_page=100`], '未指定标签时按发布日期选择包含预发布的公开版本，不能使用排除预发布的 latest 接口');
+    responses.set(`${apiUrl}/tags/draft`, { tag_name: 'draft', draft: true, assets: [] });
+    await assert.rejects(fetchModRelease({ githubUrl: `${repoUrl}/releases/tag/draft` }), /尚未公开/);
     requests.length = 0;
     await assert.rejects(fetchModRelease({ githubUrl: `${repoUrl}/tree/main` }), /原始主页/);
     assert.equal(requests.length, 0, '分支目录不得请求无关的仓库最新发布');
@@ -598,14 +603,14 @@ async function main() {
     const ucbIdentity = catalog.mods.find(mod => mod.id === 'universal-combat-zed-fix');
     const ucbUrl = `https://github.com/${ucbIdentity.repositoryKeys[0]}`;
     const ucbMod = { ...ucbIdentity, githubUrl: ucbUrl, version: '9.26' };
-    const ucbApi = `https://api.github.com/repos/${ucbIdentity.repositoryKeys[0]}/releases/latest`;
+    const ucbApi = `https://api.github.com/repos/${ucbIdentity.repositoryKeys[0]}/releases?per_page=100`;
     const oldCacheKey = `dol_mod_release_v2_${ucbIdentity.repositoryKeys[0]}/latest//${encodeURIComponent(JSON.stringify([ucbMod.id, false, ucbMod.bootNames, [], 'modpack-v1']))}`;
     cache.set(oldCacheKey, JSON.stringify({ data: { version: '9.26', tagName: '9.26' }, timestamp: Date.now() }));
-    responses.set(ucbApi, { tag_name: '9.26', name: 'UCB-ZedFix', published_at: '2024-09-26T13:10:50Z', assets: [
+    responses.set(ucbApi, [{ tag_name: '9.26', name: 'UCB-ZedFix', published_at: '2024-09-26T13:10:50Z', assets: [
       { name: 'UCB-zedfix-1.0.3.zip', browser_download_url: `${ucbUrl}/releases/download/9.26/UCB-zedfix-1.0.3.zip` },
       ...['1.0.0', '1.0.1', '1.0.2'].map(version => ({ name: `Z-outdate-UCB-zedfix-${version}.zip`,
         browser_download_url: `${ucbUrl}/releases/download/9.26/Z-outdate-UCB-zedfix-${version}.zip` })),
-    ] });
+    ] }]);
     const ucb = await fetchModRelease(ucbMod);
     assert.equal(ucb.version, '1.0.3', '日期发布标签不能覆盖唯一主包中的模组版本');
     assert.equal(ucb.tagName, '9.26', '实际发布标签仍用于来源与下载链接');

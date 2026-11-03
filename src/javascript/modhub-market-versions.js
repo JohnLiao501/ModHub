@@ -262,7 +262,8 @@
     function validHistoricalRelease(release, mod, source) {
         const validDeclaration = value => value === undefined || (value && typeof value === 'object' && !Array.isArray(value)
             && typeof value.gameVersionRange === 'string' && (!value.evidenceUrl || Boolean(normalizeSource(value.evidenceUrl))));
-        if (!release || typeof release.tagName !== 'string' || !release.tagName || !Array.isArray(release.assets)
+        if (!release || release.draft || typeof release.tagName !== 'string' || !release.tagName || !Array.isArray(release.assets)
+            || (release.prerelease != null && typeof release.prerelease !== 'boolean')
             || !validDeclaration(release.compatibility) || (release.dependencies !== undefined && !Array.isArray(release.dependencies))
             || (release.publishedAt != null && !Number.isFinite(Date.parse(release.publishedAt)))) return false;
         const rules = (Array.isArray(mod.releaseCompatibility) ? mod.releaseCompatibility : []).filter(rule => rule.releaseTag === release.tagName);
@@ -327,7 +328,7 @@
         if (!source?.tag || !source.assetName) throw historyError('无法识别待复核的 GitHub 附件', 'RELEASE_SOURCE_CHANGED');
         const { data } = await requestHistoryJson(`https://api.github.com/repos/${source.key}/releases/tags/${encodeURIComponent(source.tag)}`,
             { signal, headers: { Accept: 'application/vnd.github+json' }, cache: 'no-store', timeoutMs: 10000, service: 'GitHub 附件复核服务' });
-        const asset = data?.tag_name === source.tag && !data.draft && !data.prerelease && Array.isArray(data.assets)
+        const asset = data?.tag_name === source.tag && !data.draft && Array.isArray(data.assets)
             ? data.assets.find(item => item.name === source.assetName && item.browser_download_url === downloadUrl) : null;
         if (!asset || !Number.isSafeInteger(asset.size) || asset.size <= 0 || !/^sha256:[a-f0-9]{64}$/i.test(asset.digest || '')) {
             throw historyError('GitHub 当前发布没有可核验的同名附件，请刷新版本列表后重试', 'RELEASE_SOURCE_CHANGED');
@@ -366,13 +367,14 @@
         }
         const shared = mod.sharedRepository || market.getMarketMods?.().some(item => item.id !== mod.id && getReleaseSource(item.githubUrl)?.key === source.key);
         const releases = raw.flatMap(release => {
-            if (!release || release.draft || release.prerelease || typeof release.tag_name !== 'string' || !Array.isArray(release.assets)) return [];
+            if (!release || release.draft || typeof release.tag_name !== 'string' || !Array.isArray(release.assets)) return [];
             const reviewed = rules.filter(rule => rule.releaseTag === release.tag_name);
             const general = reviewed.find(rule => !rule.assetName);
             const declaration = rule => ({ gameVersionRange: rule.gameVersionRange, evidenceUrl: rule.evidenceUrl || '' });
             const normalized = { tagName: release.tag_name, name: typeof release.name === 'string' ? release.name : release.tag_name,
                 htmlUrl: `https://github.com/${source.key}/releases/tag/${encodeURIComponent(release.tag_name)}`,
-                publishedAt: release.published_at || null, assets: [], ...(general ? { compatibility: declaration(general) } : {}) };
+                publishedAt: release.published_at || null, prerelease: typeof release.prerelease === 'boolean' ? release.prerelease : null,
+                assets: [], ...(general ? { compatibility: declaration(general) } : {}) };
             normalized.assets = release.assets.flatMap(asset => {
                 const rule = reviewed.find(item => item.assetName === asset?.name);
                 const value = { name: asset?.name, size: asset?.size, downloadUrl: asset?.browser_download_url,
@@ -423,10 +425,12 @@
         };
 
         if (source.tag) tagName = source.tag;
-
+        const indexedRelease = getReleaseSource(mod.releaseUrl);
         const release = {
             tagName,
             name: tagName,
+            prerelease: indexedRelease?.key === source.key && indexedRelease.tag === tagName
+                && typeof mod.prerelease === 'boolean' ? mod.prerelease : null,
             htmlUrl: mod.releaseUrl || ('https://github.com/' + source.key + '/releases/tag/' + encodeURIComponent(tagName)),
             publishedAt: verified?.verifiedAt || targetRecord?.verifiedAt || mod.updateDate || new Date().toISOString(),
             assets: [asset],
@@ -493,10 +497,10 @@
         const communityRevision = market.getCommunityRevision?.() ?? mod.communityRevision;
         const signatureFields = [base.origin, mod.id, sourceUrl, mod.catalogSource || '', mod.autoInstall,
             mod.autoInstallScope || '', mod.revision, communityRevision, mod.identityId, mod.name,
-            mod.sourceUrl, mod.releaseUrl, mod.version, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
+            mod.sourceUrl, mod.releaseUrl, mod.version, mod.prerelease, mod.repositoryKeys || [], mod.releaseCompatibility || [], mod.dependencies,
             mod.bootNames || [], mod.aliases || [], mod.sharedRepository, mod.requiredDependencies || [], market.getRequiredDependencies?.(mod) || [], mod.variant || null, mod.verifiedReleaseAssets || [],
             mod.packageEditions || [], mod.optionalResources || [], mod._selectedPackageEdition || '',
-            page, 'modpack-v1', 'asset-series-v2', 'asset-version-v3', 'source-warnings-v1'];
+            page, 'modpack-v1', 'asset-series-v2', 'asset-version-v3', 'source-warnings-v1', 'prerelease-v1'];
         // 来源证据、语言或前置要求更改后，旧候选缓存不再适用。
         if (mod.verifiedReleaseAsset) signatureFields.push(mod.verifiedReleaseAsset);
         const signature = JSON.stringify(signatureFields);
@@ -791,7 +795,7 @@
         const selectionWarnings = getHistorySelectionWarnings(mod, history);
         const rejectedUrls = new Set(selectionWarnings.map(warning => normalizeSource(warning.sourceUrl)));
         for (const release of releases) {
-            if (release?.draft || release?.prerelease || !validHistoricalRelease(release, mod, source)) continue;
+            if (!validHistoricalRelease(release, mod, source)) continue;
             const assets = legacy ? (release.assets || []).flatMap(asset => {
                 if (normalizeSource(asset.downloadUrl) !== normalizeSource(legacy.sourceUrl)
                     || asset.digest && String(asset.digest).toLowerCase() !== `sha256:${legacy.sha256.toLowerCase()}` || asset.size !== legacy.size) return [];
@@ -837,6 +841,7 @@
                     ? `repository:${source.key}` : '');
                 candidates.push({ candidateKey, selectedKey: candidateKey, seriesKey,
                     tagName, releaseName: release.name || '', htmlUrl: release.htmlUrl || '', version,
+                    prerelease: typeof release.prerelease === 'boolean' ? release.prerelease : null,
                     assetName: asset.name, assetUrl: asset.downloadUrl, assetSize: Number(asset.size) || 0, assetDigest: asset.digest || '',
                     assets: selectedAssets, optionalAssets: (market.getMatchingOptionalAssets?.(asset, plan.availableAssets || assets, mod) || []).map(optional => ({ ...optional,
                         version: optional.version || market.getAssetVersionParts(optional.name).join('.') || version })),
@@ -1067,7 +1072,7 @@
             const status = getCandidateStatus(candidate);
             const prefix = recommended ? t(candidate.compatibility?.evidence === 'filename' ? '参考推荐：' : '推荐：') : '';
             return { value: candidate.candidateKey,
-                label: `${prefix}${candidate.version || candidate.tagName || t('版本未知')} · ${t(status.label)} · ${candidate.assetName || t('安装包')}` };
+                label: `${prefix}${candidate.version || candidate.tagName || t('版本未知')}${candidate.prerelease === true ? ` · ${t('预发布版本')}` : ''} · ${t(status.label)} · ${candidate.assetName || t('安装包')}` };
         })];
     }
 
