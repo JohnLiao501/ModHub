@@ -1,5 +1,10 @@
 /** ModHub 管理器与公共界面语言包。 */
 window.modHubRegisterTranslations({
+  "模组冲突风险确认": ["模組衝突風險確認", "Confirm mod conflict risk"],
+  "继续启用": ["繼續啟用", "Enable anyway"],
+  "简易框架与枫叶框架存在冲突风险": ["簡易框架與楓葉框架存在衝突風險", "Simple Framework and MapleBirch Framework may conflict"],
+  "简易框架与枫叶框架同时启用可能导致功能异常。请根据模组所需前置保留其中一种框架。": ["同時啟用簡易框架與楓葉框架可能導致功能異常。請依模組所需前置保留其中一種框架。", "Enabling Simple Framework and MapleBirch Framework together may cause problems. Keep the framework required by your mods."],
+  "同时启用【{first}】与【{second}】可能导致功能异常。\n\n请根据模组所需前置保留其中一种框架。是否仍要继续启用？": ["同時啟用【{first}】與【{second}】可能導致功能異常。\n\n請依模組所需前置保留其中一種框架。是否仍要繼續啟用？", "Enabling [{first}] and [{second}] together may cause problems.\n\nKeep the framework required by your mods. Enable anyway?"],
   "当前 ModLoader 未提供安装包校验接口，请更新 ModLoader 后重试。": ["目前 ModLoader 未提供安裝包校驗介面，請更新 ModLoader 後重試。", "This ModLoader does not provide package validation. Update ModLoader and try again."],
   "已取消模组安装": ["已取消模組安裝", "Mod installation cancelled"],
   "安装操作的还原点整理未完成：{p0}": ["安裝操作的還原點整理未完成：{p0}", "Restore-point processing for the installation did not finish: {p0}"],

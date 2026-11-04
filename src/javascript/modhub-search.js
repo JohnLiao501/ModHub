@@ -512,7 +512,7 @@
     add([entry?.aliases, entry?.bootNames, entry?.bootName, entry?.variant?.groupName, entry?.variant?.label], 6);
     add(entry?.author, 4);
     add([entry?.category, entry?.tags], 3);
-    add([entry?.description, entry?.extraText, ['body', 'syntax', 'inputLocation', 'prerequisites',
+    add([entry?.description, entry?.extraText, ['body', 'syntax', 'inputLocation', 'instructions', 'parameters', 'prerequisites',
       'gameVersionRange', 'modVersions', 'verificationMethod'].map(key => entry?.spell?.[key])], 1);
     let total = 0;
     for (const token of query.tokens) {

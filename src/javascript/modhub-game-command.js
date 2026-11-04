@@ -4,6 +4,7 @@
     const MODHUB_GAME_BACKUP_DB = 'modhub_game_command_backups';
     const MODHUB_GAME_BACKUP_STORE = 'backups';
     const MODHUB_GAME_BACKUP_PREFIX = 'modhub-game-';
+    let running = 0;
     const fail = message => { throw new Error(message); };
     const errorText = error => error?.name && error?.message ? error.name + ': ' + error.message : String(error);
     const t = value => window.modHubT?.(value) || value;
@@ -51,9 +52,18 @@
     async function prepare(payload) {
         const value = validate(payload);
         new Function(value.script);
-        const state = snapshot(game());
-        const stamp = await stampFor(value, state);
-        if (!sameState(state, snapshot(game()))) fail('游戏状态已变化，请重新预览 JS 操作。');
+        let state = snapshot(game()), stamp;
+        // 确认前只重取一次同场景快照；执行阶段仍严格拒绝状态变化。
+        for (let attempt = 0; attempt < 2; attempt++) {
+            stamp = await stampFor(value, state);
+            const current = snapshot(game());
+            if (sameState(state, current)) break;
+            if (state.passage !== current.passage || state.turns !== current.turns) {
+                fail(t('准备期间游戏页面或回合已变化，请重新预览。'));
+            }
+            if (attempt === 1) fail(t('游戏状态仍在变化，请等待当前页面稳定后再试。'));
+            state = current;
+        }
         return {
             text: '操作说明\n' + value.summary + '\n\n纯 JS 脚本\n' + value.script + '\n\n验证步骤\n' + value.verification
                 + '\n\n' + t('执行前将保存原生正常游戏存档，可下载 .save 后通过游戏存档界面导入。备份用于恢复游戏存档，运行前请核对涉及的页面数据和网络操作。')
@@ -84,17 +94,21 @@
         });
     }
 
-    async function transaction(mode, action) {
+    async function transaction(mode, action, receive) {
         const db = await openDatabase();
         return new Promise((resolve, reject) => {
-            let tx, request, value;
+            let tx, request, value, actionError;
             const stop = error => { db.close(); reject(error); };
             try {
                 tx = db.transaction(MODHUB_GAME_BACKUP_STORE, mode);
                 tx.oncomplete = () => { db.close(); resolve(value); };
-                tx.onabort = tx.onerror = () => stop(tx.error || request?.error || new Error('游戏备份事务未完成。'));
-                request = action(tx.objectStore(MODHUB_GAME_BACKUP_STORE));
-                request.onsuccess = () => { value = request.result; };
+                tx.onabort = tx.onerror = () => stop(actionError || tx.error || request?.error || new Error('游戏备份事务未完成。'));
+                const store = tx.objectStore(MODHUB_GAME_BACKUP_STORE);
+                request = action(store);
+                request.onsuccess = () => {
+                    try { value = receive ? receive(request.result, store) : request.result; }
+                    catch (error) { actionError = error; tx.abort(); }
+                };
             } catch (error) { tx?.abort(); stop(error); }
         });
     }
@@ -112,8 +126,31 @@
         return value;
     }
 
+    async function listBackups() {
+        const records = await transaction('readonly', store => store.getAll());
+        return records.map(({ id, requestId, createdAt, passage, turns, summary }) => ({ id, requestId, createdAt, passage, turns, summary }))
+            .sort((left, right) => right.createdAt - left.createdAt);
+    }
+
+    async function deleteBackups(ids) {
+        if (!Array.isArray(ids)) fail(t('存档编号列表无效，请重新选择要删除的言灵备份。'));
+        const selected = new Set(ids.map(validBackupId));
+        if (running) fail(t('游戏操作正在运行，请等待完成后再删除言灵备份。'));
+        if (!selected.size) return 0;
+        return transaction('readwrite', store => store.getAll(), (records, store) => {
+            if (running) fail(t('游戏操作正在运行，请等待完成后再删除言灵备份。'));
+            const targets = records.filter(record => selected.has(record.id));
+            if (targets.some(record => typeof record.requestId !== 'string' || !record.requestId.startsWith('modhub-spell:'))) {
+                fail(t('选中记录包含其他 JS 操作备份，本次未删除任何存档。'));
+            }
+            targets.forEach(record => store.delete(record.id));
+            return targets.length;
+        });
+    }
+
     async function run(payload, stamp, id, assertActive) {
         let backupId = null, started = false;
+        running++;
         try {
             const value = validate(payload);
             new Function(value.script);
@@ -133,7 +170,7 @@
             if (typeof data !== 'string' || !data) fail('原生游戏存档未生成，JS 未运行。');
             // 原生保存回调会更新游戏变量；以保存后状态核验异步等待期间的变化。
             const savedState = snapshot(game());
-            const record = { id: key, requestId: id, createdAt: Date.now(), passage: savedState.passage, turns: savedState.turns, data };
+            const record = { id: key, requestId: id, createdAt: Date.now(), passage: savedState.passage, turns: savedState.turns, summary: value.summary, data };
             await transaction('readwrite', store => store.add(record));
             const readback = await getBackup(key);
             if (JSON.stringify(readback) !== JSON.stringify(record)) fail('游戏备份回读内容不一致，JS 未运行。');
@@ -152,7 +189,7 @@
                 message: started ? 'JS 执行异常。备份已保留，请核验游戏状态；不会自动重试。' : 'JS 未运行。请查看本机错误详情。',
                 error: errorText(error)
             };
-        }
+        } finally { running--; }
     }
 
     async function download(backupId) {
@@ -168,5 +205,5 @@
         return true;
     }
 
-    window.modHubGameCommand = Object.freeze({ prepare, run, download, getBackup });
+    window.modHubGameCommand = Object.freeze({ prepare, run, download, getBackup, listBackups, deleteBackups });
 })();

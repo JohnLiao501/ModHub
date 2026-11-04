@@ -27,6 +27,9 @@ process.on('beforeExit', () => {
     await require('../tests/market-performance.test')();
     await require('../tests/market-startup.test')();
     await require('../tests/market-search.test')();
+    await require('../tests/market-pagination.test')();
+    await require('../tests/market-spell-apply.test')();
+    await require('../tests/market-spell-copy.test')();
     await require('../tests/market-variants.test')();
     await require('../tests/market-language-cards.test')();
     await require('../tests/diagnostics-conflicts.test')();
@@ -56,7 +59,7 @@ process.on('beforeExit', () => {
     await require('../tests/interaction.test')();
 
     suiteComplete = true;
-    console.log('ModHub v1.9.3 全部测试通过');
+    console.log('ModHub v2.0.0 全部测试通过');
 })().catch(error => {
     console.error(error);
     process.exitCode = 1;

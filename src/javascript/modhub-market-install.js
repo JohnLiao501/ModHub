@@ -1502,6 +1502,8 @@
 
     async function executePlan(plan, approved, restoreContext, languageAcknowledged) {
         const api = market(), results = new Map(), changed = new Set();
+        const confirmedFrameworkPair = plan.compatibilityResult?.compatibility?.findings
+            ?.find(finding => finding.id === 'compat-framework-maplebirch-vs-simpleframework')?.mods?.slice();
         const installedBoots = new Map();
         for (const [key, reason] of plan.blocked) results.set(key, { status: 'skipped', reason });
         const failedDependency = (key, seen = new Set()) => {
@@ -1588,7 +1590,7 @@
                     const risks = api.getPreparedCompatibilityRisks?.([currentBoot]) || [];
                     if (risks.some(risk => !approved.includes(risk.key))) throw new Error('前置游戏适配声明已变化，请重新核对安装计划。');
                     if (isDisabled(action.local.name)) changedByAction = await window.modHubToggleSideMod?.(action.local.name, true, {
-                        silentOfferReload: true, restoreContext, beforeSave: () => assertPlanCompatibility(plan) }) === true;
+                        silentOfferReload: true, restoreContext, confirmedFrameworkPair, beforeSave: () => assertPlanCompatibility(plan) }) === true;
                     if (changedByAction) {
                         changed.add(action.mod.name);
                         window.modHubRegisterOperationReload(restoreContext, '所选前置已启用，重新载入后生效。',
@@ -1630,7 +1632,7 @@
                         if (local && isDisabled(local.name)) {
                             const enabledLists = plan.compatibilityResult && advanceCompatibilityLists(plan.compatibilityLists, action,
                                 plan.compatibilityChanges.get(action.key), local.name);
-                            await window.modHubToggleSideMod?.(local.name, true, { silentOfferReload: true, restoreContext,
+                            await window.modHubToggleSideMod?.(local.name, true, { silentOfferReload: true, restoreContext, confirmedFrameworkPair,
                                 beforeSave: () => assertPlanCompatibility(plan) });
                             await window.modHubLoadModManageState?.(true);
                             if (isDisabled(local.name)) throw new Error(`安装完成但【${local.name}】未能启用`);

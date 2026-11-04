@@ -1,5 +1,10 @@
 /** ModHub 还原、说明、美化与日志界面的本地文案。 */
 window.modHubRegisterTranslations?.({
+    "准备期间游戏页面或回合已变化，请重新预览。": ["準備期間遊戲頁面或回合已變更，請重新預覽。", "The game passage or turn changed during preparation. Preview the operation again."],
+    "游戏状态仍在变化，请等待当前页面稳定后再试。": ["遊戲狀態仍在變動，請等待目前頁面穩定後再試。", "The game state is still changing. Wait for the current passage to settle, then try again."],
+    "存档编号列表无效，请重新选择要删除的言灵备份。": ["存檔編號清單無效，請重新選擇要刪除的言靈備份。", "The save ID list is invalid. Select the spell backups to delete again."],
+    "游戏操作正在运行，请等待完成后再删除言灵备份。": ["遊戲操作正在執行，請等待完成後再刪除言靈備份。", "A game operation is running. Wait for it to finish before deleting spell backups."],
+    "选中记录包含其他 JS 操作备份，本次未删除任何存档。": ["所選記錄包含其他 JS 操作的備份，本次未刪除任何存檔。", "The selection includes backups from other JavaScript operations. No saves were deleted."],
     "安装包变更缺少完整目标模组档案，已停止写入": ["安裝包變更缺少完整目標模組資料，已停止寫入", "The package changes are missing complete target mod profiles. Writing has stopped."],
     "安装目标模组档案格式或技术名不一致，已停止写入": ["安裝目標模組資料格式或技術名稱不一致，已停止寫入", "The target mod profiles have invalid formats or mismatched technical names. Writing has stopped."],
     "安装目标模组档案包含重复技术名，已停止写入": ["安裝目標模組資料含有重複技術名稱，已停止寫入", "The target mod profiles contain duplicate technical names. Writing has stopped."],

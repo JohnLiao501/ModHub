@@ -51,6 +51,7 @@
     const MODHUB_SUBMISSION_RECEIPTS_KEY = 'modhub_market_submission_receipts_v1';
     const MODHUB_SUBMISSION_DRAFTS_KEY = 'modhub_market_submission_drafts_v1';
     const MODHUB_SUBMISSION_PAGE_SIZE = 10;
+    const MODHUB_MARKET_PAGE_SIZE = 20;
     const PRIMARY_RELEASE_INDEX_URL = 'https://dol.alseece.top/release-index.json';
     const BACKUP_RELEASE_INDEX_URL = 'https://dolmod-release-index.johnliao381658675.workers.dev/release-index.json';
     const RELEASE_WORKER_API_BASE = 'https://dol.alseece.top';
@@ -1007,7 +1008,11 @@
     let marketSearchTimer;
     const sectionFilters = {
         packages: { category: 'all', status: 'all', search: '', sort: 'date' },
-        spells: { category: 'all', status: 'all', search: '', sort: 'date' }
+        spells: { category: 'all', status: 'all', search: '', sort: 'name' }
+    };
+    const marketPagination = {
+        packages: { page: 1, filters: null },
+        spells: { page: 1, filters: null }
     };
     let isLoading = false;
     const batchInstallState = { selecting: false, selected: new Set(), running: false, preparing: false, reselectable: false, progressExpanded: true, progressScrollTop: 0, stopRequested: false, progressPhase: '', current: '', completed: 0, total: 0, items: new Map() };
@@ -1345,6 +1350,8 @@
     function getLocalizedSearchEntry(mod) {
         return { ...mod, aliases: [...(Array.isArray(mod.aliases) ? mod.aliases : []), getLocalizedModName(mod)],
             extraText: [mod.extraText || '', window.modHubGetMarketCardText(mod, 'description').text,
+                ...(mod.spell ? ['inputLocation', 'instructions', 'parameters', 'prerequisites', 'gameVersionRange', 'modVersions', 'verificationMethod']
+                    .map(field => window.modHubGetMarketCardText(mod, field).text) : []),
                 ...[mod.category, ...(mod.tags || [])].filter(Boolean).map(name => window.modHubGetMarketCardText({ name }, 'name').text)].join(' ') };
     }
 
@@ -1360,7 +1367,7 @@
         const { name, description, tags, missing, translated } = getCardTranslationState(mod);
         return `<div class="modhub-market-desc" data-modhub-card-field="description" data-modhub-i18n-ignore>${escapeHtml(description.text || window.modHubT('暂无说明'))}</div>
             <div class="modhub-market-translation-note grey" data-modhub-card-missing ${missing ? '' : 'hidden'}>部分内容暂缺译文，已显示原文。</div>
-            <details class="modhub-market-original" data-modhub-card-original ${translated ? '' : 'hidden'}><summary>查看原文</summary><div data-modhub-i18n-ignore><strong>${escapeHtml(name.source)}</strong><p>${escapeHtml(description.source)}</p>${tags.length ? `<p>${tags.map(tag => escapeHtml(tag.source)).join(' · ')}</p>` : ''}</div></details>`;
+            ${mod.spell ? '' : `<details class="modhub-market-original" data-modhub-card-original ${translated ? '' : 'hidden'}><summary>查看原文</summary><div data-modhub-i18n-ignore><strong>${escapeHtml(name.source)}</strong><p>${escapeHtml(description.source)}</p>${tags.length ? `<p>${tags.map(tag => escapeHtml(tag.source)).join(' · ')}</p>` : ''}</div></details>`}`;
     }
 
     function refreshCardContent(host, mod) {
@@ -1436,7 +1443,8 @@
     function selectAllVisibleMods() {
         if (currentMarketSection !== 'packages' || batchInstallState.running || marketInstallBusy || !batchInstallState.selecting) return;
         const profiles = getLocalInstalledProfiles();
-        getFilteredDisplayMods(filterAndSortMods(), profiles).filter(mod => isBatchInstallEligible(mod, profiles)).forEach(mod => batchInstallState.selected.add(getMarketModKey(mod)));
+        const entries = getFilteredDisplayMods(filterAndSortMods(), profiles);
+        getMarketPage(entries).entries.filter(mod => isBatchInstallEligible(mod, profiles)).forEach(mod => batchInstallState.selected.add(getMarketModKey(mod)));
         syncBatchSelectionControls();
     }
 
@@ -1504,12 +1512,6 @@
 
     function renderBatchInstallToolbar(profiles, evaluatedMods) {
         const state = batchInstallState;
-        if (!state.running && !state.preparing && state.selected.size) {
-            profiles = profiles || getLocalInstalledProfiles();
-            const eligibleKeys = new Set(getDisplayMods(evaluatedMods).filter(mod => state.selected.has(getMarketModKey(mod))
-                && isBatchInstallEligible(mod, profiles, Boolean(evaluatedMods))).map(getMarketModKey));
-            for (const key of state.selected) if (!eligibleKeys.has(key)) state.selected.delete(key);
-        }
         document.querySelectorAll('#modHubMarketBtnRefresh, [data-modhub-market-tool], .modhub-market-tool-pin, #modHubMirrorSelect, .btn-market-install, .btn-market-update, .btn-market-addons, .btn-market-language-choice, .btn-market-package-edition, .modhub-market-update-all, .modhub-market-summary-button, .modhub-market-select').forEach(control => {
             const mod = marketModList[Number(control.dataset?.modIndex)];
             control.disabled = state.running || state.preparing || Boolean(mod && activeDownloadControllers.has(mod.name))
@@ -1517,13 +1519,24 @@
                 || marketInstallBusy && ['btn-market-language-choice', 'btn-market-package-edition', 'btn-market-install', 'btn-market-update', 'btn-market-addons', 'modhub-market-summary-button'].some(name => control.classList.contains(name));
         });
         const toolbar = document.getElementById('modHubMarketBatchToolbar');
+        if (currentMarketSection !== 'packages') {
+            if (toolbar) toolbar.hidden = true;
+            syncMarketLoadingControls();
+            return;
+        }
+        if (!state.running && !state.preparing && state.selected.size) {
+            profiles = profiles || getLocalInstalledProfiles();
+            const eligibleKeys = new Set(getDisplayMods(evaluatedMods).filter(mod => state.selected.has(getMarketModKey(mod))
+                && isBatchInstallEligible(mod, profiles, Boolean(evaluatedMods))).map(getMarketModKey));
+            for (const key of state.selected) if (!eligibleKeys.has(key)) state.selected.delete(key);
+        }
         if (!toolbar) return;
-        toolbar.hidden = currentMarketSection !== 'packages';
+        toolbar.hidden = false;
         const filters = document.querySelector('#modHubModMarketContainer .modhub-market-filter-row');
         const controls = filters?.closest('.modhub-market-toolbar');
         const selecting = state.selecting && !state.running;
         const hiddenSelected = selecting && state.selected.size ? hiddenBatchSelectionCount(profiles, evaluatedMods) : 0;
-        // 多选操作仍覆盖整个列表，任务入口和浮窗不占用结果栏布局。
+        // 多选工具栏保持在筛选区下方，任务入口和浮窗不占用结果栏布局。
         if (controls && (selecting || state.preparing)) {
             if (toolbar.parentNode !== controls.parentNode) controls.after(toolbar);
         } else {
@@ -1544,7 +1557,7 @@
                 <button id="modHubBatchToggle" type="button" class="macro-button ${state.selecting ? 'modhub-btn-secondary' : 'modhub-btn-primary modhub-batch-entry'}" aria-pressed="${state.selecting}"${state.selecting ? '' : ' aria-describedby="modHubBatchEntryHint"'}>${state.selecting ? '退出多选' : '多选安装'}</button>
                 ${state.selecting ? '' : '<span id="modHubBatchEntryHint" class="modhub-batch-entry-hint">勾选多个模组，统一下载并安装</span>'}
                 ${state.selecting ? `<span class="modhub-batch-count grey" role="status" aria-live="polite">${modHubLabelHtml('已选 {count} 项', { count: state.selected.size })}${hiddenSelected ? ` · ${modHubLabelHtml('筛选外 {count} 项', { count: hiddenSelected })}` : ''}</span>
-                <button id="modHubBatchSelectAll" type="button" class="macro-button modhub-btn-secondary">全选当前筛选</button>
+                <button id="modHubBatchSelectAll" type="button" class="macro-button modhub-btn-secondary">全选当前页</button>
                 <button id="modHubBatchClear" type="button" class="macro-button modhub-btn-secondary" ${state.selected.size ? '' : 'disabled'}>清空选择</button>
                 <button id="modHubBatchInstall" type="button" class="macro-button modhub-btn-primary" ${state.selected.size ? '' : 'disabled'}>下载并安装（${state.selected.size}）</button>` : ''}`);
         }
@@ -2155,7 +2168,7 @@
         const sourceUrl = safeHttpsUrl(mod?.sourceUrl || mod?.otherUrl || mod?.githubUrl) || '';
         const draftKey = `${mode}:${isAmend ? mod?.id || '' : catalogId || sourceUrl}`;
         const draft = readSubmissionDraft(draftKey);
-        const titles = { new: '申请上架 / 推荐模组', spell: '投稿候选言灵', my: '我的投稿', correct: '纠错', withdraw: '申请下架', amend: isSpell ? '补充候选言灵资料' : '补充投稿资料' };
+        const titles = { new: '申请上架 / 推荐模组', spell: '投稿言灵', my: '我的投稿', correct: '纠错', withdraw: '申请下架', amend: isSpell ? '补充言灵资料' : '补充投稿资料' };
         const escapeHtml = window.modHubEscapeHtml || (value => String(value ?? '').replace(/[&<>"']/g,
             char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]));
         const formFieldsHtml = isSpell ? `
@@ -5571,7 +5584,8 @@
             onFailure: reason => { action.failureReason = reason; }
             });
         });
-        const enable = options.enable || (action => window.modHubToggleSideMod?.(action.local.name, true, { silentOfferReload: true, restoreContext: options.restoreContext }));
+        const enable = options.enable || (action => window.modHubToggleSideMod?.(action.local.name, true, {
+            silentOfferReload: true, restoreContext: options.restoreContext, confirmedFrameworkPair: options.confirmedFrameworkPair }));
         const isEnabled = action => {
             const state = window._modHubModState;
             const item = state?.sideMods?.find(mod => mod.name === action.local?.name);
@@ -5742,7 +5756,32 @@
         }
     }
 
-    function formatBatchInstallPlanHtml(originalTargets, activeTargets, plan, mirrorId) {
+    function getLegacyFrameworkRisk(actions) {
+        if (typeof window.modHubGetFrameworkPairRisk !== 'function') return null;
+        const disabled = new Set([
+            ...(window._modHubModState?.sideDisabled || []),
+            ...(window._modHubModState?.sideMods || []).filter(item => item.enabled === false).map(item => item.name)
+        ].map(normalizeKey));
+        const physicalNames = action => {
+            const localName = action.local?.bootJson?.name || action.local?.name;
+            if (action.type === 'enable') return localName ? [localName] : [];
+            if (action.type === 'update' && localName && disabled.has(normalizeKey(localName)) && action.enableAfter !== true) return [];
+            const names = Array.isArray(action.mod?.bootNames) ? action.mod.bootNames : [];
+            return names.length ? names : localName ? [localName] : [];
+        };
+        // 登记的包名标识独立安装包；原生 alias 仅用于依赖代供。
+        const incoming = actions.flatMap(physicalNames).filter(name => typeof name === 'string' && name.trim());
+        if (!incoming.length) return null;
+        const active = getLocalInstalledProfiles().filter(profile => !disabled.has(normalizeKey(profile.name)));
+        const risk = window.modHubGetFrameworkPairRisk([...active, ...incoming.map(name => ({ name }))]);
+        return risk?.mods.some(name => incoming.some(value => normalizeKey(value) === normalizeKey(name))) ? risk : null;
+    }
+
+    function formatLegacyFrameworkRiskHtml(risk) {
+        return risk ? `<div class="modhub-install-plan-warning">${modHubLabelHtml(risk.reason)}</div>` : '';
+    }
+
+    function formatBatchInstallPlanHtml(originalTargets, activeTargets, plan, mirrorId, frameworkRisk) {
         const escape = window.modHubEscapeHtml;
         const labels = { install: '将安装', update: '将更新', enable: '将启用' };
         const targets = originalTargets.map(mod => {
@@ -5767,7 +5806,7 @@
             const status = req.skipped ? '自行处理，可能无法运行' : (problem?.reason || (action ? `${labels[action.type]}${action.enableAfter ? '并启用' : ''}` : '随所属目标跳过'));
             return `<label class="modhub-dep-item modhub-dep-actionable"><input type="checkbox" class="modhub-dep-checkbox" name="modHubBatchDependency" data-key="${escape(req.key)}" ${req.skipped ? '' : 'checked'}><span class="modhub-dep-content"><span class="gold" data-modhub-i18n-ignore>${escape(req.mod.name)}</span>${action?.release?.prerelease === true ? `<span class="gold">${modHubLabelHtml('预发布版本')}</span>` : ''}<span class="grey">影响：${escape(req.requiredBy.join('、'))}</span><span class="${req.skipped || problem ? 'red' : 'grey'}">${escape(status)}</span></span></label>`;
         }).join('');
-        return `${dependencies ? `<div class="modhub-install-dependencies"><strong class="gold">前置依赖（需要处理的项目默认勾选，可取消）</strong>${dependencies}</div>` : ''}<div class="modhub-install-dependencies"><strong class="gold">所选目标</strong><div class="modhub-batch-target-list" role="group" aria-label="所选目标，可上下滚动" tabindex="0">${targets}</div></div><div class="modhub-batch-summary grey"><div>将串行处理 <strong class="gold">${plan.actions.length} 项操作</strong>；不可执行的目标会跳过。</div><div>下载线路：<strong class="gold">${escape(modHubT(resolveMirrorServer(mirrorId).name))}</strong></div></div>`;
+        return `${formatLegacyFrameworkRiskHtml(frameworkRisk)}${dependencies ? `<div class="modhub-install-dependencies"><strong class="gold">前置依赖（需要处理的项目默认勾选，可取消）</strong>${dependencies}</div>` : ''}<div class="modhub-install-dependencies"><strong class="gold">所选目标</strong><div class="modhub-batch-target-list" role="group" aria-label="所选目标，可上下滚动" tabindex="0">${targets}</div></div><div class="modhub-batch-summary grey"><div>将串行处理 <strong class="gold">${plan.actions.length} 项操作</strong>；不可执行的目标会跳过。</div><div>下载线路：<strong class="gold">${escape(modHubT(resolveMirrorServer(mirrorId).name))}</strong></div></div>`;
     }
 
     async function installSelectedMods() {
@@ -5842,7 +5881,12 @@
                 } else {
                     batchInstallState.current = '核对安装清单';
                     renderBatchInstallToolbar();
-                    const planHtml = () => formatBatchInstallPlanHtml(originalTargets, activeTargets, getPlan(), mirrorId);
+                    let confirmedFrameworkPair;
+                    const planHtml = () => {
+                        const plan = getPlan(), risk = getLegacyFrameworkRisk(plan.actions);
+                        confirmedFrameworkPair = risk?.mods.slice();
+                        return formatBatchInstallPlanHtml(originalTargets, activeTargets, plan, mirrorId, risk);
+                    };
                     const confirmPlan = () => window.modHubConfirm({
                         title: '批量安装确认', message: '请核对所选目标和前置依赖。',
                         trustedMessageHtml: `<div id="modHubBatchPlan">${planHtml()}</div>`,
@@ -5890,6 +5934,7 @@
                         outcome = await executeBatchInstallPlan(plan, {
                             restoreContext,
                             releaseInfos,
+                            confirmedFrameworkPair,
                             getPlan,
                             shouldStop: () => batchInstallState.stopRequested,
                             onProgress: (action, index, total) => {
@@ -7224,7 +7269,7 @@
                 if (cmp !== 0) return cmp;
                 return (a.name || '').localeCompare(b.name || '', 'zh-CN');
             } else if (currentSortBy === 'name') {
-                return (a.name || '').localeCompare(b.name || '', 'zh-CN');
+                return getLocalizedModName(a).localeCompare(getLocalizedModName(b), 'zh-CN');
             }
             return 0;
         });
@@ -7748,10 +7793,80 @@
         `;
     }
 
+    function getMarketPage(entries) {
+        const state = marketPagination[currentMarketSection];
+        const filters = [currentCategory, currentStatusFilter, currentSearchText, currentSortBy, window.modHubGetLanguage?.()];
+        if (!state.filters || filters.some((value, index) => value !== state.filters[index])) state.page = 1;
+        state.filters = filters;
+        const pages = Math.max(1, Math.ceil(entries.length / MODHUB_MARKET_PAGE_SIZE));
+        state.page = Math.max(1, Math.min(state.page, pages));
+        const start = (state.page - 1) * MODHUB_MARKET_PAGE_SIZE;
+        return { entries: entries.slice(start, start + MODHUB_MARKET_PAGE_SIZE), page: state.page, pages, count: entries.length };
+    }
+
+    function renderMarketPagination(page) {
+        if (page.pages <= 1) return '';
+        const escape = window.modHubEscapeHtml;
+        const numbers = size => {
+            const start = Math.max(1, Math.min(page.page - Math.floor(size / 2), page.pages - size + 1));
+            const end = Math.min(page.pages, start + size - 1);
+            const pages = [...new Set([1, ...Array.from({ length: end - start + 1 }, (_, index) => start + index), page.pages])];
+            return pages.map((number, index) => {
+                const params = { page: number };
+                const gap = index && number - pages[index - 1] > 1 ? '<span class="modhub-market-page-ellipsis" aria-hidden="true">...</span>' : '';
+                return gap + `<button type="button" class="macro-button modhub-btn-secondary modhub-market-page-button modhub-market-page-number${number === page.page ? ' modhub-market-page-current' : ''}" data-page="${number}"${number === page.page ? ' aria-current="page"' : ''} aria-label="${escape(modHubT('第 {page} 页', params))}" data-modhub-i18n-aria-label="第 {page} 页" data-modhub-i18n-aria-label-params="${escape(JSON.stringify(params))}">${number}</button>`;
+            }).join('');
+        };
+        return `<nav class="modhub-market-pagination" aria-label="${escape(modHubT('目录分页'))}" data-modhub-i18n-aria-label="目录分页">`
+            + `<span class="modhub-market-page-info">${modHubLabelHtml('共 {count} 项', { count: page.count })}</span>`
+            + '<div class="modhub-market-page-controls">'
+            + `<button type="button" class="macro-button modhub-btn-secondary modhub-market-page-button" data-page-direction="previous" data-page="${page.page - 1}"${page.page === 1 ? ' disabled' : ''}>${modHubLabelHtml('上一页')}</button>`
+            + `<span class="modhub-market-page-numbers modhub-market-page-wide">${numbers(7)}</span>`
+            + `<span class="modhub-market-page-numbers modhub-market-page-compact">${numbers(3)}</span>`
+            + `<button type="button" class="macro-button modhub-btn-secondary modhub-market-page-button" data-page-direction="next" data-page="${page.page + 1}"${page.page === page.pages ? ' disabled' : ''}>${modHubLabelHtml('下一页')}</button></div></nav>`;
+    }
+
+    function bindMarketPagination(container) {
+        const changePage = page => {
+            const targetPage = Number(page);
+            if (targetPage === marketPagination[currentMarketSection].page) return;
+            marketPagination[currentMarketSection].page = targetPage;
+            renderMarketCards();
+            container.scrollIntoView({ block: 'start' });
+            const firstTitle = container.querySelector('.modhub-market-title');
+            firstTitle?.setAttribute('tabindex', '-1');
+            firstTitle?.focus({ preventScroll: true });
+        };
+        container.querySelectorAll('.modhub-market-page-button').forEach(button => {
+            button.onclick = () => changePage(button.dataset.page);
+        });
+    }
+
     function renderMarketCards() {
         const container = document.getElementById('modHubMarketCardsContainer');
         if (!container) return;
         renderMarketCatalogStatus();
+
+        if (currentMarketSection === 'spells') {
+            renderMarketSections();
+            renderBatchInstallToolbar();
+            const mirrorSelect = document.getElementById('modHubMirrorSelect');
+            if (mirrorSelect) mirrorSelect.disabled = true;
+            const filterResult = document.getElementById('modHubMarketFilterResult');
+            if (filterResult) filterResult.hidden = true;
+            if (window.modHubMarketSpells) {
+                const page = getMarketPage(window.modHubMarketSpells.filter(currentSearchText));
+                if (filterResult && currentSearchText) {
+                    filterResult.hidden = false;
+                    modHubText(filterResult, '找到 {count} 条言灵', { count: page.count });
+                }
+                window.modHubMarketSpells.render(container, { search: currentSearchText, entries: page.entries, paginationHtml: renderMarketPagination(page) });
+                bindMarketPagination(container);
+            }
+            else container.innerHTML = modHubHtml('<div class="modhub-empty-state grey">言灵资料模块尚未就绪。请重新载入游戏后重试。</div>');
+            updateToolbarResetBtn();
+            return;
+        }
 
         const profiles = getLocalInstalledProfiles();
         const evaluatedMods = marketModList.map((mod, index) => {
@@ -7790,37 +7905,31 @@
             allDisplayStats.filter(entry => statMembers(entry).some(mod => updatableIndexes.has(mod._marketIndex))).length);
         renderBatchInstallToolbar(profiles, evaluatedMods);
         const filterResult = document.getElementById('modHubMarketFilterResult');
-        if (filterResult) {
-            filterResult.hidden = currentCategory === 'all' && currentStatusFilter === 'all' && !currentSearchText;
-            modHubText(filterResult, `当前显示 ${displayedMods.length} / 共 ${displayStats.length} 个模组`);
-        }
 
         // 同步通知外部模组管理环境看板与 Tab 徽标
         if (typeof window.modHubNotifyUpdateState === 'function') {
             window.modHubNotifyUpdateState(updatableCount, updatableList);
         }
 
-        const spellView = currentMarketSection === 'spells';
         renderMarketSections();
-        const batchToolbar = document.getElementById('modHubMarketBatchToolbar');
-        if (batchToolbar) batchToolbar.hidden = spellView;
         const mirrorSelect = document.getElementById('modHubMirrorSelect');
-        if (mirrorSelect) mirrorSelect.disabled = spellView || batchInstallState.running || batchInstallState.preparing;
-        if (spellView) {
-            if (window.modHubMarketSpells) window.modHubMarketSpells.render(container, { search: currentSearchText, sort: currentSortBy });
-            else container.innerHTML = modHubHtml('<div class="modhub-empty-state grey">言灵资料模块尚未就绪。请重新载入游戏后重试。</div>');
-            updateToolbarResetBtn();
-            return;
-        }
+        if (mirrorSelect) mirrorSelect.disabled = batchInstallState.running || batchInstallState.preparing;
 
-        if (!filtered.length) {
+        if (filterResult) {
+            filterResult.hidden = currentCategory === 'all' && currentStatusFilter === 'all' && !currentSearchText;
+            modHubText(filterResult, `当前显示 ${displayedMods.length} / 共 ${displayStats.length} 个模组`);
+        }
+        const page = getMarketPage(displayedMods);
+        const paginationHtml = renderMarketPagination(page);
+        if (!displayedMods.length) {
             container.innerHTML = modHubHtml(`
                 <div class="modhub-empty-state grey">
                     未找到匹配的模组。您可以清除筛选或刷新市场数据。
                     <br><br>
                     <button type="button" class="macro-button modhub-btn-primary" onclick="window.modHubMarket.resetFilters()">返回查看全部模组</button>
                 </div>
-            `);
+            ` + paginationHtml);
+            bindMarketPagination(container);
             updateToolbarResetBtn();
             return;
         }
@@ -7828,12 +7937,13 @@
         const escapeHtml = window.modHubEscapeHtml || (value => String(value ?? '').replace(/[&<>"']/g, char =>
             ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]));
 
-        const html = displayedMods.map(mod => renderMarketCard(mod, profiles, escapeHtml)).join('');
+        const html = page.entries.map(mod => renderMarketCard(mod, profiles, escapeHtml)).join('');
 
-        container.innerHTML = modHubHtml(html);
+        container.innerHTML = modHubHtml(html + paginationHtml);
         downloadProgressState.forEach((progress, name) => updateDownloadProgress(name, progress.percent, progress.text, progress.state, true));
 
         bindMarketCardEvents(container);
+        bindMarketPagination(container);
 
         renderBatchInstallToolbar(profiles, evaluatedMods);
         updateToolbarResetBtn();
@@ -8083,9 +8193,17 @@
         const manualAssetOptions = releaseInfo?.requiresManualSelection ? getManualAssetOptions(releaseInfo) : [];
         const selectOptions = manualAssetOptions.length ? manualAssetOptions : companionOptions;
         const dependencyHtml = plan.requirements.length ? `<div id="modHubInstallDependencyArea">${formatDependencyListHtml(plan)}</div>` : '';
-        const trustedMessageHtml = releaseInfo
+        const installSummaryHtml = releaseInfo
             ? `${dependencyHtml}${formatReleaseInstallPlanHtml(releaseInfo, selectedMirror, historicalCompanions.length)}`
             : (dependencyHtml ? `${dependencyHtml}<div class="modhub-install-summary"><div class="modhub-install-overview"><strong>目标模组需手动下载</strong></div><p style="margin:8px 0 0; color:var(--300,#bbb); font-size:0.9em;">处理完上述勾选的前置依赖后，将自动为您打开【${window.modHubEscapeHtml(mod.name)}】的下载页面。</p></div>` : '');
+        let confirmedFrameworkPair;
+        const frameworkRiskHtml = () => {
+            const risk = getLegacyFrameworkRisk([...getActivePlan().actions,
+                ...(!externalOnly && !selectedMirror.browserOnly ? [{ mod }] : [])]);
+            confirmedFrameworkPair = risk?.mods.slice();
+            return formatLegacyFrameworkRiskHtml(risk);
+        };
+        const trustedMessageHtml = `<div id="modHubLegacyFrameworkRisk">${frameworkRiskHtml()}</div>${installSummaryHtml}`;
         const initialActionCount = plan.actions.length;
         const initialConfirmText = manualAssetOptions.length
             ? '安装所选包'
@@ -8109,9 +8227,11 @@
             requireSelection: manualAssetOptions.length > 0,
             onRender: (dialog) => {
                 const dependencyArea = dialog.querySelector('#modHubInstallDependencyArea');
+                const frameworkArea = dialog.querySelector('#modHubLegacyFrameworkRisk');
                 const confirmBtn = dialog.querySelector('.modhub-modal-btn-confirm');
                 const updateDepUi = () => {
                     const activeActions = getActivePlan().actions;
+                    if (frameworkArea) frameworkArea.innerHTML = modHubHtml(frameworkRiskHtml());
                     if (dependencyArea) dependencyArea.innerHTML = modHubHtml(formatDependencyListHtml(plan));
                     dialog.querySelectorAll('input[name="modHubDepReq"]').forEach(checkbox => {
                         const requirement = plan.requirements[Number(checkbox.dataset.reqIndex)];
@@ -8205,7 +8325,8 @@
                     return local ? local.enabled === true : (state?.sideEnabled || []).includes(action.local.name);
                 };
                 if (!isEnabled()) {
-                    const enabled = await window.modHubToggleSideMod(action.local.name, true, { silentOfferReload: true, restoreContext });
+                    const enabled = await window.modHubToggleSideMod(action.local.name, true, {
+                        silentOfferReload: true, restoreContext, confirmedFrameworkPair });
                     if (enabled !== true || !isEnabled()) {
                         await window.modHubAlert(`前置依赖【${action.mod.name}】未能启用，已停止安装目标模组。`, '安装已停止');
                         return false;
@@ -8279,6 +8400,7 @@
             if (searchInput) searchInput.value = currentSearchText;
             const sortSelect = document.getElementById('modHubSortSelect');
             if (sortSelect) sortSelect.value = currentSortBy;
+            renderPinnedMarketTools();
         }
         syncMarketSearchClearButton();
         if (render) {
@@ -8290,6 +8412,8 @@
 
     function renderMarketSections() {
         const spellView = currentMarketSection === 'spells';
+        const spellBackups = document.getElementById('modHubMarketSpellBackups');
+        if (spellBackups) spellBackups.hidden = !spellView;
         const reselect = document.getElementById('modHubBatchReselect');
         if (reselect) reselect.disabled = batchInstallState.running || batchInstallState.preparing || marketInstallBusy || marketViewLoading;
         document.getElementById('modHubMarketStats')?.querySelectorAll('button').forEach(button => {
@@ -8308,20 +8432,18 @@
                 if (focusedSection === button.dataset.section && !button.disabled) button.focus();
             });
         }
-        ['modHubMarketStats', 'modHubMarketMirrorField', 'modHubMarketSource', 'modHubMarketBatchToolbar'].forEach(id => {
+        ['modHubMarketStats', 'modHubMarketMirrorField', 'modHubMarketSource', 'modHubMarketBatchToolbar', 'modHubSortSelect'].forEach(id => {
             const control = document.getElementById(id);
             if (control) control.hidden = spellView;
         });
         const footer = document.getElementById('modHubMarketFilterFooter');
         if (footer) footer.hidden = spellView && !currentSearchText;
-        const result = document.getElementById('modHubMarketFilterResult');
-        if (spellView && result) result.hidden = true;
         const note = document.getElementById('modHubMarketSpellNote');
         if (note) note.hidden = !spellView;
         ['modHubMarketBtnSubmit', 'modHubMarketBtnSubmitPinned'].forEach(id => {
             const submit = document.getElementById(id);
             const submitLabel = submit?.querySelector('span') || submit;
-            if (submitLabel) modHubText(submitLabel, spellView ? '投稿候选言灵' : '申请上架 / 推荐模组');
+            if (submitLabel) modHubText(submitLabel, spellView ? '投稿言灵' : '申请上架 / 推荐模组');
         });
         const submitPin = document.querySelector('[data-modhub-market-pin="modHubMarketBtnSubmit"]');
         if (submitPin) updateMarketToolPin(submitPin);
@@ -8345,7 +8467,8 @@
     const MODHUB_MARKET_TOOLS = [
         { id: 'modHubMarketBtnSubmit', label: '申请上架 / 推荐模组', action: () => openCommunitySubmission(currentMarketSection === 'spells' ? 'spell' : 'new') },
         { id: 'modHubMarketBtnMy', label: '我的投稿', action: () => openCommunitySubmission('my') },
-        { id: 'modHubMarketBtnFeedback', label: '纠错与下架申请', action: () => openCommunityFeedback() }
+        { id: 'modHubMarketBtnFeedback', label: '纠错与下架申请', action: () => openCommunityFeedback() },
+        { id: 'modHubMarketBtnSpellBackups', label: '言灵备份', action: () => window.modHubMarketSpells.showBackups() }
     ];
 
     function readPinnedMarketTools() {
@@ -8356,11 +8479,15 @@
     }
 
     function marketToolLabel(tool) {
-        return tool.id === 'modHubMarketBtnSubmit' && currentMarketSection === 'spells' ? '投稿候选言灵' : tool.label;
+        return tool.id === 'modHubMarketBtnSubmit' && currentMarketSection === 'spells' ? '投稿言灵' : tool.label;
     }
 
     function marketToolHtml(tool, pinned = false) {
         return `<button id="${tool.id}${pinned ? 'Pinned' : ''}" data-modhub-market-tool="${tool.id}" type="button" class="macro-button ${tool.id === 'modHubMarketBtnSubmit' ? 'modhub-btn-primary modhub-submit-link' : 'modhub-btn-secondary'}"><span>${marketToolLabel(tool)}</span></button>`;
+    }
+
+    function marketToolPinHtml(tool) {
+        return `<button type="button" class="modhub-market-tool-pin" data-modhub-market-pin="${tool.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3M12 15v6"/></svg></button>`;
     }
 
     function updateMarketToolPin(button) {
@@ -8376,7 +8503,9 @@
 
     function renderPinnedMarketTools() {
         const container = document.getElementById('modHubMarketPinnedTools');
-        if (container) container.innerHTML = modHubHtml(readPinnedMarketTools().map(id => marketToolHtml(MODHUB_MARKET_TOOLS.find(tool => tool.id === id), true)).join(''));
+        if (container) container.innerHTML = modHubHtml(readPinnedMarketTools()
+            .filter(id => id !== 'modHubMarketBtnSpellBackups' || currentMarketSection === 'spells')
+            .map(id => marketToolHtml(MODHUB_MARKET_TOOLS.find(tool => tool.id === id), true)).join(''));
         document.querySelectorAll('[data-modhub-market-tool]').forEach(button => {
             button.onclick = () => {
                 if (button.disabled || batchInstallState.running || batchInstallState.preparing) return;
@@ -8485,7 +8614,7 @@
                 <div id="modHubMarketSections" class="modhub-market-sections" role="group" aria-label="市场内容板块"></div>
             </div>
             <div id="modHubMarketStats" class="modhub-market-summary" role="group" aria-label="按安装状态筛选模组"></div>
-            <p id="modHubMarketSpellNote" class="modhub-market-section-note grey" hidden>言灵按原文展示和复制。请按使用说明在对应位置使用；市场不执行言灵，也不会将其安装为模组。</p>
+            <p id="modHubMarketSpellNote" class="modhub-market-section-note grey" hidden>可直接应用言灵，也可复制正文手动使用。应用前会自动备份存档，请先阅读使用条件。</p>
 
             <!-- ===== 搜索与筛选工具栏 ===== -->
             <div class="modhub-market-toolbar">
@@ -8522,8 +8651,9 @@
                         <div class="modhub-market-more-content">
                             <div class="modhub-market-community-tools" role="group" aria-labelledby="modHubMarketCommunityTitle">
                                 <div id="modHubMarketCommunityTitle" class="modhub-market-group-title">投稿与反馈</div>
-                                ${MODHUB_MARKET_TOOLS.map(tool => `<div class="modhub-market-tool-row">${marketToolHtml(tool)}<button type="button" class="modhub-market-tool-pin" data-modhub-market-pin="${tool.id}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M8 3h8M9 3v6l-3 4v2h12v-2l-3-4V3M12 15v6"/></svg></button></div>`).join('')}
+                                ${MODHUB_MARKET_TOOLS.filter(tool => tool.id !== 'modHubMarketBtnSpellBackups').map(tool => `<div class="modhub-market-tool-row">${marketToolHtml(tool)}${marketToolPinHtml(tool)}</div>`).join('')}
                             </div>
+                            <div id="modHubMarketSpellBackups" class="modhub-market-tool-row"${currentMarketSection === 'spells' ? '' : ' hidden'}>${marketToolHtml(MODHUB_MARKET_TOOLS.find(tool => tool.id === 'modHubMarketBtnSpellBackups'))}${marketToolPinHtml(MODHUB_MARKET_TOOLS.find(tool => tool.id === 'modHubMarketBtnSpellBackups'))}</div>
                             <label id="modHubMarketMirrorField">下载方式
                                 <select id="modHubMirrorSelect" class="modhub-select" title="选择下载方式" aria-describedby="modHubMirrorHint">
                                     ${MIRROR_SERVERS.map(m => `<option value="${m.id}" ${currentMirrorId === m.id ? 'selected' : ''}>${m.name}</option>`).join('')}
@@ -8607,6 +8737,10 @@
             await Promise.all([catalog, local]);
             if (revision === marketViewRevision) marketViewLoading = false;
             if (!current()) return false;
+            if (currentMarketSection === 'spells') {
+                const updates = getUpdatableMods();
+                window.modHubNotifyUpdateState?.(updates.length, updates);
+            }
             renderCategoryFilters();
             renderMarketCards();
             if (!catalogReady) throw catalogError;
@@ -8651,7 +8785,7 @@
                     if (!await refreshView(true)) return;
                     if (marketCatalogStatus?.source === 'cache') window.modHubShowToast(marketCatalogStatusText(), 'warning');
                     else if (marketCatalogStatus?.source === 'wiki') window.modHubShowToast(modHubT('已通过 Wiki 载入目录，统一索引暂不可用。'), 'info');
-                    else window.modHubShowToast(`刷新成功，已载入 ${getDisplayMods().length} 个模组、${window.modHubMarketSpells?.getSpells().length || 0} 个言灵配方`, 'success');
+                    else window.modHubShowToast(`刷新成功，已载入 ${getDisplayMods().length} 个模组、${window.modHubMarketSpells?.getSpells().length || 0} 条言灵`, 'success');
                 } catch (e) {
                     if (current()) window.modHubShowToast(`刷新失败: ${e.message}`, 'warning');
                 } finally {
@@ -8668,7 +8802,7 @@
         const sortSelect = document.getElementById('modHubSortSelect');
         if (sortSelect) {
             sortSelect.onchange = () => {
-                currentSortBy = sortSelect.value;
+                currentSortBy = currentMarketSection === 'spells' ? 'name' : sortSelect.value;
                 renderMarketCards();
             };
         }
@@ -8739,10 +8873,9 @@
     function updateToolbarResetBtn() {
         const btn = document.getElementById('modHubMarketBtnResetFilter');
         if (!btn) return;
-        const spellView = currentMarketSection === 'spells';
-        const isFiltering = spellView ? !!currentSearchText : (currentCategory !== 'all' || currentStatusFilter !== 'all' || !!currentSearchText);
-        modHubText(btn, spellView ? '清除搜索' : '返回全部模组');
-        btn.title = spellView ? '清除搜索，查看全部言灵' : '清除当前所有筛选与搜索，查看全部模组';
+        const isFiltering = currentMarketSection !== 'spells' && (currentCategory !== 'all' || currentStatusFilter !== 'all' || !!currentSearchText);
+        modHubText(btn, '返回全部模组');
+        btn.title = '清除当前所有筛选与搜索，查看全部模组';
         window.modHubLocalizeOwned?.(btn);
         btn.style.display = isFiltering ? 'inline-block' : 'none';
     }
@@ -8804,9 +8937,11 @@
         }
 
         const lines = updatables.map(u => `· ${u.name} (当前: ${formatVersionDisplay(u.currentVersion)} -> 最新: ${formatVersionDisplay(u.newVersion)})${(getModUpdateInfo(u.marketMod).release?.prerelease ?? u.marketMod.prerelease) === true ? ` · ${modHubT('预发布版本')}` : ''}`).join('\n');
+        const frameworkRisk = getLegacyFrameworkRisk(updatables.map(item => ({ type: 'update', mod: item.marketMod,
+            local: item.localProfile, enableAfter: false })));
         const ok = await window.modHubConfirm({
             title: '一键全部更新',
-            message: `检测到共有 ${updatables.length} 个模组可升级至最新版本：\n\n${lines}\n\n当前下载线路：${modHubT(selectedMirror.name)}\n是否立即开始批量下载并安装？`,
+            message: `${frameworkRisk ? modHubT(frameworkRisk.reason) + '\n\n' : ''}检测到共有 ${updatables.length} 个模组可升级至最新版本：\n\n${lines}\n\n当前下载线路：${modHubT(selectedMirror.name)}\n是否立即开始批量下载并安装？`,
             confirmText: '开始更新',
             cancelText: '取消',
             confirmType: 'primary'
@@ -8881,26 +9016,18 @@
     window.addEventListener('modhub:languagechange', () => {
         const root = document.getElementById('modHubModMarketContainer');
         if (root) {
-            renderMarketCatalogStatus();
-            root.querySelectorAll('.modhub-market-card[data-mod-index], .modhub-market-variant-row[data-mod-index]').forEach(node => {
-                const mod = marketModList[Number(node.dataset.modIndex)];
-                if (mod) refreshCardContent(node, mod);
+            const openOriginals = new Set();
+            root.querySelectorAll('[data-modhub-card-original]').forEach(node => {
+                if (node.open) openOriginals.add(node.closest?.('[data-mod-index]')?.dataset.modIndex);
             });
-            const groups = getDisplayMods().filter(mod => mod.isLanguageGroup);
-            root.querySelectorAll('.modhub-market-language-card[data-variant-group]').forEach(node => {
-                const group = groups.find(mod => mod.variantGroupId === node.dataset.variantGroup);
-                const title = node.querySelector('[data-modhub-card-field="name"]');
-                node.querySelectorAll('[data-modhub-card-tag]').forEach(tag => {
-                    tag.textContent = window.modHubGetMarketCardText({ name: tag.dataset.modhubCardTag }, 'name').text;
-                });
-                if (group && title) {
-                    const name = getLocalizedModName(group);
-                    title.textContent = name;
-                    node.setAttribute('data-modhub-i18n-aria-label-params', JSON.stringify({ name }));
-                    node.setAttribute('aria-label', window.modHubT('{name}的模组信息', { name }));
-                }
+            clearTimeout(marketSearchTimer);
+            const searchInput = document.getElementById('modHubMarketSearch');
+            if (searchInput) currentSearchText = searchInput.value.trim();
+            renderMarketCards();
+            root.querySelectorAll('[data-modhub-card-original]').forEach(node => {
+                const index = node.closest?.('[data-mod-index]')?.dataset.modIndex;
+                if (index !== undefined && openOriginals.has(index)) node.open = true;
             });
-            window.modHubMarketSpells?.refreshLanguage?.(root);
             window.modHubApplyLanguage?.(root);
         }
     });

@@ -2693,6 +2693,33 @@ const MODHUB_FRAMEWORK_IDENTITY_GROUPS = [
     { key: 'simpleframework', aliases: ['simpleframework', '简易框架', 'scmlsimpleframework', 'simpleframeworks', 'Simple Frameworks', 'SimpleFrameworks'] }
 ];
 
+window.modHubGetFrameworkPairRisk = function(profiles = []) {
+    const normalize = name => String(name || '').toLowerCase().replace(/[\s_\-.]/g, '');
+    const enabled = new Map();
+    for (const profile of profiles) {
+        if (profile?.enabled === false) continue;
+        const name = typeof profile === 'string' ? profile : profile?.bootJson?.name || profile?.name;
+        const group = MODHUB_FRAMEWORK_IDENTITY_GROUPS.find(group =>
+            [group.key, ...group.aliases].some(alias => normalize(alias) === normalize(name)));
+        if (group) enabled.set(group.key, name);
+    }
+    if (!enabled.has('maplebirch') || !enabled.has('simpleframework')) return null;
+    return { id: 'maplebirch-vs-simpleframework', mods: [enabled.get('maplebirch'), enabled.get('simpleframework')],
+        reason: '简易框架与枫叶框架同时启用可能导致功能异常。请根据模组所需前置保留其中一种框架。' };
+};
+
+async function modHubConfirmFrameworkEnable(names, confirmedFrameworkPair) {
+    const profiles = window._modHubModState.sideMods.filter(item => item.enabled || names.includes(item.name));
+    const risk = window.modHubGetFrameworkPairRisk(profiles.map(item => ({ name: item.name })));
+    if (!risk || !risk.mods.some(name => names.includes(name))) return true;
+    if (Array.isArray(confirmedFrameworkPair) && confirmedFrameworkPair.length === 2
+        && risk.mods.every(name => confirmedFrameworkPair.includes(name))) return true;
+    return window.modHubConfirm({ title: '模组冲突风险确认',
+        message: window.modHubT('同时启用【{first}】与【{second}】可能导致功能异常。\n\n请根据模组所需前置保留其中一种框架。是否仍要继续启用？',
+            { first: risk.mods[0], second: risk.mods[1] }),
+        confirmText: '继续启用', cancelText: '取消', confirmType: 'danger' });
+}
+
 // 判断模组是否属于核心框架。
 window.modHubIsFrameworkMod = function(modName) {
     if (!modName) return false;
@@ -3606,6 +3633,7 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     const selfNotice = isModHub ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。可通过加载器原生管理界面重新启用 ModHub。游戏存档和已有还原点保留。' : '';
     const selfNoticeHtml = isModHub ? modHubSelfRemovalNoticeHtml(false) : '';
     if (item.enabled === targetEnable) return false;
+    if (targetEnable && !await modHubConfirmFrameworkEnable([modName], options.confirmedFrameworkPair)) return false;
 
     // 当即将禁用模组时，进行下游依赖影响排查
     if (!targetEnable && !options.skipConfirm) {
@@ -3910,6 +3938,7 @@ window.modHubBatchEnable = async function() {
         window.modHubShowToast('所选模组已全部处于启用状态', 'info');
         return false;
     }
+    if (!await modHubConfirmFrameworkEnable(toEnable)) return false;
 
     const saved = await window.modHubRunManagerAction(async () => {
         const currentState = window._modHubModState;

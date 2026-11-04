@@ -225,7 +225,7 @@
     align-items: stretch;
     gap: 8px;
     box-sizing: border-box;
-    width: 380px;
+    width: min(300px, calc(100vw - 32px));
     max-width: calc(100cqw - 2px);
     max-height: min(420px, 60vh, var(--modhub-market-more-space, 420px));
     max-height: min(420px, 60dvh, var(--modhub-market-more-space, 420px));
@@ -277,12 +277,17 @@
 }
 
 .modhub-market-tool-row > [data-modhub-market-tool] {
-    flex: 1 1 auto;
+    flex: 1 1 0;
+    width: auto !important;
+    white-space: normal !important;
 }
 
 .modhub-market-tool-row > .modhub-market-tool-pin {
+    box-sizing: border-box;
     flex: 0 0 36px;
     width: 36px !important;
+    min-width: 36px !important;
+    max-width: 36px;
     padding: 6px !important;
 }
 
@@ -832,6 +837,8 @@
     text-align: center;
     text-align-last: center;
 }
+
+#modHubSortSelect[hidden] { display: none !important; }
 
 .modhub-market-header-actions {
     position: relative;
@@ -2368,12 +2375,99 @@ div.modhub-version-optional { display: block; cursor: default; }
     border-top: 1px solid var(--750, #333);
 }
 
-.modhub-spell-detail p {
+.modhub-spell-dialog { max-width: 680px; }
+
+.modhub-spell-dialog .modhub-spell-detail {
+    display: grid;
+    gap: 12px;
+    min-width: 0;
+    color: var(--200, #ccc);
+    font-size: 1em;
+    line-height: 1.6;
+}
+
+.modhub-spell-summary,
+.modhub-spell-section {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--750, #333);
+    border-radius: 3px;
+    background: var(--900, #111);
+}
+
+.modhub-spell-name {
+    margin: 0;
+    color: var(--gold, #d4af37);
+    font-size: 1.15em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.modhub-spell-author { margin: 4px 0 0; color: var(--400, #999); font-size: 0.95em; }
+.modhub-spell-description { margin: 8px 0 0; }
+.modhub-spell-author,
+.modhub-spell-description {
     white-space: pre-wrap;
     overflow-wrap: anywhere;
 }
 
-.modhub-spell-body {
+.modhub-spell-section-heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    min-width: 0;
+    margin-bottom: 10px;
+}
+.modhub-spell-section-heading > h3 {
+    min-width: 0;
+    margin: 0;
+    color: var(--gold, #d4af37);
+    font-size: 1em;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.modhub-spell-section-important { border-left: 2px solid var(--gold, #d4af37); background: var(--850, #1b1b1b); }
+
+.modhub-spell-facts { display: grid; gap: 10px; margin: 0; }
+.modhub-spell-fact {
+    display: grid;
+    grid-template-columns: minmax(110px, 1fr) minmax(0, 3fr);
+    gap: 4px 12px;
+    min-width: 0;
+}
+.modhub-spell-fact > dt { margin: 0; color: var(--400, #999); font-size: 0.95em; }
+.modhub-spell-fact > dd {
+    min-width: 0;
+    margin: 0;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+
+.modhub-spell-dialog .modhub-spell-copy-icon {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 36px;
+    box-sizing: border-box;
+    width: 36px !important;
+    min-width: 36px !important;
+    height: 36px !important;
+    min-height: 36px;
+    margin: 0;
+    padding: 0 !important;
+    border: 1px solid var(--600, #555) !important;
+    border-radius: 3px;
+    background: var(--800, #222) !important;
+    color: var(--300, #aaa) !important;
+    cursor: pointer;
+}
+.modhub-spell-copy-icon > svg { display: block; width: 18px; height: 18px; }
+.modhub-spell-dialog .modhub-spell-copy-icon:hover { border-color: var(--gold, #d4af37) !important; color: var(--gold, #d4af37) !important; }
+.modhub-spell-copy-icon:focus-visible { outline: 2px solid var(--gold, #d4af37); outline-offset: 2px; }
+
+.modhub-spell-dialog .modhub-spell-body {
+    min-width: 0;
+    margin: 0;
     white-space: pre-wrap;
     overflow-wrap: anywhere;
     word-break: break-word;
@@ -2381,15 +2475,197 @@ div.modhub-version-optional { display: block; cursor: default; }
     overflow: auto;
     padding: 10px;
     background: var(--900);
-    border: 1px solid var(--600);
-    color: var(--000);
+    border: 1px solid var(--750, #333);
+    color: var(--200, #ccc);
+    font-size: 0.95em;
+    line-height: 1.55;
     user-select: text;
+}
+
+.modhub-spell-sources { display: grid; gap: 10px; min-width: 0; }
+.modhub-spell-source { min-width: 0; }
+.modhub-spell-source + .modhub-spell-source { padding-top: 10px; border-top: 1px solid var(--750, #333); }
+.modhub-spell-source > a {
+    display: inline-flex;
+    align-items: center;
+    box-sizing: border-box;
+    min-height: 32px;
+    max-width: 100%;
+    padding: 4px 0;
+    color: var(--link, #5888dd);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.modhub-spell-source > a:hover { color: var(--link-hover, #8af); }
+.modhub-spell-source > a:focus-visible { outline: 2px solid var(--gold, #d4af37); outline-offset: 2px; }
+.modhub-spell-source > p {
+    margin: 4px 0 0;
+    color: var(--300, #aaa);
+    font-size: 0.95em;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
 
 .modhub-spell-dialog .modhub-modal-body {
     min-height: 0;
     max-height: 65vh;
     overflow-y: auto;
+}
+
+.modhub-spell-dialog .modhub-modal-close {
+    min-width: 32px;
+    min-height: 32px;
+    flex-shrink: 0;
+}
+
+@media (max-width: 600px) {
+    .modhub-spell-dialog .modhub-modal-body { padding: 12px; }
+    .modhub-spell-summary,
+    .modhub-spell-section { padding: 10px; }
+    .modhub-spell-fact { grid-template-columns: minmax(0, 1fr); gap: 3px; }
+}
+
+.modhub-spell-backup-download {
+    box-sizing: border-box;
+    flex: 0 1 auto;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    min-height: 36px;
+    margin: 0;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+}
+
+[data-modhub-spell-meta-row][hidden],
+#modHubMarketSpellBackups[hidden] { display: none !important; }
+
+.modhub-spell-card .modhub-market-actions { margin-top: auto; padding-top: 8px; }
+.modhub-spell-card .modhub-market-actions > button { flex: 1 1 0; }
+.modhub-spell-card .modhub-market-actions > button:disabled {
+    opacity: 1 !important;
+    background: var(--800, #222) !important;
+    border-color: var(--600, #555) !important;
+    color: var(--300, #aaa) !important;
+    box-shadow: none !important;
+    cursor: default !important;
+}
+
+.modhub-spell-apply-notice {
+    margin: 0 0 12px;
+    padding: 10px;
+    border-left: 2px solid var(--gold, #d4af37);
+    background: var(--850, #1b1b1b);
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+
+.modhub-spell-failure-dialog { max-width: 560px; }
+.modhub-spell-failure-dialog .modhub-modal-title { color: var(--red, #ff5555); }
+.modhub-spell-failure { display: grid; gap: 14px; min-width: 0; line-height: 1.6; }
+.modhub-spell-failure > section { min-width: 0; }
+.modhub-spell-failure h3 {
+    margin: 0 0 7px;
+    font-size: 0.95em;
+    font-weight: bold;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+}
+.modhub-spell-failure p { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.modhub-spell-failure-status {
+    padding: 10px 12px;
+    border: 1px solid var(--750, #333);
+    border-left: 3px solid var(--red, #ff5555);
+    background: var(--850, #1b1b1b);
+}
+.modhub-spell-failure .modhub-spell-failure-heading { margin: 0; color: var(--red, #ff5555); font-size: 1.05em; }
+.modhub-spell-failure .modhub-spell-failure-message { margin-top: 7px; color: var(--200, #ccc); font-size: 0.95em; }
+.modhub-spell-failure-raw {
+    box-sizing: border-box;
+    min-width: 0;
+    max-height: 24vh;
+    margin: 0;
+    padding: 10px;
+    overflow: auto;
+    border: 1px solid var(--750, #333);
+    background: var(--900, #111);
+    color: var(--200, #ccc);
+    font: inherit;
+    font-size: 0.95em;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    user-select: text;
+}
+.modhub-spell-failure-raw:focus-visible { outline: 2px solid var(--gold, #d4af37); outline-offset: 2px; }
+.modhub-spell-failure-next { padding: 0 2px; color: var(--300, #aaa); font-size: 0.95em; }
+.modhub-spell-failure-backup {
+    padding: 10px 12px;
+    border-left: 2px solid var(--gold, #d4af37);
+    background: var(--850, #1b1b1b);
+    color: var(--300, #aaa);
+    font-size: 0.95em;
+}
+
+.modhub-spell-backup-manager { display: grid; gap: 10px; min-width: 0; }
+.modhub-spell-backup-count { margin: 0; color: var(--300, #aaa); font-size: 0.9em; }
+.modhub-spell-backup-toolbar { display: flex; flex-wrap: wrap; gap: 8px; min-width: 0; }
+.modhub-spell-backup-toolbar > button {
+    flex: 1 1 100px;
+    box-sizing: border-box;
+    width: auto !important;
+    min-width: 0 !important;
+    max-width: 100%;
+    min-height: 36px;
+    margin: 0;
+    padding: 6px 8px !important;
+    white-space: normal !important;
+    overflow-wrap: anywhere;
+}
+.modhub-spell-backup-status {
+    margin: 0;
+    padding-left: 8px;
+    border-left: 2px solid var(--gold, #d4af37);
+    font-size: 0.9em;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.modhub-spell-backup-status[hidden] { display: none !important; }
+.modhub-spell-backups { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.modhub-spell-backup-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid var(--600, #555);
+    background: var(--850, #1b1b1b);
+}
+.modhub-spell-backup-row.is-selected { border-color: var(--gold, #d4af37); }
+.modhub-spell-backup-select {
+    display: flex;
+    align-items: center;
+    flex: 1 1 180px;
+    gap: 8px;
+    min-width: 0;
+    min-height: 36px;
+    margin: 0;
+    cursor: pointer;
+}
+.modhub-spell-backup-select > input { flex: 0 0 18px; box-sizing: border-box; width: 18px; height: 18px; margin: 0; }
+.modhub-spell-backup-select > span {
+    min-width: 0;
+    line-height: 1.5;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+
+@media (max-width: 768px) {
+    .modhub-spell-backup-row > .modhub-spell-backup-select,
+    .modhub-spell-backup-row > .modhub-spell-backup-download { flex-basis: 100%; }
 }
 
 .modhub-acquisition:focus-visible,
@@ -2666,5 +2942,90 @@ div.modhub-version-optional { display: block; cursor: default; }
     .modhub-market-sections { gap: 8px 16px; }
     .modhub-market-sections .modhub-market-section-button {
         font-size: min(0.85em, 17px) !important;
+    }
+}
+
+/* 分页栏居中显示，窄屏将翻页操作与数字页码分行。 */
+.modhub-market-pagination {
+    grid-column: 1 / -1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
+    min-width: 0;
+    padding: 10px 0;
+    border-top: 1px solid var(--750, #333);
+    border-bottom: 1px solid var(--750, #333);
+    font-size: 0.85em;
+}
+
+.modhub-market-page-info {
+    min-width: 0;
+    color: var(--400, #999);
+    text-align: center;
+    overflow-wrap: anywhere;
+}
+
+.modhub-market-page-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-width: 0;
+    max-width: 100%;
+}
+
+.modhub-market-page-numbers {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.modhub-market-page-compact { display: none; }
+
+.modhub-market-pagination .modhub-market-page-button {
+    box-sizing: border-box;
+    flex: 0 0 auto;
+    width: auto !important;
+    min-width: 36px !important;
+    min-height: 36px;
+    margin: 0;
+    padding: 6px 8px !important;
+    border: 1px solid var(--600, #555) !important;
+    border-radius: 3px;
+    background: var(--800, #222);
+    color: var(--100, #ddd) !important;
+    font: inherit;
+    font-size: 1em !important;
+    line-height: 1.35;
+    cursor: pointer;
+    white-space: nowrap !important;
+}
+
+.modhub-market-pagination .modhub-market-page-current {
+    border-color: var(--gold, #d4af37) !important;
+    background-color: var(--gold, #d4af37) !important;
+    color: var(--900, #111) !important;
+}
+.modhub-market-page-ellipsis {
+    min-width: 16px;
+    color: var(--400, #999);
+    text-align: center;
+}
+.modhub-market-pagination .modhub-market-page-button:not(:disabled):hover { border-color: var(--gold, #d4af37) !important; }
+.modhub-market-page-button:disabled { cursor: default; opacity: 0.45; }
+.modhub-market-page-button:focus-visible {
+    outline: 2px solid var(--gold, #d4af37);
+    outline-offset: 2px;
+}
+
+@media (max-width: 768px) {
+    .modhub-market-page-controls { flex-wrap: wrap; width: 100%; }
+    .modhub-market-page-wide { display: none; }
+    .modhub-market-page-compact {
+        display: inline-flex;
+        order: 1;
+        flex-basis: 100%;
+        justify-content: center;
     }
 }

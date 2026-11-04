@@ -41,6 +41,11 @@
 
     function declarationChecks(snapshot) {
         const { active, providers, complete } = window.modHubHelp.getDependencyContext(snapshot);
+        const frameworkRisk = window.modHubGetFrameworkPairRisk(active);
+        if (frameworkRisk) addFinding(snapshot, { id: 'compat-framework-' + frameworkRisk.id, kind: 'configuration', status: 'problem',
+            title: '简易框架与枫叶框架存在冲突风险', mods: frameworkRisk.mods,
+            evidence: '已启用【' + frameworkRisk.mods.join('】与【') + '】。' + frameworkRisk.reason,
+            advice: frameworkRisk.reason });
         const edges = new Map(active.map(item => [item.name, []]));
         const utils = window.modHubGetGui?.()?.gModUtils || window.modUtils;
         const registry = utils?.getAddonPluginManager?.();
