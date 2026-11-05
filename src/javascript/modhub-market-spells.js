@@ -8,6 +8,7 @@
 
 
     const MODHUB_SPELL_CACHE_KEY = 'modhub_market_spells_v1';
+    const MODHUB_SPELL_CATEGORIES = ['状态与治疗', '属性与技能', '物品与金钱', '角色与关系', '时间调整', '地点传送', '任务与事件', '外观与身体', '经历与声望'];
     const MODHUB_SOURCE_NAMES = { github: 'GitHub', tieba: '百度贴吧', discord: 'Discord' };
     let revision = -1;
     let spells = [];
@@ -97,13 +98,23 @@
         return false;
     }
 
-    function filter(search = '') {
+    function getCategory(entry) {
+        return MODHUB_SPELL_CATEGORIES.includes(entry?.spell?.category) ? entry.spell.category : '未分类';
+    }
+
+    function filter(search = '', category = 'all') {
         const query = search ? window.modHubSearch.compile(search) : { tokens: [] };
-        return spells.filter(entry => window.modHubMarket.matchesContentLanguage(entry)).map(entry => ({ entry, score: query.tokens.length ? window.modHubSearch.score(window.modHubMarket.getLocalizedSearchEntry(entry), query) : 0 }))
+        return spells.filter(entry => window.modHubMarket.matchesContentLanguage(entry) && (category === 'all' || getCategory(entry) === category)).map(entry => ({ entry, score: query.tokens.length ? window.modHubSearch.score(window.modHubMarket.getLocalizedSearchEntry(entry), query) : 0 }))
             .filter(item => item.score >= 0).sort((left, right) => {
                 if (query.tokens.length && left.score !== right.score) return right.score - left.score;
                 return String(displayText(left.entry, 'name')).localeCompare(String(displayText(right.entry, 'name')), 'zh-CN');
             }).map(item => item.entry);
+    }
+
+    function getCategories(search = '') {
+        const counts = new Map([...MODHUB_SPELL_CATEGORIES, '未分类'].map(category => [category, 0]));
+        filter(search).forEach(entry => counts.set(getCategory(entry), counts.get(getCategory(entry)) + 1));
+        return [...counts].map(([category, count]) => ({ category, count }));
     }
 
     function acquisitionHtml(entry) {
@@ -582,12 +593,13 @@
     function render(container, { search = '', entries = filter(search), paginationHtml = '' } = {}) {
         container.innerHTML = modHubHtml((entries.length ? entries.map((entry, index) => `<div class="childItem modhub-market-card modhub-spell-card" data-spell-id="${escapeHtml(entry.id)}">`
             + `<div class="modhub-market-card-header"><span class="modhub-market-title gold" data-modhub-card-field="name" data-modhub-i18n-ignore>${escapeHtml(displayText(entry, 'name'))}</span></div>`
+            + `<div class="modhub-market-tags"><span class="modhub-market-tag modhub-market-category">${labelHtml(getCategory(entry))}</span></div>`
             + `<div class="modhub-market-meta grey"><span>${labelHtml('作者')}：<span data-modhub-i18n-ignore>${escapeHtml(entry.author || t('未知作者'))}</span></span></div>`
             + window.modHubMarket.renderCardDescription(entry, escapeHtml)
             + `<div class="modhub-market-meta grey" data-modhub-spell-meta-row="gameVersionRange"${displayText(entry, 'gameVersionRange') ? '' : ' hidden'}>${labelHtml('适配 DoL')}：<span data-modhub-spell-field="gameVersionRange" data-modhub-i18n-ignore>${escapeHtml(displayText(entry, 'gameVersionRange') || '')}</span></div>`
             + `<div class="modhub-market-actions"><button type="button" class="macro-button modhub-btn-primary modhub-spell-apply-button" data-spell-id="${escapeHtml(entry.id)}" data-spell-index="${index}">应用</button>`
             + `<button type="button" class="macro-button modhub-btn-secondary modhub-spell-detail-button" data-spell-index="${index}">查看使用说明</button></div></div>`).join('')
-            : `<div class="modhub-empty-state grey">${search ? '没有找到匹配的言灵。试试其他关键词。' : '这里还没有言灵，可以刷新列表再看看。'}</div>`) + paginationHtml);
+            : `<div class="modhub-empty-state grey">${spells.length ? '没有找到匹配的言灵。请调整用途或搜索条件。' : '这里还没有言灵，可以刷新列表再看看。'}</div>`) + paginationHtml);
         container.querySelectorAll('.modhub-spell-detail-button').forEach(button => { button.onclick = () => showDetails(entries[Number(button.dataset.spellIndex)]); });
         container.querySelectorAll('.modhub-spell-apply-button').forEach(button => { button.onclick = () => applySpell(entries[Number(button.dataset.spellIndex)]); });
         refreshApplyButtons(container);
@@ -609,6 +621,7 @@
     }
 
     window.modHubMarketSpells = { applyIndex, restoreCache, normalizeSpells, normalizeSources, normalizePackages, isVerifiedPackage,
-        acquisitionHtml, getSourceLinks, renderAcquisitionDetails, copyBody, showDetails, applySpell, showBackups, render, refreshLanguage, filter, getSpells: () => spells.slice(),
+        acquisitionHtml, getSourceLinks, renderAcquisitionDetails, copyBody, showDetails, applySpell, showBackups, render, refreshLanguage, filter, getCategory, getCategories,
+        getCategoryNames: () => MODHUB_SPELL_CATEGORIES.slice(), getSpells: () => spells.slice(),
         getRevision: () => revision, CACHE_KEY: MODHUB_SPELL_CACHE_KEY };
 })();

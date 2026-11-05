@@ -32,6 +32,7 @@
     let successNoticeBusy = false;
     let successNoticeClosed = false;
     let startupVerified = false;
+    const guardedStores = new WeakSet();
     const busy = message => Object.assign(new Error(message), { code: 'MODHUB_BUSY' });
 
     const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
@@ -59,7 +60,51 @@
         if (![enabledKey, disabledKey, prefix, schema.dbName, schema.storeName].every(value => typeof value === 'string' && value.length > 0)
             || enabledKey === disabledKey || reserved.some(key => overlaps(prefix, key))
             || [enabledKey, disabledKey].some(key => key.startsWith(prefix) || reserved.some(metadata => overlaps(key, metadata)))) fail('ModLoader 存储结构未知，已停止还原写入');
-        return { utils, modLoader, loader, enabledKey, disabledKey, prefix, dbName: schema.dbName, storeName: schema.storeName };
+        const env = { utils, modLoader, loader, enabledKey, disabledKey, prefix, dbName: schema.dbName, storeName: schema.storeName };
+        guardModStore(env);
+        return env;
+    }
+
+    function guardModStore(env) {
+        if (guardedStores.has(env.loader.customStore)) return;
+        let current = env.loader.customStore;
+        let reopening;
+        const reopen = () => {
+            if (reopening) return reopening;
+            reopening = new Promise((resolve, reject) => {
+                const request = window.indexedDB.open(env.dbName);
+                let settled = false;
+                let missing = false;
+                const stop = error => { settled = true; reject(error); };
+                request.onupgradeneeded = () => { missing = true; request.transaction.abort(); };
+                request.onerror = () => stop(missing ? new Error('原模组数据库不存在，已停止操作') : request.error || new Error('模组存储无法重新打开'));
+                request.onblocked = () => stop(new Error('模组存储正被其他页面占用，请关闭其他游戏页面后重试'));
+                request.onsuccess = () => {
+                    const db = request.result;
+                    if (settled) { db.close(); return; }
+                    if (!db.objectStoreNames.contains(env.storeName)) { db.close(); stop(new Error('原模组仓库不存在，已停止操作')); return; }
+                    settled = true;
+                    db.onversionchange = () => db.close();
+                    current = (mode, callback) => callback(db.transaction(env.storeName, mode).objectStore(env.storeName));
+                    resolve(current);
+                };
+            }).finally(() => { reopening = null; });
+            return reopening;
+        };
+        const guarded = async function(mode, callback) {
+            const previous = current;
+            let entered = false;
+            try {
+                return await previous.call(this, mode, store => { entered = true; return callback(store); });
+            } catch (error) {
+                // 只重试尚未开始的读取，已经执行的事务和写入不得重放。
+                if (mode !== 'readonly' || entered || error?.name !== 'InvalidStateError') throw error;
+                const next = current !== previous ? current : await reopen();
+                return next.call(this, mode, callback);
+            }
+        };
+        guardedStores.add(guarded);
+        env.loader.customStore = guarded;
     }
 
     // 普通变更须保留真实包体的完整登记，救援快照仍按原始状态读取。

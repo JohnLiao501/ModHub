@@ -1352,6 +1352,7 @@
             extraText: [mod.extraText || '', window.modHubGetMarketCardText(mod, 'description').text,
                 ...(mod.spell ? ['inputLocation', 'instructions', 'parameters', 'prerequisites', 'gameVersionRange', 'modVersions', 'verificationMethod']
                     .map(field => window.modHubGetMarketCardText(mod, field).text) : []),
+                ...(mod.spell ? [mod.spell.category || '', modHubT(window.modHubMarketSpells?.getCategory(mod) || '未分类')] : []),
                 ...[mod.category, ...(mod.tags || [])].filter(Boolean).map(name => window.modHubGetMarketCardText({ name }, 'name').text)].join(' ') };
     }
 
@@ -2156,7 +2157,8 @@
         const isAmend = mode === 'amend';
         const isSpell = mode === 'spell' || mode === 'correct' && mod?.contentType === 'spell'
             || isAmend && ['add', 'correct'].includes(mod?.kind) && mod?.contentType === 'spell';
-        const spellFields = ['body', 'syntax', 'inputLocation', 'instructions', 'parameters', 'prerequisites', 'gameVersionRange', 'modVersions', 'verificationMethod', 'submittedEnvironmentVerified'];
+        const spellFields = ['category', 'body', 'syntax', 'inputLocation', 'instructions', 'parameters', 'prerequisites', 'gameVersionRange', 'modVersions', 'verificationMethod', 'submittedEnvironmentVerified'];
+        const spellCategories = window.modHubMarketSpells?.getCategoryNames() || [];
         const isWithdrawForm = mode === 'withdraw';
         const isPackageSubmission = !isSpell && (mode === 'new' || isAmend && mod?.kind === 'add');
         const hasCategoryField = isPackageSubmission || !isSpell && (mode === 'correct' || isAmend && mod?.kind === 'correct');
@@ -2177,6 +2179,7 @@
             <label>作者或提交者<input name="author" maxlength="100" required></label>
             <label>公开来源链接（原创可留空）<input name="sourceUrl" type="url" maxlength="1000" inputmode="url"></label>
             <label>用途说明<textarea name="description" maxlength="1000" required></textarea></label>
+            <label>${modHubLabelHtml('言灵用途')}<select name="category"><option value="">${modHubT('未分类')}</option>${spellCategories.map(category => `<option value="${category}" data-modhub-i18n-key="${category}">${modHubT(category)}</option>`).join('')}</select></label>
             <label>言灵正文<textarea name="body" maxlength="64000" rows="8" spellcheck="false" required></textarea></label>
             <label>语法类型<input name="syntax" maxlength="200" required></label>
             <label>输入位置<input name="inputLocation" maxlength="1000" required></label>
@@ -2633,7 +2636,7 @@
                     } : storedInitial;
                     fields.forEach(name => {
                         if (input[name].type === 'checkbox') input[name].checked = false;
-                        else input[name].value = name === 'category' ? (submissionCategories.includes(initial[name]) ? initial[name] : '')
+                        else input[name].value = name === 'category' ? ((isSpell ? spellCategories : submissionCategories).includes(initial[name]) ? initial[name] : '')
                             : String(initial[name] || '').slice(0, input[name].maxLength);
                     });
                     if ((sourceLocked || isCatalogFeedback) && !pending) input.sourceUrl.value = sourceUrl;
@@ -2709,7 +2712,10 @@
                         if (hasCategoryField && !pending && (mode === 'new' || current.category) && !submissionCategories.includes(current.category)) {
                             tell('请选择模组分类。'); input.category.focus(); return;
                         }
-                        if (isSpell && spellFields.filter(name => name !== 'submittedEnvironmentVerified').some(name => !current[name]?.trim())) {
+                        if (isSpell && current.category && !spellCategories.includes(current.category)) {
+                            tell('请选择现有的言灵用途。'); input.category.focus(); return;
+                        }
+                        if (isSpell && spellFields.filter(name => !['category', 'submittedEnvironmentVerified'].includes(name)).some(name => !current[name]?.trim())) {
                             tell('请完整填写正文、使用环境、参数、前提及验证方法；不依赖模组或没有参数时，请明确填写“无”。'); return;
                         }
                         if (isSpell && (!current.submittedEnvironmentVerified || !current.publicationConsent)) {
@@ -2720,7 +2726,7 @@
                             .find(([, hosts]) => hosts.includes(new URL(current.sourceUrl).hostname))?.[0] : '';
                         if (isSpell && current.sourceUrl && !spellPlatform) { tell('言灵来源仅支持 GitHub、百度贴吧或 Discord；原创候选可留空。'); return; }
                         if (isSpell && pending && fields.filter(name => name !== 'publicationConsent').some(name =>
-                            current[name] !== (spellFields.includes(name) ? pending.payload.spell?.[name] : pending.payload[name]))) {
+                            current[name] !== (spellFields.includes(name) ? pending.payload.spell?.[name] ?? '' : pending.payload[name]))) {
                             pending = null; lockFields(false); resetSpellConfirmation();
                             saveSubmissionDraft(draftKey, { fields: values() });
                             tell('候选内容已改变，请重新核对全部公开字段并确认后提交。'); return;
@@ -2758,7 +2764,7 @@
                                 if (!isAmend || error.status !== 409) throw error;
                                 const latest = await communitySubmissionRequest('/community-submissions/query', { receipt: pending.receipt });
                                 if (latest.revision <= pending.payload.revision || !fields.filter(name => name !== 'publicationConsent').every(name =>
-                                    (isSpell && spellFields.includes(name) ? latest.spell?.[name] === pending.payload.spell?.[name] : latest[name] === pending.payload[name]))) throw error;
+                                    (isSpell && spellFields.includes(name) ? (latest.spell?.[name] ?? '') === (pending.payload.spell?.[name] ?? '') : latest[name] === pending.payload[name]))) throw error;
                                 row = latest;
                             }
                             if (typeof row.id !== 'string' || !row.id) throw new Error('服务响应缺少投稿编号');
@@ -7849,14 +7855,15 @@
 
         if (currentMarketSection === 'spells') {
             renderMarketSections();
+            renderCategoryFilters();
             renderBatchInstallToolbar();
             const mirrorSelect = document.getElementById('modHubMirrorSelect');
             if (mirrorSelect) mirrorSelect.disabled = true;
             const filterResult = document.getElementById('modHubMarketFilterResult');
             if (filterResult) filterResult.hidden = true;
             if (window.modHubMarketSpells) {
-                const page = getMarketPage(window.modHubMarketSpells.filter(currentSearchText));
-                if (filterResult && currentSearchText) {
+                const page = getMarketPage(window.modHubMarketSpells.filter(currentSearchText, currentCategory));
+                if (filterResult && (currentSearchText || currentCategory !== 'all')) {
                     filterResult.hidden = false;
                     modHubText(filterResult, '找到 {count} 条言灵', { count: page.count });
                 }
@@ -8382,7 +8389,7 @@
         if (button) button.hidden = !document.getElementById('modHubMarketSearch')?.value;
     }
 
-    /** 两个板块保留各自搜索；模组状态和分类不参与言灵筛选。 */
+    /** 两个板块分别保留分类、搜索与页码。 */
     function selectMarketSection(section, render = true) {
         if (!['packages', 'spells'].includes(section) || batchInstallState.running || marketInstallBusy) return false;
         clearTimeout(marketSearchTimer);
@@ -8437,7 +8444,7 @@
             if (control) control.hidden = spellView;
         });
         const footer = document.getElementById('modHubMarketFilterFooter');
-        if (footer) footer.hidden = spellView && !currentSearchText;
+        if (footer) footer.hidden = spellView && !currentSearchText && currentCategory === 'all';
         const note = document.getElementById('modHubMarketSpellNote');
         if (note) note.hidden = !spellView;
         ['modHubMarketBtnSubmit', 'modHubMarketBtnSubmitPinned'].forEach(id => {
@@ -8565,9 +8572,21 @@
     function renderCategoryFilters() {
         const container = document.getElementById('modHubCategoryCapsules');
         if (!container) return;
-        const showCategories = currentMarketSection === 'packages' && shouldShowCategoryFilters(currentStatusFilter);
+        const spellView = currentMarketSection === 'spells';
+        const showCategories = spellView || shouldShowCategoryFilters(currentStatusFilter);
         container.style.display = showCategories ? '' : 'none';
         if (!showCategories) return;
+        container.setAttribute('aria-label', modHubT(spellView ? '言灵用途' : '模组分类'));
+        container.setAttribute('data-modhub-i18n-aria-label', spellView ? '言灵用途' : '模组分类');
+        if (spellView) {
+            const categories = window.modHubMarketSpells?.getCategories(currentSearchText) || [];
+            const escapeHtml = window.modHubEscapeHtml;
+            container.innerHTML = `<option value="all">${escapeHtml(modHubT('全部用途（{count}）', { count: categories.reduce((count, item) => count + item.count, 0) }))}</option>`
+                + categories.map(({ category, count }) => `<option value="${escapeHtml(category)}">${escapeHtml(modHubT('{category}（{count}）', { category: modHubT(category), count }))}</option>`).join('');
+            container.value = currentCategory;
+            container.onchange = () => { currentCategory = container.value || 'all'; renderMarketCards(); };
+            return;
+        }
         const counts = new Map();
         const visibleMods = getDisplayMods();
         visibleMods.forEach(entry => {
@@ -8873,9 +8892,10 @@
     function updateToolbarResetBtn() {
         const btn = document.getElementById('modHubMarketBtnResetFilter');
         if (!btn) return;
-        const isFiltering = currentMarketSection !== 'spells' && (currentCategory !== 'all' || currentStatusFilter !== 'all' || !!currentSearchText);
-        modHubText(btn, '返回全部模组');
-        btn.title = '清除当前所有筛选与搜索，查看全部模组';
+        const spellView = currentMarketSection === 'spells';
+        const isFiltering = currentCategory !== 'all' || !spellView && (currentStatusFilter !== 'all' || !!currentSearchText);
+        modHubText(btn, spellView ? '返回全部言灵' : '返回全部模组');
+        btn.title = spellView ? '清除用途和搜索，查看全部言灵' : '清除当前所有筛选与搜索，查看全部模组';
         window.modHubLocalizeOwned?.(btn);
         btn.style.display = isFiltering ? 'inline-block' : 'none';
     }
@@ -8893,7 +8913,7 @@
         renderMarketCards();
         updateToolbarResetBtn();
         if (typeof window.modHubShowToast === 'function') {
-            window.modHubShowToast(currentMarketSection === 'spells' ? '已清除搜索并展示全部言灵' : '已返回并展示全部模组', 'info');
+            window.modHubShowToast(currentMarketSection === 'spells' ? '已清除筛选并展示全部言灵' : '已返回并展示全部模组', 'info');
         }
     }
 
