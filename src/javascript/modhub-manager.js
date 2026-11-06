@@ -356,7 +356,18 @@ window.modHubReadInstalledModBoot = async function(modName) {
     return result;
 };
 
-// 禁用或刚安装尚未加载的模组，直接从 IndexedDB 安装包读取真实 boot.json。
+async function modHubReadManagedEmbeddedStorage(name) {
+    if (!window.modHubGetManagedEmbeddedModBoot?.(name)) return null;
+    const utils = window.modHubGetGui()?.gModUtils;
+    const loader = utils?.getModLoader?.()?.getIndexDBLoader?.();
+    const keyval = utils?.getIdbKeyValRef?.();
+    if (typeof loader?.customStore !== 'function' || typeof loader.constructor?.calcModNameKey !== 'function'
+        || typeof keyval?.get !== 'function') throw new Error('无法读取同名旁加载包，请重新载入后重试。');
+    const key = loader.constructor.calcModNameKey(name);
+    return { loader, keyval, key, data: await keyval.get(key, loader.customStore) };
+}
+
+// 禁用或刚安装尚未加载的模组，从真实包体读取档案。
 window.modHubLoadDisabledModInfo = async function(modNames, refresh = false) {
     const gui = window.modHubGetGui();
     const names = window.modHubUniqueModNames(Array.isArray(modNames)
@@ -377,15 +388,16 @@ window.modHubLoadDisabledModInfo = async function(modNames, refresh = false) {
         const cached = window._modHubDisabledModInfo.get(key);
         if (!refresh && String(cached?.bootJson?.name || '').trim().toLowerCase() === key) continue;
         await window.modHubYieldToBrowser();
-        const { bootJson, error } = await window.modHubReadInstalledModBoot(name);
+        const installed = await window.modHubReadInstalledModBoot(name);
+        const bootJson = installed.bootJson || (installed.missing && window.modHubGetManagedEmbeddedModBoot?.(name));
         if (bootJson) {
             window._modHubDisabledModInfo.set(key, {
                 name: bootJson.name || name,
                 bootJson
             });
             loaded++;
-        } else if (error) {
-            console.warn(`[ModHub] 读取已禁用模组【${name}】档案失败`, error);
+        } else if (installed.error) {
+            console.warn(`[ModHub] 读取已禁用模组【${name}】档案失败`, installed.error);
         }
     }
     return loaded;
@@ -1525,8 +1537,9 @@ async function modHubCommitImportedPackages(prepared, options, context) {
     for (const name of requestedEnabled) {
         if (profiles.some(item => key(item.name) === key(name))) continue;
         const installed = await window.modHubReadInstalledModPackage(name);
-        if (installed.error || installed.missing || installed.bootJson?.name !== name) throw installed.error || new Error(`无法核验已安装模组【${name}】`);
-        profiles.push({ name, bootJson: installed.bootJson });
+        const bootJson = installed.bootJson || (installed.missing && window.modHubGetManagedEmbeddedModBoot?.(name));
+        if (installed.error || bootJson?.name !== name) throw installed.error || new Error(`无法核验已安装模组【${name}】`);
+        profiles.push({ name, bootJson });
     }
     const nextEnabled = window.modHubKeepRecoveryOrder(requestedEnabled, profiles);
     const enabledKeys = new Set(nextEnabled.map(key));
@@ -1785,6 +1798,11 @@ window.modHubHandleAddMod = async function(fileInput, options = {}) {
 };
 
 
+function modHubKeepEmbeddedSortSlots(items, sorted) {
+    let index = 0;
+    return items.map(item => item.embedded ? item : sorted[index++]);
+}
+
 // 重新排列列表项并持久化保存
 window.modHubReorderList = async function(listType, fromIndex, targetIndex, isAfter) {
     if (listType === 'side' && window.modHubIsManagerSearchActive()) {
@@ -1802,16 +1820,23 @@ window.modHubReorderList = async function(listType, fromIndex, targetIndex, isAf
         }
     }, undefined, { trackReload: true, updateState: () => {
         if (!['side', 'beauty'].includes(listType) || !Number.isInteger(fromIndex) || !Number.isInteger(targetIndex)) return false;
-        toIndex = isAfter ? targetIndex + 1 : targetIndex;
-        if (fromIndex < toIndex) toIndex--;
-        if (fromIndex === toIndex) return false;
         const state = listType === 'side' ? window._modHubModState : window._modHubBeautyState;
         if (listType === 'side') window.modHubEnsureModStateSync(state);
         const list = listType === 'side' ? state?.sideMods : state?.enabledList;
-        if (!list || fromIndex < 0 || fromIndex >= list.length || toIndex < 0 || toIndex >= list.length) return false;
-        [moved] = list.splice(fromIndex, 1);
-        list.splice(toIndex, 0, moved);
-        if (listType === 'side') window.modHubEnsureModStateSync(state);
+        if (!list?.[fromIndex] || !list[targetIndex]) return false;
+        const sortable = listType === 'side' ? list.filter(item => !item.embedded) : list;
+        const from = sortable.indexOf(list[fromIndex]), target = sortable.indexOf(list[targetIndex]);
+        if (from < 0 || target < 0) return false;
+        toIndex = target + (isAfter ? 1 : 0);
+        if (from < toIndex) toIndex--;
+        if (from === toIndex) return false;
+        [moved] = sortable.splice(from, 1);
+        sortable.splice(toIndex, 0, moved);
+        if (listType === 'side') {
+            state.sideMods = modHubKeepEmbeddedSortSlots(list, sortable);
+            toIndex = state.sideMods.indexOf(moved);
+            window.modHubEnsureModStateSync(state);
+        }
     } });
 };
 
@@ -1836,13 +1861,13 @@ window.modHubEnsureModStateSync = function(state) {
             seen.add(key);
             return true;
         });
-        const currentNames = new Set(state.sideMods.map(m => m.name.trim().toLowerCase()));
-        const hasNewExternalMods = enabled.some(n => !currentNames.has(n.trim().toLowerCase())) ||
-            disabled.some(n => !currentNames.has(n.trim().toLowerCase()));
+        const currentItems = new Map(state.sideMods.map(m => [m.name.trim().toLowerCase(), m]));
+        const hasNewExternalMods = enabled.some(n => !currentItems.has(n.trim().toLowerCase())) ||
+            disabled.some(n => !currentItems.has(n.trim().toLowerCase()));
         if (hasNewExternalMods) {
             state.sideMods = [
-                ...enabled.map(name => ({ name, enabled: true })),
-                ...disabled.map(name => ({ name, enabled: false }))
+                ...enabled.map(name => ({ ...currentItems.get(name.trim().toLowerCase()), name, enabled: true })),
+                ...disabled.map(name => ({ ...currentItems.get(name.trim().toLowerCase()), name, enabled: false }))
             ];
         }
     }
@@ -1916,6 +1941,14 @@ window.modHubLoadModManageState = function(refresh = false, options = {}) {
             const enabled = enabledSet.has(name);
             return { name: enabled ? sideEnabled[enabledIndex++] : sideDisabled[disabledIndex++], enabled };
         });
+        await Promise.all(sideMods.map(async item => {
+            try {
+                const storage = await modHubReadManagedEmbeddedStorage(item.name);
+                if (storage && storage.data === undefined) item.embedded = true;
+            } catch (error) {
+                console.warn(`[ModHub] 无法核验模组【${item.name}】的安装来源`, error);
+            }
+        }));
 
         // 区分内置核心模组
         const builtInMods = (window._modHubModState?.builtInMods || allLoaded).filter(name => !allSideSet.has(name));
@@ -2296,13 +2329,14 @@ function modHubApplyManagerSearch() {
     const mods = window._modHubModState?.sideMods || [];
     const query = modHubManagerSearchQuery(), active = !!query?.tokens.length;
     const visible = new Set(mods.filter(item => modHubManagerMatchesSearch(item, query)).map(item => item.name));
-    const recoveryNames = new Set(window.modHubProtectedRecoveryNames().map(name => name.toLowerCase()));
+    const fixedNames = new Set([...window.modHubProtectedRecoveryNames(), ...mods.filter(item => item.embedded).map(item => item.name)]
+        .map(name => name.toLowerCase()));
     container.querySelectorAll('li[data-mod-name][data-drag-type="side"]').forEach(row => {
         row.hidden = !visible.has(row.dataset.modName);
-        const protectedMod = recoveryNames.has(row.dataset.modName.toLowerCase());
-        row.draggable = !active && !window._modHubBatchMode && !protectedMod;
+        const fixedOrder = fixedNames.has(row.dataset.modName.toLowerCase());
+        row.draggable = !active && !window._modHubBatchMode && !fixedOrder;
         row.querySelectorAll('.modhub-side-move-up, .modhub-side-move-down').forEach(button => {
-            button.disabled = active || protectedMod;
+            button.disabled = active || fixedOrder;
         });
     });
     const clear = document.getElementById('modHubManagerSearchClear');
@@ -2437,6 +2471,7 @@ window.modHubRenderModManageUI = function() {
             const modName = item.name;
             const isEnabled = item.enabled;
             const isRecovery = recoveryNames.has(modName.toLowerCase());
+            const fixedOrder = isRecovery || item.embedded;
             const modInfo = window.modHubGetModInfo(modName);
             const version = modInfo?.bootJson?.version || '';
             const subText = window.modHubGetModSubtext(modName, modInfo, false);
@@ -2449,7 +2484,8 @@ window.modHubRenderModManageUI = function() {
             const updateBtnHtml = `<button class="macro-button modhub-btn-primary btn-inline-update" data-mod-action="update" title="${newVerText ? `立即升级至 ${window.modHubEscapeHtml(newVerText)}` : ''}"${newVerText ? '' : ' style="display:none;"'}>更新</button>`;
 
             const descParts = [];
-            if (isRecovery) descParts.push('<span class="gold">为确保时间点还原正常运行，不可调整顺序</span>');
+            if (item.embedded) descParts.push('<span class="gold">整合包内置，加载顺序由整合包决定</span>');
+            else if (isRecovery) descParts.push('<span class="gold">为确保时间点还原正常运行，不可调整顺序</span>');
             if (isEnabled) {
                 if (versionText) descParts.push(window.modHubEscapeHtml(versionText));
                 if (subText) descParts.push(`<span class="modhub-mod-alias" data-modhub-no-translate>${window.modHubEscapeHtml(subText)}</span>`);
@@ -2463,13 +2499,13 @@ window.modHubRenderModManageUI = function() {
             const isSelected = isBatchMode && window._modHubSelectedMods && window._modHubSelectedMods.has(modName);
 
             html += `
-                <li class="modhub-item ${isEnabled ? '' : 'item-disabled'} ${isHighlight ? 'modhub-item-highlight' : ''} ${isBatchMode ? 'modhub-batch-active' : ''} ${isSelected ? 'modhub-item-selected' : ''}" data-mod-name="${window.modHubEscapeHtml(modName)}" data-index="${index}" data-drag-type="side" draggable="${!isRecovery && !isBatchMode}">
+                <li class="modhub-item ${isEnabled ? '' : 'item-disabled'} ${isHighlight ? 'modhub-item-highlight' : ''} ${isBatchMode ? 'modhub-batch-active' : ''} ${isSelected ? 'modhub-item-selected' : ''}" data-mod-name="${window.modHubEscapeHtml(modName)}" data-index="${index}" data-drag-type="side" draggable="${!fixedOrder && !isBatchMode}">
                     <div class="modhub-item-info">
                         ${isBatchMode ? `
                             <label class="modhub-batch-check-wrap" onclick="event.stopPropagation();">
                                 <input type="checkbox" class="macro-checkbox modhub-batch-checkbox" data-mod-name="${window.modHubEscapeHtml(modName)}" ${isSelected ? 'checked' : ''} ${isRecovery ? 'disabled title="系统保护模组，不可批量操作"' : ''} />
                             </label>
-                        ` : (isRecovery ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>')}
+                        ` : (fixedOrder ? '<span class="gold modhub-status-tag">[固定]</span>' : '<span class="modhub-drag-handle grey" title="按住拖拽调整加载顺序" aria-label="拖拽手柄">⋮⋮</span>')}
                         <div class="modhub-item-main">
                             <div class="modhub-item-title ${isEnabled ? '' : 'grey'}" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</div>
                             <div class="grey modhub-item-desc">${descHtml}${updateTagHtml}</div>
@@ -2477,10 +2513,10 @@ window.modHubRenderModManageUI = function() {
                     </div>
                     <div class="modhub-btn-group">
                         ${updateBtnHtml}
-                        <button data-modhub-busy-key="${window.modHubEscapeHtml('side:up:' + modName)}" class="macro-button modhub-btn-move modhub-side-move-up" data-index="${index}" title="上移一位（长按直接置顶）" aria-label="上移或置顶" ${isRecovery ? 'disabled' : ''}>▲</button>
-                        <button data-modhub-busy-key="${window.modHubEscapeHtml('side:down:' + modName)}" class="macro-button modhub-btn-move modhub-side-move-down" data-index="${index}" title="下移一位（长按直接置底）" aria-label="下移或置底" ${isRecovery ? 'disabled' : ''}>▼</button>
+                        <button data-modhub-busy-key="${window.modHubEscapeHtml('side:up:' + modName)}" class="macro-button modhub-btn-move modhub-side-move-up" data-index="${index}" title="上移一位（长按直接置顶）" aria-label="上移或置顶" ${fixedOrder ? 'disabled' : ''}>▲</button>
+                        <button data-modhub-busy-key="${window.modHubEscapeHtml('side:down:' + modName)}" class="macro-button modhub-btn-move modhub-side-move-down" data-index="${index}" title="下移一位（长按直接置底）" aria-label="下移或置底" ${fixedOrder ? 'disabled' : ''}>▼</button>
                         <button class="macro-button modhub-btn-toggle ${isEnabled ? '' : 'btn-enable'}" data-mod-action="toggle" data-modhub-busy-key="${window.modHubEscapeHtml('side:toggle:' + modName)}" title="${isEnabled ? '禁用该模组' : '启用该模组'}">${isEnabled ? '禁用' : '启用'}</button>
-                        <button class="macro-button modhub-btn-delete btn-delete" data-mod-action="delete" data-modhub-busy-key="${window.modHubEscapeHtml('side:delete:' + modName)}" title="永久删除该模组"><span class="red">删除</span></button>
+                        ${item.embedded ? '' : `<button class="macro-button modhub-btn-delete btn-delete" data-mod-action="delete" data-modhub-busy-key="${window.modHubEscapeHtml('side:delete:' + modName)}" title="永久删除该模组"><span class="red">删除</span></button>`}
                     </div>
                 </li>
             `;
@@ -3129,12 +3165,13 @@ window.modHubSmartSortAll = async function() {
             if (window._modHubModState) {
                 window.modHubEnsureModStateSync(window._modHubModState);
                 const sideMods = window._modHubModState.sideMods;
-                const sideNodes = sideMods.map(item => ({ key: item.name, modName: item.name }));
+                const sortable = sideMods.filter(item => !item.embedded);
+                const sideNodes = sortable.map(item => ({ key: item.name, modName: item.name }));
                 const sortedSideKeys = await window.modHubBuildSmartOrder(sideNodes, gui, false);
-                sideChanged = sortedSideKeys.some((name, index) => name !== sideMods[index].name);
+                sideChanged = sortedSideKeys.some((name, index) => name !== sortable[index].name);
                 if (sideChanged) {
-                    const map = new Map(sideMods.map(m => [m.name, m]));
-                    window._modHubModState.sideMods = sortedSideKeys.map(key => map.get(key)).filter(Boolean);
+                    const map = new Map(sortable.map(m => [m.name, m]));
+                    window._modHubModState.sideMods = modHubKeepEmbeddedSortSlots(sideMods, sortedSideKeys.map(key => map.get(key)));
                     window.modHubEnsureModStateSync(window._modHubModState);
                 }
             }
@@ -3434,23 +3471,26 @@ window.modHubMoveSideMod = async function(index, deltaOrPosition) {
             const state = window._modHubModState;
             if (!state) return false;
             window.modHubEnsureModStateSync(state);
-            const list = state.sideMods;
-            if (!list || index < 0 || index >= list.length) return false;
+            const item = state.sideMods[index];
+            if (!item || item.embedded) return false;
+            const list = state.sideMods.filter(mod => !mod.embedded);
+            const fromIndex = list.indexOf(item);
 
-            let targetIndex = index;
+            let targetIndex = fromIndex;
             if (deltaOrPosition === 'top') {
                 targetIndex = 0;
             } else if (deltaOrPosition === 'bottom') {
                 targetIndex = list.length - 1;
             } else if (typeof deltaOrPosition === 'number') {
-                targetIndex = index + deltaOrPosition;
+                targetIndex = fromIndex + deltaOrPosition;
             }
 
-            if (targetIndex < 0 || targetIndex >= list.length || targetIndex === index) return false;
+            if (targetIndex < 0 || targetIndex >= list.length || targetIndex === fromIndex) return false;
 
-            const [item] = list.splice(index, 1);
+            list.splice(fromIndex, 1);
             list.splice(targetIndex, 0, item);
             movedName = item.name;
+            state.sideMods = modHubKeepEmbeddedSortSlots(state.sideMods, list);
             window.modHubEnsureModStateSync(state);
         }
     });
@@ -3708,8 +3748,83 @@ window.modHubToggleSideMod = async function(modName, enable, options = {}) {
     return saved;
 };
 
+async function modHubPlanSideRemoval(names) {
+    const targets = [], skipped = [], overrides = new Set();
+    try {
+        for (const name of names) {
+            const stored = await modHubReadManagedEmbeddedStorage(name);
+            if (stored && stored.data === undefined) skipped.push(name);
+            else {
+                targets.push(name);
+                if (stored) overrides.add(name);
+            }
+        }
+    } catch (error) {
+        await window.modHubAlert(error.message || String(error));
+        return null;
+    }
+    if (!targets.length) {
+        await window.modHubAlert('这些模组随整合包提供，无法删除。可以在模组管理中启用或禁用。');
+        return null;
+    }
+    return { targets, skipped, overrides };
+}
+
+async function modHubDeleteSidePackages({ targets, overrides }) {
+    const state = window._modHubModState;
+    if (!state) throw new Error('模组列表尚未读取完成');
+    const ordinary = targets.filter(name => !overrides.has(name));
+    const controller = window.modHubGetController();
+    if (ordinary.length && typeof controller?.removeModIndexDB !== 'function') throw new Error('当前加载器未提供模组包删除接口，已停止删除');
+    const managed = new Map();
+    for (const name of overrides) {
+        const stored = await modHubReadManagedEmbeddedStorage(name);
+        if (!stored || stored.data === undefined) throw new Error('同名旁加载包已不存在，请刷新列表后重试。');
+        if (typeof stored.keyval.del !== 'function') throw new Error('当前加载器未提供模组包删除接口，已停止删除');
+        managed.set(name, stored);
+    }
+    if (ordinary.length) {
+        const names = new Set(ordinary);
+        window.modHubEnsureModStateSync(state);
+        state.sideMods = state.sideMods.filter(item => !names.has(item.name));
+        state.sideEnabled = state.sideEnabled.filter(name => !names.has(name));
+        state.sideDisabled = state.sideDisabled.filter(name => !names.has(name));
+        if (!await window.modHubSaveModManageState(false, { dropNames: ordinary })) throw new Error('删除模组配置失败');
+    }
+    const utils = window.modHubGetGui()?.gModUtils;
+    const loader = utils?.getModLoader?.()?.getIndexDBLoader?.();
+    const keyval = utils?.getIdbKeyValRef?.();
+    for (const name of targets) {
+        await window.modHubLoadBeautyState(true, [name]);
+        window._modHubDisabledModInfo.delete(name.trim().toLowerCase());
+        const stored = managed.get(name);
+        if (stored) {
+            // 原生删除还会清掉隐藏登记，此处只移除旁加载覆盖包。
+            await stored.keyval.del(stored.key, stored.loader.customStore);
+            if (await stored.keyval.get(stored.key, stored.loader.customStore) !== undefined) {
+                throw new Error('模组包删除后仍存在，未能确认卸载成功');
+            }
+        } else {
+            if (await controller.removeModIndexDB(name) === false) throw new Error('模组包删除失败');
+            if (loader?.customStore && typeof loader.constructor?.calcModNameKey === 'function' && typeof keyval?.get === 'function' &&
+                await keyval.get(loader.constructor.calcModNameKey(name), loader.customStore)) {
+                throw new Error('模组包删除后仍存在，未能确认卸载成功');
+            }
+        }
+    }
+    if (overrides.size) {
+        window.modHubMarket?.invalidateLocalPackageProfiles?.();
+        if (!ordinary.length) window._modHubReloadRevision++;
+        await window.modHubLoadModManageState(true);
+    }
+    return true;
+}
+
 // 永久删除旁加载模组
 window.modHubDeleteSideMod = async function(modName) {
+    const plan = await modHubPlanSideRemoval([modName]);
+    if (!plan) return false;
+    const overrideNotice = plan.overrides.size ? '仅删除同名旁加载包，保留整合包内嵌模组及其启禁状态。' : '';
     const isModHub = String(modName).trim().toLowerCase() === 'modhub';
     const selfNotice = isModHub ? '重新载入后，ModHub 的模组管理、模组市场、时间点还原和加载页救援将停用。游戏存档和已有还原点保留；重新导入 ModHub 后可继续使用。' : '';
     const selfNoticeHtml = isModHub ? modHubSelfRemovalNoticeHtml(true) : '';
@@ -3739,12 +3854,12 @@ window.modHubDeleteSideMod = async function(modName) {
                 </div>
             </div>
             ${selfNoticeHtml}
-            <div class="red modhub-delete-warning">删除后该模组将从浏览器存储中彻底移除。是否仍要删除？</div>
+            <div class="red modhub-delete-warning">${overrideNotice || '删除后该模组将从浏览器存储中彻底移除。是否仍要删除？'}</div>
         `;
 
         confirmed = await window.modHubConfirm({
             title: isModHub ? '确认卸载 ModHub（存在依赖警告）' : '确认删除模组（存在依赖警告）',
-            message: `确定要彻底删除模组【${modDisplayName}】吗？\n\n警告：以下模组依赖于该模组/框架，删除后可能无法正常运行：\n${affectedListText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}删除后该模组将从浏览器存储中彻底移除。是否确认删除？`,
+            message: `确定要彻底删除模组【${modDisplayName}】吗？\n\n警告：以下模组依赖于该模组/框架，删除后可能无法正常运行：\n${affectedListText}\n\n${selfNotice ? selfNotice + '\n\n' : ''}${overrideNotice || '删除后该模组将从浏览器存储中彻底移除。是否确认删除？'}`,
             trustedMessageHtml,
             confirmText: isModHub ? '确认卸载' : '确认删除',
             cancelText: '取消',
@@ -3755,8 +3870,8 @@ window.modHubDeleteSideMod = async function(modName) {
     } else {
         confirmed = await window.modHubConfirm({
             title: isModHub ? '确认卸载 ModHub' : '确认删除模组',
-            message: `确定要删除模组【${modName}】吗？\n${selfNotice || '删除后该模组将从浏览器存储中彻底移除，不可恢复。'}`,
-            trustedMessageHtml: `<p class="modhub-delete-intro">确定要删除模组【<strong class="gold modhub-delete-target" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${isModHub ? selfNoticeHtml : '<p class="red modhub-delete-warning">删除后该模组将从浏览器存储中彻底移除，不可恢复。</p>'}`,
+            message: `确定要删除模组【${modName}】吗？\n${selfNotice || overrideNotice || '删除后该模组将从浏览器存储中彻底移除，不可恢复。'}`,
+            trustedMessageHtml: `<p class="modhub-delete-intro">确定要删除模组【<strong class="gold modhub-delete-target" data-modhub-no-translate>${window.modHubEscapeHtml(modName)}</strong>】吗？</p>${isModHub ? selfNoticeHtml : `<p class="red modhub-delete-warning">${overrideNotice || '删除后该模组将从浏览器存储中彻底移除，不可恢复。'}</p>`}`,
             dialogClass: isModHub ? 'modhub-self-removal-dialog' : '',
             confirmText: isModHub ? '确认卸载' : '确认删除',
             cancelText: '取消',
@@ -3765,32 +3880,10 @@ window.modHubDeleteSideMod = async function(modName) {
     }
     if (!confirmed) return;
 
-    const saved = await window.modHubRunManagerAction(async () => {
-        const state = window._modHubModState;
-        if (!state) throw new Error('模组列表尚未读取完成');
-        const controller = window.modHubGetController();
-        if (typeof controller?.removeModIndexDB !== 'function') throw new Error('当前加载器未提供模组包删除接口，已停止删除');
-        window.modHubEnsureModStateSync(state);
-        state.sideMods = state.sideMods.filter(item => item.name !== modName);
-        state.sideEnabled = state.sideEnabled.filter(name => name !== modName);
-        state.sideDisabled = state.sideDisabled.filter(name => name !== modName);
-        // dropNames：明确告知保存层该模组已被删除，禁止被「已安装保留」逻辑复活
-        if (!await window.modHubSaveModManageState(false, { dropNames: [modName] })) throw new Error('删除模组配置失败');
-        await window.modHubLoadBeautyState(true, [modName]);
-        window._modHubDisabledModInfo.delete(modName.trim().toLowerCase());
-        // 真正删除浏览器存储中的安装包；
-        // 只从列表移除而不删包体，会留下永远无法被加载的孤儿包体（占用空间且状态诡异）。
-        if (await controller.removeModIndexDB(modName) === false) throw new Error('模组包删除失败');
-        const gui = window.modHubGetGui();
-        const loader = gui?.gModUtils?.getModLoader?.()?.getIndexDBLoader?.();
-        const keyval = gui?.gModUtils?.getIdbKeyValRef?.();
-        if (loader?.customStore && typeof loader.constructor?.calcModNameKey === 'function' && typeof keyval?.get === 'function' &&
-            await keyval.get(loader.constructor.calcModNameKey(modName), loader.customStore)) {
-            throw new Error('模组包删除后仍存在，未能确认卸载成功');
-        }
-    }, undefined, { trackReload: true, immediateReload: isFramework || isModHub, busyKey: `side:delete:${modName}`, restoreLabel: `删除模组【${modName}】` });
+    const saved = await window.modHubRunManagerAction(() => modHubDeleteSidePackages(plan), undefined,
+        { trackReload: true, immediateReload: isFramework || isModHub, busyKey: `side:delete:${modName}`, restoreLabel: `删除模组【${modName}】` });
     if (saved) {
-        window.modHubShowToast(`已删除模组【${modName}】，重新载入后生效`, 'warning');
+        window.modHubShowToast(plan.overrides.size ? '已删除同名旁加载包，重新载入后生效。' : `已删除模组【${modName}】，重新载入后生效`, 'warning');
         if (isFramework || isModHub) await window.modHubOfferReload(`模组【${modDisplayName || modName}】已从模组列表中删除。`, { isFramework });
     }
     return saved;
@@ -4074,8 +4167,11 @@ window.modHubBatchDelete = async function() {
     }
     const state = window._modHubModState;
     if (!state) return false;
-    const toDelete = selected.filter(name => state.sideMods?.some(m => m.name === name));
-    if (!toDelete.length) return false;
+    const selectedNames = selected.filter(name => state.sideMods?.some(m => m.name === name));
+    if (!selectedNames.length) return false;
+    const plan = await modHubPlanSideRemoval(selectedNames);
+    if (!plan) return false;
+    const { targets: toDelete, skipped, overrides } = plan;
 
     const toDeleteSet = new Set(toDelete.map(n => n.toLowerCase()));
     const affectedMap = new Map();
@@ -4097,6 +4193,9 @@ window.modHubBatchDelete = async function() {
     const selfNoticeHtml = isModHubIncluded ? modHubSelfRemovalNoticeHtml(true) : '';
 
     const escape = value => typeof window.modHubEscapeHtml === 'function' ? window.modHubEscapeHtml(String(value ?? '')) : String(value ?? '');
+    const skippedNotice = '以下内嵌模组将保留：';
+    const overrideNotice = '删除同名旁加载包后，对应的内嵌模组及其启禁状态将保留。';
+    const notices = [skipped.length ? skippedNotice + skipped.join('、') : '', overrides.size ? overrideNotice : ''].filter(Boolean);
     const deleteListHtml = toDelete.map(name => {
         const modInfo = window.modHubGetModInfo(name);
         const subtext = window.modHubGetModSubtext(name, modInfo, false, true);
@@ -4141,8 +4240,9 @@ window.modHubBatchDelete = async function() {
 
     const ok = await window.modHubConfirm({
         title: isModHubIncluded ? `确认批量删除 ${toDelete.length} 个模组（含 ModHub 卸载）` : `确认批量删除 ${toDelete.length} 个模组`,
-        message: `确定要批量删除选中的 ${toDelete.length} 个模组吗？\n${selfNotice ? selfNotice + '\n\n' : ''}删除后这些模组将从浏览器存储中彻底移除，不可恢复。\n\n是否确认删除？`,
-        trustedMessageHtml,
+        message: `确定要批量删除选中的 ${toDelete.length} 个模组吗？\n${selfNotice ? selfNotice + '\n\n' : ''}删除后这些模组将从浏览器存储中彻底移除，不可恢复。\n\n是否确认删除？${notices.length ? '\n\n' + notices.join('\n') : ''}`,
+        trustedMessageHtml: trustedMessageHtml + (skipped.length ? `<p>${skippedNotice}<span data-modhub-no-translate>${escape(skipped.join('、'))}</span></p>` : '')
+            + (overrides.size ? `<p>${overrideNotice}</p>` : ''),
         confirmText: isModHubIncluded ? '确认批量删除与卸载' : '确认批量删除',
         cancelText: '取消',
         confirmType: 'danger',
@@ -4150,30 +4250,12 @@ window.modHubBatchDelete = async function() {
     });
     if (!ok) return false;
 
-    const saved = await window.modHubRunManagerAction(async () => {
-        const state = window._modHubModState;
-        if (!state) throw new Error('模组列表尚未读取完成');
-        const controller = window.modHubGetController();
-        if (typeof controller?.removeModIndexDB !== 'function') throw new Error('当前加载器未提供模组包删除接口，已停止删除');
-
-        window.modHubEnsureModStateSync(state);
-        state.sideMods = state.sideMods.filter(item => !toDeleteSet.has(item.name.toLowerCase()));
-        state.sideEnabled = state.sideEnabled.filter(name => !toDeleteSet.has(name.toLowerCase()));
-        state.sideDisabled = state.sideDisabled.filter(name => !toDeleteSet.has(name.toLowerCase()));
-
-        if (!await window.modHubSaveModManageState(false, { dropNames: toDelete })) throw new Error('删除模组配置失败');
-
-        for (const name of toDelete) {
-            await window.modHubLoadBeautyState(true, [name]);
-            window._modHubDisabledModInfo.delete(name.trim().toLowerCase());
-            await controller.removeModIndexDB(name);
-        }
-        return true;
-    }, undefined, { trackReload: true, busyKey: 'batch:delete', restoreLabel: `批量删除 ${toDelete.length} 个模组` });
+    const saved = await window.modHubRunManagerAction(() => modHubDeleteSidePackages(plan), undefined,
+        { trackReload: true, busyKey: 'batch:delete', restoreLabel: `批量删除 ${toDelete.length} 个模组` });
 
     if (saved) {
         window._modHubSelectedMods.clear();
-        window.modHubShowToast(`已批量删除 ${toDelete.length} 个模组，重新载入后生效`, 'warning');
+        window.modHubShowToast(overrides.size ? `已删除 ${toDelete.length} 个旁加载包，重新载入后生效。` : `已批量删除 ${toDelete.length} 个模组，重新载入后生效`, 'warning');
         const hasFramework = toDelete.some(name => window.modHubIsFrameworkMod(name));
         if (hasFramework || isModHubIncluded) {
             await window.modHubOfferReload(`已批量删除 ${toDelete.length} 个模组。`, { isFramework: hasFramework });

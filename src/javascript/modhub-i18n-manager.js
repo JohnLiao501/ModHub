@@ -1,5 +1,13 @@
 /** ModHub 管理器与公共界面语言包。 */
 window.modHubRegisterTranslations({
+  "无法读取同名旁加载包，请重新载入后重试。": ["無法讀取同名旁載入包，請重新載入後再試。", "The sideloaded package with the same name could not be read. Reload and try again."],
+  "同名旁加载包已不存在，请刷新列表后重试。": ["同名旁載入包已不存在，請重新整理清單後再試。", "The sideloaded package with the same name no longer exists. Refresh the list and try again."],
+  "这些模组随整合包提供，无法删除。可以在模组管理中启用或禁用。": ["這些模組隨整合包提供，無法刪除。可以在模組管理中啟用或停用。", "These mods are included in the distribution and cannot be deleted. Use Mod Management to enable or disable them."],
+  "仅删除同名旁加载包，保留整合包内嵌模组及其启禁状态。": ["僅刪除同名旁載入包，保留整合包內嵌模組及其啟停狀態。", "Only the sideloaded package will be deleted. The embedded mod and its enabled state will be kept."],
+  "已删除同名旁加载包，重新载入后生效。": ["已刪除同名旁載入包，重新載入後生效。", "The sideloaded package has been deleted. Reload to apply the change."],
+  "已删除 {p0} 个旁加载包，重新载入后生效。": ["已刪除 {p0} 個旁載入包，重新載入後生效。", "Deleted {p0} sideloaded packages. Reload to apply the changes."],
+  "以下内嵌模组将保留：": ["以下內嵌模組將保留：", "These embedded mods will be kept: "],
+  "删除同名旁加载包后，对应的内嵌模组及其启禁状态将保留。": ["刪除同名旁載入包後，對應的內嵌模組及其啟停狀態將保留。", "Deleting sideloaded packages keeps the corresponding embedded mods and their enabled states."],
   "模组冲突风险确认": ["模組衝突風險確認", "Confirm mod conflict risk"],
   "继续启用": ["繼續啟用", "Enable anyway"],
   "简易框架与枫叶框架存在冲突风险": ["簡易框架與楓葉框架存在衝突風險", "Simple Framework and MapleBirch Framework may conflict"],
@@ -1525,5 +1533,9 @@ window.modHubRegisterTranslations({
   "取消固定时间点还原": [
     "取消固定時間點還原",
     "Unpin Restore points"
+  ],
+  "整合包内置，加载顺序由整合包决定": [
+    "整合包內建，載入順序由整合包決定",
+    "Built into the distribution. The distribution determines its load order."
   ]
 });

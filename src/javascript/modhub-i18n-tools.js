@@ -2042,6 +2042,10 @@ window.modHubRegisterTranslations?.({
         "部分游戲版本信息未識別，未能核驗游戲版本兼容性。",
         "Some game version information is unknown. Game version compatibility could not be verified."
     ],
+    "建点时缺少以下内置模组的来源记录，暂不能核对：{p0}。": [
+        "建立還原點時缺少以下內置模組的來源記錄，暫不能核對：{p0}。",
+        "This restore point has no source record for the following embedded mods, so they cannot be checked: {p0}."
+    ],
     "部分内置模组档案未识别，未能核验内置模组兼容性。": [
         "部分內置模組檔案未識別，未能核驗內置模組兼容性。",
         "Some built-in mod metadata is unknown. Built-in mod compatibility could not be verified."

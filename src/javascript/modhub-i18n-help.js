@@ -1082,6 +1082,7 @@
         "已取消兼容性检查": ["已取消兼容性檢查", "Compatibility Check Canceled"],
         "另一项模组操作尚未完成，请等待完成后重新检查": ["另一項模組操作尚未完成，請等待完成后重新檢查", "Another mod operation is still running. Wait for it to finish, then check again"],
         "此结果不能直接修复，请重新检查或使用对应管理入口。": ["此結果不能直接修復，請重新檢查或使用對應管理入口。", "This result cannot be repaired directly. Check again or use the relevant management page."],
+        "请在原生模组管理器中核对内置模组配置。": ["請在原生模組管理器中核對內置模組配置。", "Check the embedded mod configuration in the native mod manager."],
         "安装包或内置模组资料不完整，不能预览配置修复。": ["安裝包或內置模組資料不完整，不能預覽配置修復。", "Package or embedded-mod information is incomplete. Configuration repairs cannot be previewed."],
         "存在管理器无法区分的重复名称，请先在原生管理器核对。": ["存在管理器無法區分的重復名稱，請先在原生管理器核對。", "Duplicate names cannot be distinguished by this manager. Check them in the native manager first."],
         "加载顺序处理接口尚未就绪。": ["載入順序處理接口尚未就緒。", "The loading-order interface is not ready."],

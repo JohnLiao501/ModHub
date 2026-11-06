@@ -133,7 +133,8 @@
                 const finding = { id: 'compat-catalog-' + item.name + '-' + target + '-' + requirement.version,
                     evidence, mods: [item.name, target], advice: '请安装并启用作者要求的前置，再重新检查。' };
                 if (!matches.length) {
-                    const disabled = snapshot.packages.some(profile => !profile.enabled && namesOf(profile.bootJson).includes(target));
+                    const disabled = snapshot.packages.some(profile => !profile.enabled
+                        && namesOf(profile.bootJson || (profile.missing && profile.embeddedBootJson)).includes(target));
                     addFinding(snapshot, { ...finding, status: disabled || complete ? 'problem' : 'review',
                         title: disabled ? '作者要求的前置未启用' : complete ? '缺少作者要求的前置' : '作者要求的前置尚未确认' });
                 } else if (!complete) {
@@ -195,6 +196,7 @@
                     throw new Error(field + ' 中的声明路径无效');
                 }
                 if (!archive) {
+                    if (item.source === 'Local' && window.modHubGetManagedEmbeddedModBoot?.(item.name)) throw new Error('当前来源未提供原始包体');
                     const installed = candidates.get(item.name) || await packageRecord(item.name, cache, options.signal);
                     if (!installed?.data) throw new Error(installed?.missing ? '安装包不存在' : reason(installed?.error || '当前来源未提供原始包体'));
                     archive = await window.modHubAiPackage.read(installed.data);
@@ -409,7 +411,11 @@
         if ([...enabled, ...disabled].some(name => typeof name !== 'string' || !name.length) || new Set([...enabled, ...disabled]).size !== enabled.length + disabled.length) throw new Error('拟安装组合的启禁列表无效或重复。');
         snapshot.lists = { ...snapshot.lists, enabled, disabled };
         const profiles = new Map(snapshot.packages.map(item => [item.name, item]));
-        for (const candidate of candidates) profiles.set(candidate.name, candidate);
+        for (const candidate of candidates) {
+            const installed = profiles.get(candidate.name);
+            if (candidate.imported === false && candidate.data == null && installed?.missing && installed.embeddedBootJson) continue;
+            profiles.set(candidate.name, candidate);
+        }
         snapshot.packages = [...profiles.values()].map(item => ({ ...item, enabled: enabled.includes(item.name) }));
         snapshot.issues = snapshot.issues.filter(issue => issue.id.startsWith('log-') || ['read-failed', 'runtime-unknown', 'comparison-unknown'].includes(issue.id));
         window.modHubHelp.checkDeclarations(snapshot, { builtins: snapshot.builtins || [], builtinKnown: snapshot.builtinKnown });

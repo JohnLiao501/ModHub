@@ -23,7 +23,7 @@
         (_, value) => value && typeof value === 'object' && !Array.isArray(value)
             ? Object.fromEntries(Object.keys(value).sort().map(name => [name, value[name]])) : value);
     const listStamp = lists => JSON.stringify([lists.ok, lists.enabled, lists.disabled]);
-    const packageStamp = packages => JSON.stringify(packages.map(item => [item.name, item.missing, detail(item.error), bootStamp(item.bootJson)]));
+    const packageStamp = packages => JSON.stringify(packages.map(item => [item.name, item.missing, detail(item.error), bootStamp(item.bootJson), bootStamp(item.embeddedBootJson)]));
     const escape = value => window.modHubEscapeHtml(String(value ?? ''));
     const busy = () => Boolean(window.modHubIsReloadBusy?.() || window._modHubManagerBusy || window._modHubModLoading);
     let viewRevision = 0;
@@ -54,6 +54,7 @@
         // 原始读取缓存也含被框架禁止加载的包，只用它补充来源，不能据此认定提供者已启用。
         const builtins = runtime.filter(item => item.source && item.source !== 'IndexDB');
         return { runtime, builtins, runtimeKnown: Array.isArray(declared),
+            localOrder: [...(loader?.getLocalLoader?.()?.modZipList?.keys?.() || [])],
             builtinKnown: Array.isArray(declared) && Array.isArray(cache) && runtime.every(item => item.source && item.bootJson),
             loaderVersion: String(utils?.version || window.modSC2DataManager?.getModUtils?.()?.version || '') };
     }
@@ -132,17 +133,28 @@
                 result = { name, bootJson: null, error };
             }
             checkCancelled(signal);
-            packages.push({ ...result, name, enabled: enabled.has(key(name)) });
+            const embeddedBootJson = window.modHubGetManagedEmbeddedModBoot?.(name) || null;
+            packages.push({ ...result, name, enabled: enabled.has(key(name)), embeddedBootJson });
         }
         return packages;
     }
 
     function getDependencyContext(snapshot, metadata = snapshot) {
-        const enabled = snapshot.lists?.enabled || [], packages = snapshot.packages || [];
+        const enabled = snapshot.lists?.enabled || [], disabled = new Set(snapshot.lists?.disabled || []);
+        const packages = snapshot.packages || [];
         const saved = new Map(packages.filter(item => item.enabled && item.bootJson).map(item => [item.name, item]));
+        const managed = new Map(packages.filter(item => item.missing && item.embeddedBootJson).map(item => [item.name, item.embeddedBootJson]));
         // 原生依赖索引按加载顺序写入 name/alias，后写覆盖先写；旁加载同名包替换内置包。
-        const active = [...(metadata.builtins || []).filter(item => item.bootJson && !saved.has(item.name)),
-            ...enabled.map(name => saved.get(name)).filter(Boolean)];
+        const builtins = (metadata.builtins || []).filter(item => item.bootJson && !saved.has(item.name)
+            && !(item.source === 'Local' && disabled.has(item.name)
+                && (managed.has(item.name) || window.modHubGetManagedEmbeddedModBoot?.(item.name))));
+        const localOrder = snapshot.localOrder || [];
+        for (const [name, bootJson] of managed) {
+            if (disabled.has(name) || saved.has(name) || builtins.some(item => item.name === name)) continue;
+            const position = builtins.findIndex(item => item.source !== 'Local' || localOrder.indexOf(item.name) > localOrder.indexOf(name));
+            builtins.splice(position < 0 ? builtins.length : position, 0, { name, bootJson, source: 'Local' });
+        }
+        const active = [...builtins, ...enabled.map(name => saved.get(name)).filter(Boolean)];
         const complete = snapshot.lists?.ok && metadata.builtinKnown && packages.every(item => item.bootJson || item.missing)
             && enabled.every(name => packages.some(item => item.name === name && (item.bootJson || item.missing)));
         const providers = new Map();
@@ -156,8 +168,12 @@
     function checkDeclarations(snapshot, metadata) {
         const { packages } = snapshot;
         const { active, providers, complete } = getDependencyContext(snapshot, metadata);
-        const disabled = packages.filter(item => !item.enabled && item.bootJson);
+        const disabled = packages.filter(item => !item.enabled)
+            .map(item => ({ ...item, bootJson: item.bootJson || (item.missing && item.embeddedBootJson) }))
+            .filter(item => item.bootJson);
+        const canRepair = !packages.some(item => item.missing && item.embeddedBootJson);
         for (const item of packages) {
+            if (item.missing && item.embeddedBootJson) continue;
             if (item.missing || item.error || !item.bootJson) {
                 addIssue(snapshot, 'package-' + key(item.name), item.missing ? 'problem' : 'review',
                     item.missing ? '登记的模组缺少安装包' : '安装包资料暂不能读取',
@@ -193,10 +209,10 @@
                         const installed = disabled.filter(profile => namesOf(profile.bootJson).some(name => key(name) === key(target)));
                         const title = installed.length ? '前置已安装但未启用' : complete ? '缺少前置模组' : '暂不能确认此前置是否已安装';
                         const checked = installed.length === 1 && window.modHubMarketVersions?.assessVersionRange?.(installed[0].bootJson.version, dependency.version);
-                        const canEnable = complete && checked?.status === 'compatible';
+                        const canEnable = canRepair && complete && checked?.status === 'compatible';
                         addIssue(snapshot, 'dependency-' + id, installed.length || complete ? 'problem' : 'review', title,
                             evidence + (installed.length ? '已禁用提供者：' + installed.map(profile => profile.name).join('、') + '。' + (checked?.reason || '') : ''),
-                            installed.length ? canEnable ? '可预览启用此前置及必要的顺序调整，确认后保存，再重新载入。' : '请核对提供者及其版本要求；当前依据不足，不能直接启用。'
+                            installed.length ? canEnable ? '可预览启用此前置及必要的顺序调整，确认后保存，再重新载入。' : !canRepair ? '请在原生模组管理器中核对内置模组配置。' : '请核对提供者及其版本要求；当前依据不足，不能直接启用。'
                                 : complete ? '请在模组市场或作者发布页获取满足要求的前置。' : '请先处理未能读取的包体资料，再重新检查。',
                             installed.length || !complete ? '模组管理' : '模组市场', '', canEnable ? { type: 'enable', enableName: installed[0].name } : null);
                         continue;
@@ -212,8 +228,9 @@
                     if (order.has(key(item.name)) && order.has(key(provider.name)) && order.get(key(provider.name)) >= order.get(key(item.name))) {
                         const canOrder = window.modHubMarketVersions?.assessVersionRange?.(version, dependency.version)?.status === 'compatible';
                         addIssue(snapshot, 'order-' + id, 'problem', '前置加载顺序需要调整', evidence,
-                            canOrder ? '可按包内声明预览加载顺序调整，确认后保存，再重新载入。' : '请先核对并满足版本要求，再调整顺序。', '模组管理', '',
-                            canOrder && provider.name !== item.name ? { type: 'order' } : null);
+                            canOrder && canRepair ? '可按包内声明预览加载顺序调整，确认后保存，再重新载入。'
+                                : canOrder ? '请在原生模组管理器中核对内置模组配置。' : '请先核对并满足版本要求，再调整顺序。', '模组管理', '',
+                            canRepair && canOrder && provider.name !== item.name ? { type: 'order' } : null);
                     }
                 }
                 const checked = window.modHubMarketVersions?.assessVersionRange?.(version, dependency.version, target === 'GameVersion')
@@ -241,7 +258,7 @@
             }
             const metadata = readRuntime();
             Object.assign(snapshot, { runtime: metadata.runtime, loaderVersion: metadata.loaderVersion,
-                builtins: metadata.builtins, builtinKnown: metadata.builtinKnown });
+                builtins: metadata.builtins, builtinKnown: metadata.builtinKnown, localOrder: metadata.localOrder });
             if (!metadata.runtimeKnown) addIssue(snapshot, 'runtime-unknown', 'review', '本次运行清单未能完整核对',
                 '当前加载器未提供实际运行顺序，下面仅列可读取的运行档案。', '请查看加载日志，核对各模组是否成功加载。');
             snapshot.lists = await window.modHubReadIndexDBModLists();
@@ -253,10 +270,11 @@
             checkDeclarations(snapshot, metadata);
             const runtimeSide = snapshot.runtime.filter(item => item.source === 'IndexDB');
             const runtimeOrder = runtimeSide.map(item => key(item.name));
-            const savedOrder = snapshot.lists.enabled.map(key);
+            const savedOrder = snapshot.lists.enabled.filter(name => !snapshot.packages.some(item => item.name === name && item.missing && item.embeddedBootJson)).map(key);
             const runtimeComparable = metadata.runtimeKnown && snapshot.runtime.every(item => item.source && item.bootJson);
             snapshot.different = runtimeComparable && (JSON.stringify(runtimeOrder) !== JSON.stringify(savedOrder)
-                || snapshot.packages.some(item => item.enabled && item.bootJson && runtimeSide.some(run => key(run.name) === key(item.name) && bootStamp(run.bootJson) !== bootStamp(item.bootJson))));
+                || snapshot.packages.some(item => item.enabled && item.bootJson && runtimeSide.some(run => key(run.name) === key(item.name) && bootStamp(run.bootJson) !== bootStamp(item.bootJson)))
+                || snapshot.packages.some(item => item.missing && item.embeddedBootJson && item.enabled !== snapshot.runtime.some(run => run.name === item.name && run.source === 'Local')));
             if (!runtimeComparable) addIssue(snapshot, 'comparison-unknown', 'review', '运行与配置的差异暂不能完整核对',
                 '部分运行档案或模组来源未识别。', '报告将分别列出可读取的运行清单和已保存配置，请结合日志核对。');
             if (snapshot.different) addIssue(snapshot, 'configuration-different', 'review', '已保存配置与本次运行不同',
@@ -420,8 +438,9 @@
         const listRows = enabled => {
             for (const [index, name] of (enabled ? snapshot.lists.enabled : snapshot.lists.disabled).entries()) {
                 const item = snapshot.packages.find(profile => key(profile.name) === key(name));
-                lines.push((index + 1) + '. ' + name + ' | ' + (item?.bootJson?.version || '未识别')
-                    + (item?.missing ? ' | 包体缺失' : item?.error ? ' | ' + detail(item.error) : ''));
+                const embedded = item?.missing && item.embeddedBootJson;
+                lines.push((index + 1) + '. ' + name + ' | ' + (item?.bootJson?.version || embedded?.version || '未识别')
+                    + (embedded ? ' | 来源：Local' : item?.missing ? ' | 包体缺失' : item?.error ? ' | ' + detail(item.error) : ''));
             }
             if (!(enabled ? snapshot.lists.enabled : snapshot.lists.disabled).length) lines.push('无');
         };

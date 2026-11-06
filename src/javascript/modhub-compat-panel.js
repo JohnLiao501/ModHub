@@ -98,7 +98,7 @@
         const runtimeProblem = !oldRuntime && runtime.some(item => item.status === 'problem');
         const overlapsOnly = related.length > 0 && related.every(item => item.kind === 'overlap');
         const headline = snapshot?.stale ? '检查内容已更改，请重新检查'
-            : confirmed.length ? confirmed.every(item => /缺少/.test(item.title)) ? '请注意：部分模组缺少前置'
+            : confirmed.length ? confirmed.every(item => item.title.startsWith('缺少')) ? '请注意：部分模组缺少前置'
                 : confirmed.every(item => /未启用/.test(item.title)) ? '请注意：部分前置尚未启用'
                 : confirmed.every(item => /加载器或运行库/.test(item.title)) ? '请注意：加载器或运行库版本不符合要求'
                 : confirmed.every(item => /版本/.test(item.title)) ? '请注意：部分前置版本不符合要求'

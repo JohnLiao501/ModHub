@@ -410,16 +410,26 @@
         return points.filter(point => retained.has(point.id));
     }
 
+    function sideloadOrder(state) {
+        const packages = new Set(state.packages.map(item => item.name));
+        return state.enabled.filter(name => packages.has(name) || !getManagedEmbeddedModBoot(name));
+    }
+
     function describeChanges(before, after) {
         const prior = new Map(before.packages.map(item => [item.name, item.hash]));
         const next = new Map(after.packages.map(item => [item.name, item.hash]));
+        const enabled = after.enabled.filter(name => !before.enabled.includes(name)
+            && (before.disabled.includes(name) || !getManagedEmbeddedModBoot(name)));
+        // 内置模组离开原生禁用列表后，即使没有显式启用登记也会加载。
+        enabled.push(...before.disabled.filter(name => !after.enabled.includes(name)
+            && !after.disabled.includes(name) && getManagedEmbeddedModBoot(name)));
         return {
             installed: [...next.keys()].filter(name => !prior.has(name)),
             updated: [...next.keys()].filter(name => prior.has(name) && next.get(name) !== prior.get(name)),
             removed: [...prior.keys()].filter(name => !next.has(name)),
-            enabled: after.enabled.filter(name => !before.enabled.includes(name)),
+            enabled,
             disabled: after.disabled.filter(name => !before.disabled.includes(name)),
-            orderChanged: !same(before.enabled, after.enabled),
+            orderChanged: !same(sideloadOrder(before), sideloadOrder(after)),
             beautyChanged: !same(before.beauty.value, after.beauty.value),
             settingsChanged: !same(before.settings, after.settings),
         };
@@ -430,7 +440,28 @@
         const entries = Array.isArray(read) ? read : [];
         const info = item => item.mod || item.zip?.getModInfo?.() || item.zip?.modInfo;
         const game = entries.find(item => String(info(item)?.bootJson?.name || item.name || '').trim().toLowerCase() === 'gameversion');
-        return { html: String(window.location?.href || '').split(/[?#]/)[0], gameVersion: String(window.StartConfig?.version || info(game || {})?.bootJson?.version || window.modHubMarketVersions?.getGameVersion?.() || ''), builtinKnown: Array.isArray(read), builtinMods: entries.filter(item => item.from && item.from !== 'IndexDB').map(item => ({ name: String(item.name || info(item)?.name || ''), version: String(info(item)?.version || info(item)?.bootJson?.version || '') })).filter(item => item.name) };
+        const builtinMods = entries.filter(item => item.from && item.from !== 'IndexDB')
+            .map(item => ({ name: String(item.name || info(item)?.name || ''), version: String(info(item)?.version || info(item)?.bootJson?.version || '') }))
+            .filter(item => item.name);
+        // 同名旁加载会替换原始读取缓存中的 Local 档案，但不会改变 HTML 中的内置包。
+        const recorded = new Set(builtinMods.map(item => item.name));
+        for (const name of env.modLoader.getLocalLoader?.()?.modZipList?.keys?.() || []) {
+            if (recorded.has(name)) continue;
+            const boot = getManagedEmbeddedModBoot(name);
+            if (boot) builtinMods.push({ name, version: String(boot.version || '') });
+        }
+        return { html: String(window.location?.href || '').split(/[?#]/)[0], gameVersion: String(window.StartConfig?.version || info(game || {})?.bootJson?.version || window.modHubMarketVersions?.getGameVersion?.() || ''), builtinKnown: Array.isArray(read), builtinMods };
+    }
+
+    function getManagedEmbeddedModBoot(name) {
+        const gui = window.modLoaderGui || window.modLoaderGuiInstance || window.modHubGetGui?.();
+        const loadSwitch = gui?.getModLoadSwitch?.();
+        if (typeof loadSwitch?.isManageableMod !== 'function') return null;
+        // 原生 GUI 可将内嵌包的启禁状态登记在 IndexedDB，包体始终由 LocalLoader 提供。
+        const local = gui.gModUtils?.getModLoader?.()?.getLocalLoader?.();
+        const zips = local?.getZipFile?.(name);
+        const boot = zips?.[zips.length - 1]?.getModInfo?.()?.bootJson;
+        return boot?.name === name && loadSwitch.isManageableMod(boot) ? boot : null;
     }
 
     function embeddedRecovery(env) {
@@ -1094,19 +1125,24 @@
     }
 
     async function buildTarget(env, current, point) {
+        const target = JSON.parse(JSON.stringify(point.state));
+        checkTarget(env, target);
         const source = sourceMetadata(env);
         const prior = point.source;
         const builtinKnown = metadata => metadata?.builtinKnown !== false && Array.isArray(metadata?.builtinMods) && (metadata.builtinKnown === true || metadata.builtinMods.length > 0);
         const priorBuiltin = new Map((prior?.builtinMods || []).map(item => [item.name, item.version]));
         const nextBuiltin = new Map(source.builtinMods.map(item => [item.name, item.version]));
-        const builtinChanged = builtinKnown(prior) && builtinKnown(source) && (!same([...priorBuiltin.keys()].sort(), [...nextBuiltin.keys()].sort()) || [...priorBuiltin].some(([name, version]) => version && nextBuiltin.get(name) && version !== nextBuiltin.get(name)));
+        const comparable = builtinKnown(prior) && builtinKnown(source);
+        const unknownHistory = new Set(comparable ? target.packages.map(item => item.name)
+            .filter(name => nextBuiltin.has(name) && !priorBuiltin.has(name) && getManagedEmbeddedModBoot(name)) : []);
+        const builtinChanged = comparable && (!same([...priorBuiltin.keys()].sort(), [...nextBuiltin.keys()].filter(name => !unknownHistory.has(name)).sort())
+            || [...priorBuiltin].some(([name, version]) => version && nextBuiltin.get(name) && version !== nextBuiltin.get(name)));
         const sourceChanged = !!prior && (prior.html && source.html && prior.html !== source.html || prior.gameVersion && source.gameVersion && prior.gameVersion !== source.gameVersion || builtinChanged);
         const riskMessages = [];
         if (sourceChanged) riskMessages.push('游戏环境已变化：游戏文件、版本或内置模组与建点时不同。无法恢复游戏 HTML 和内置包，不能保证与旧模组兼容。');
         if (!prior?.gameVersion || !source.gameVersion) riskMessages.push('部分游戏版本信息未识别，未能核验游戏版本兼容性。');
         if (!builtinKnown(prior) || !builtinKnown(source)) riskMessages.push('部分内置模组档案未识别，未能核验内置模组兼容性。');
-        const target = JSON.parse(JSON.stringify(point.state));
-        checkTarget(env, target);
+        if (unknownHistory.size) riskMessages.push(`建点时缺少以下内置模组的来源记录，暂不能核对：${[...unknownHistory].join('、')}。`);
         const self = current.state.packages.find(item => item.name.toLowerCase() === 'modhub');
         const embedded = embeddedRecovery(env);
         if (!self && !embedded) fail('未找到当前 ModHub 恢复入口，已停止恢复');
@@ -1120,7 +1156,7 @@
             target.disabled = target.disabled.filter(name => name.toLowerCase() !== 'modhub');
         }
         const names = new Set(target.packages.map(item => item.name));
-        const missing = [...target.enabled, ...target.disabled].filter(name => !names.has(name));
+        const missing = [...target.enabled, ...target.disabled].filter(name => !names.has(name) && !getManagedEmbeddedModBoot(name));
         if (missing.length) riskMessages.push(`以下模组只有启禁记录，没有备份包体：${missing.join('、')}。将还原这些记录的原始状态，无法恢复缺失的安装包；需要时请重新导入。`);
         // 当前工具由本次快照与真实包档案核验，旧点的工具归档不参与最终恢复。
         const archived = { ...target, packages: target.packages.filter(item => item.name !== self?.name) };
@@ -1150,7 +1186,7 @@
             return profile ? (typeof profile.bootJson.version === 'string' ? profile.bootJson.version : '') : null;
         };
         const packageVersions = Object.fromEntries([...changedNames].map(name => [name, { current: versionOf(currentProfiles, name), target: versionOf(profiles, name) }]));
-        const orderChanges = window.modHubDescribeOrderChanges(current.state.enabled, target.enabled);
+        const orderChanges = window.modHubDescribeOrderChanges(sideloadOrder(current.state), sideloadOrder(target));
         return { target, changes, riskMessages, packageVersions, orderChanges };
     }
 
@@ -1506,6 +1542,7 @@
             return value.hasValue ? parseNames(value.value) : null;
         },
         getStorageIdentity: () => { const { dbName, storeName } = environment(); return { dbName, storeName }; } });
+    window.modHubGetManagedEmbeddedModBoot = getManagedEmbeddedModBoot;
     window.modHubKeepRecoveryOrder = window.modHubKeepRecoveryOrder || recoveryOrder;
     window.addEventListener?.('modhub:languagechange', syncStartupUi);
     if (!window.indexedDB || typeof window.modUtils?.getModLoader !== 'function') return;
