@@ -1002,6 +1002,7 @@
     let localProfileRevision = 0;
     let currentCategory = 'all';
     let currentStatusFilter = 'all';
+    let currentDownloadFilter = 'all';
     let currentSortBy = 'date'; // 'date' | 'name'
     let currentSearchText = '';
     let currentMarketSection = 'packages';
@@ -5263,7 +5264,8 @@
             const isDead = Boolean(mod._isDeadRepo || isDeadRepo(marketRepoKey, mod) || isDeadRepo(mod.githubUrl, mod));
             if (isDead) return safeHttpsUrl(mod.otherUrl) ? 'external_only' : 'unavailable';
             if (!mod.githubUrl && !safeHttpsUrl(mod.otherUrl)) return 'unavailable';
-            if (!mod.githubUrl || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod))) return 'external_only';
+            const repo = parseGithubRepo(mod.githubUrl);
+            if (!repo || repo.sourcePath || (mod.catalogSource === 'community' && !hasCommunityReleaseSource(mod))) return 'external_only';
             return 'not_installed';
         }
 
@@ -7223,6 +7225,15 @@
         return !isWithdrawn(mod) && !isDelistedMarketMod(mod);
     }
 
+    function isExternalMarketResource(mod) {
+        const repo = parseGithubRepo(mod.githubUrl);
+        const deadRepo = repo && isDeadRepo(repo.key, mod);
+        if (repo && !deadRepo && !repo.sourcePath && mod.autoInstall !== false
+            && (mod.catalogSource !== 'community' || hasCommunityReleaseSource(mod))) return false;
+        return Boolean(window.modHubMarketSpells?.normalizeSources(mod).some(source =>
+            !deadRepo || parseGithubRepo(source.url)?.key !== repo.key));
+    }
+
     function filterAndSortMods(profiles = getLocalInstalledProfiles(), evaluatedMods) {
         let list = evaluatedMods || marketModList.map((mod, marketIndex) => {
             const status = checkModInstallStatus(mod, profiles);
@@ -7247,6 +7258,8 @@
         } else if (currentStatusFilter === 'ignored') {
             list = list.filter(m => m._isIgnored);
         }
+
+        if (currentDownloadFilter === 'external') list = list.filter(isExternalMarketResource);
 
         // 3. 两端共用离线搜索规则，名称优先，支持多词、拼音和有限拼写容错。
         const search = currentSearchText ? window.modHubSearch.compile(currentSearchText) : { tokens: [] };
@@ -7802,6 +7815,7 @@
     function getMarketPage(entries) {
         const state = marketPagination[currentMarketSection];
         const filters = [currentCategory, currentStatusFilter, currentSearchText, currentSortBy, window.modHubGetLanguage?.()];
+        if (currentMarketSection === 'packages') filters.push(currentDownloadFilter);
         if (!state.filters || filters.some((value, index) => value !== state.filters[index])) state.page = 1;
         state.filters = filters;
         const pages = Math.max(1, Math.ceil(entries.length / MODHUB_MARKET_PAGE_SIZE));
@@ -7923,7 +7937,7 @@
         if (mirrorSelect) mirrorSelect.disabled = batchInstallState.running || batchInstallState.preparing;
 
         if (filterResult) {
-            filterResult.hidden = currentCategory === 'all' && currentStatusFilter === 'all' && !currentSearchText;
+            filterResult.hidden = currentCategory === 'all' && currentStatusFilter === 'all' && currentDownloadFilter === 'all' && !currentSearchText;
             modHubText(filterResult, `当前显示 ${displayedMods.length} / 共 ${displayStats.length} 个模组`);
         }
         const page = getMarketPage(displayedMods);
@@ -8443,6 +8457,11 @@
             const control = document.getElementById(id);
             if (control) control.hidden = spellView;
         });
+        const downloadFilter = document.getElementById('modHubMarketDownloadFilter');
+        if (downloadFilter) {
+            downloadFilter.hidden = spellView;
+            downloadFilter.value = currentDownloadFilter;
+        }
         const footer = document.getElementById('modHubMarketFilterFooter');
         if (footer) footer.hidden = spellView && !currentSearchText && currentCategory === 'all';
         const note = document.getElementById('modHubMarketSpellNote');
@@ -8661,6 +8680,10 @@
                         <option value="date" ${currentSortBy === 'date' ? 'selected' : ''}>按最新更新</option>
                         <option value="name" ${currentSortBy === 'name' ? 'selected' : ''}>按模组名称</option>
                     </select>
+                    <select id="modHubMarketDownloadFilter" class="modhub-select" aria-label="按获取方式筛选"${currentMarketSection === 'spells' ? ' hidden' : ''}>
+                        <option value="all">全部获取方式</option>
+                        <option value="external" ${currentDownloadFilter === 'external' ? 'selected' : ''}>仅外部获取</option>
+                    </select>
                     <div id="modHubMarketHeaderActions" class="modhub-market-header-actions">
                     <div id="modHubMarketPinnedTools" class="modhub-market-pinned-tools"></div>
                     <div id="modHubMarketMainActions" class="modhub-market-main-actions">
@@ -8826,6 +8849,14 @@
             };
         }
 
+        const downloadFilter = document.getElementById('modHubMarketDownloadFilter');
+        if (downloadFilter) {
+            downloadFilter.onchange = () => {
+                currentDownloadFilter = downloadFilter.value;
+                renderMarketCards();
+            };
+        }
+
         const mirrorSelect = document.getElementById('modHubMirrorSelect');
         if (mirrorSelect) {
             mirrorSelect.onchange = () => {
@@ -8893,18 +8924,20 @@
         const btn = document.getElementById('modHubMarketBtnResetFilter');
         if (!btn) return;
         const spellView = currentMarketSection === 'spells';
-        const isFiltering = currentCategory !== 'all' || !spellView && (currentStatusFilter !== 'all' || !!currentSearchText);
+        const isFiltering = currentCategory !== 'all' || !spellView
+            && (currentStatusFilter !== 'all' || currentDownloadFilter !== 'all' || !!currentSearchText);
         modHubText(btn, spellView ? '返回全部言灵' : '返回全部模组');
         btn.title = spellView ? '清除用途和搜索，查看全部言灵' : '清除当前所有筛选与搜索，查看全部模组';
         window.modHubLocalizeOwned?.(btn);
         btn.style.display = isFiltering ? 'inline-block' : 'none';
     }
 
-    /** 重置分类、状态与搜索。 */
+    /** 重置当前板块的筛选与搜索。 */
     function resetFilters() {
         clearTimeout(marketSearchTimer);
         currentCategory = 'all';
         currentStatusFilter = 'all';
+        if (currentMarketSection === 'packages') currentDownloadFilter = 'all';
         currentSearchText = '';
         const searchInput = document.getElementById('modHubMarketSearch');
         if (searchInput) searchInput.value = '';

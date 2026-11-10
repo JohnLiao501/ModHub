@@ -1738,9 +1738,9 @@ window.modHubRegisterTranslations?.({
         "模組【{mod}】有 {failed} 處補丁未能匹配。原因可能是多個模組修改了同一文本，或文本與當前游戲/漢化版本存在差異。",
         "Mod [{mod}] has {failed} unmatched patches. Multiple mods may change the same text, or the text may differ from the current game or translation version."
     ],
-    "建议：1. 执行【智能整理模组与美化顺序】调整加载次序；2. 若游戏功能异常，可在【还原点】中恢复安装前的配置。若大部分补丁已匹配，通常仅影响局部选项。": [
-        "建議：1. 執行【智能整理模組與美化順序】調整加載次序；2. 若游戲功能異常，可在【還原點】中恢復安裝前的配置。若大部分補丁已匹配，通常僅影響局部選項。",
-        "Suggested checks: 1. Use Smart sort mods and appearance packs. 2. If game features malfunction, use Restore points to return to the previous configuration. When most patches match, effects are usually limited to individual options."
+    "请核对模组是否适配当前游戏或汉化版本，并查看错误详情中的目标段落和查找文本。若异常出现在调整模组之后，可在【还原点】中恢复之前的配置。": [
+        "請確認模組是否支援目前的遊戲或漢化版本，並查看錯誤詳情中的目標段落和搜尋文字。若異常出現在調整模組之後，可在【還原點】中恢復先前的設定。",
+        "Check whether the mod supports the current game or translation version, then review the target passage and search text in the error details. If the issue started after a mod change, use Restore points to restore the previous configuration."
     ],
     "模组【{mod}】在神庙段落【Temple Jordan】中未匹配到选项文本。原因可能是模组针对特定中文汉化制作，而当前游戏文本存在词句差异。该补丁仅用于添加询问银海螺的次要选项。": [
         "模組【{mod}】在神廟段落【Temple Jordan】中未匹配到選項文本。原因可能是模組針對特定中文漢化制作，而當前游戲文本存在詞句差異。該補丁僅用于添加詢問銀海螺的次要選項。",
@@ -1758,13 +1758,13 @@ window.modHubRegisterTranslations?.({
         "建議：1. 此項不影響核心劇情，游戲可正常游玩；2. 可執行【智能整理模組與美化順序】檢查次序；3. 若遇到功能異常，可在【還原點】中恢復之前的配置。",
         "Suggested checks: 1. This does not affect the main story. You can continue playing. 2. Use Smart sort mods and appearance packs to check the order. 3. If features malfunction, use Restore points to return to a previous configuration."
     ],
-    "模组【{mod}】在【StoryCaption】中修改作弊按钮开放条件的补丁未能匹配。可能由于其他模组修改了相同位置或游戏版本差异引起，仅凭此日志不能确定冲突来源或功能影响。": [
-        "模組【{mod}】在【StoryCaption】中修改作弊按鈕開放條件的補丁未能匹配。可能由于其他模組修改了相同位置或游戲版本差異引起，僅憑此日志不能確定沖突來源或功能影響。",
-        "Mod [{mod}] could not match its cheat-button condition patch in [StoryCaption]. Another mod may change the same location, or the game version may differ. This log alone does not establish the cause or effect."
+    "模组【{mod}】在【StoryCaption】中修改作弊按钮开放条件时未匹配到原文。模组管理中的启用状态仅反映加载配置。如果枯木逢春已解除同一显示条件，也会出现这条错误。侧栏入口仍受当前游戏场景限制。": [
+        "模組【{mod}】在【StoryCaption】中修改作弊按鈕顯示條件時未匹配到原文。模組管理中的啟用狀態僅反映載入設定。如果枯木逢春已解除同一顯示條件，也會出現這條錯誤。側欄入口仍受目前遊戲場景限制。",
+        "Mod [{mod}] could not match the original cheat-button condition in [StoryCaption]. The enabled status in Mod Management reflects the load configuration only. This error can also occur if Deadwood Reblooms already removed the same condition. The sidebar entry still depends on the current game scene."
     ],
-    "建议：1. 确认作弊入口是否正常显示；2. 检查与当前游戏版本及其他作弊模组的兼容性；3. 可执行【智能整理模组与美化顺序】，或在【还原点】中恢复安装前的配置。": [
-        "建議：1. 確認作弊入口是否正常顯示；2. 檢查與當前游戲版本及其他作弊模組的兼容性；3. 可執行【智能整理模組與美化順序】，或在【還原點】中恢復安裝前的配置。",
-        "Suggested checks: 1. Check whether the cheat entry appears. 2. Check compatibility with the game version and other cheat mods. 3. Use Smart sort mods and appearance packs, or restore the configuration from before installation."
+    "若同时启用了枯木逢春的【作弊入口与战斗数值】模块，可停用该模块排查。保存进度并重新载入后，在非战斗、非跳舞场景检查侧栏。若问题仍存在，请保留游戏版本、整合包版本及补丁错误原文。": [
+        "若同時啟用了枯木逢春的【作弊入口与战斗数值】模組，可停用該模組進行排查。儲存進度並重新載入後，請在非戰鬥、非跳舞場景檢查側欄。若問題仍存在，請保留遊戲版本、整合包版本及補丁錯誤原文。",
+        "If Deadwood Reblooms also has its 作弊入口与战斗数值 (cheat entry and combat stats) module enabled, try turning off that module. Save and reload, then check the sidebar outside combat and dance scenes. If the problem persists, keep the game version, modpack version, and original patch error."
     ],
     "模组【{mod}】在段落【{passage}】中未匹配到中文文本“{snippet}”。原因可能是当前游戏或汉化版本的词句、空格或排版存在差异。": [
         "模組【{mod}】在段落【{passage}】中未匹配到中文文本“{snippet}”。原因可能是當前游戲或漢化版本的詞句、空格或排版存在差異。",
@@ -1778,17 +1778,9 @@ window.modHubRegisterTranslations?.({
         "模組【{mod}】在段落【{passage}】中未找到匹配目標。原因可能是多個模組修改了同一文本，或模組未適配當前游戲版本。",
         "Mod [{mod}] found no matching target in [{passage}]. Multiple mods may change the same text, or the mod may not support the current game version."
     ],
-    "建议：1. 执行【智能整理模组与美化顺序】调整加载次序；2. 若出现异常，可在【还原点】中恢复配置。若大部分补丁已匹配，通常仅影响局部选项。": [
-        "建議：1. 執行【智能整理模組與美化順序】調整加載次序；2. 若出現異常，可在【還原點】中恢復配置。若大部分補丁已匹配，通常僅影響局部選項。",
-        "Suggested checks: 1. Use Smart sort mods and appearance packs. 2. If issues occur, use Restore points to restore the configuration. When most patches match, effects are usually limited to individual options."
-    ],
     "补丁未能找到匹配的文本目标。原因可能是多个模组修改了同一位置，或模组未适配当前游戏版本。": [
         "補丁未能找到匹配的文本目標。原因可能是多個模組修改了同一位置，或模組未適配當前游戲版本。",
         "The patch found no matching text target. Multiple mods may change the same location, or the mod may not support the current game version."
-    ],
-    "建议：1. 执行【智能整理模组与美化顺序】；2. 若仍有异常，检查模组与当前游戏版本的兼容性。": [
-        "建議：1. 執行【智能整理模組與美化順序】；2. 若仍有異常，檢查模組與當前游戲版本的兼容性。",
-        "Suggested checks: 1. Use Smart sort mods and appearance packs. 2. If issues persist, check compatibility with the current game version."
     ],
     "NPC 怀孕系统或开局变量未初始化": [
         "NPC 懷孕系統或開局變量未初始化",

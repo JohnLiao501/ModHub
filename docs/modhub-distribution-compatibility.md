@@ -31,6 +31,14 @@ Lyra 的原生管理器将可管理内嵌模组的启禁状态写入 IndexedDB�
 
 已有启禁登记的内嵌项可在 ModHub 启用或禁用，加载顺序由整合包决定。尚未登记的可管理内嵌项在 ModHub 的内置区只读显示，可通过整合包的原生管理器启禁。删除同名旁加载包时，内嵌项及其启禁登记继续保留。时间点还原按记录恢复启禁设置，包体仍由当前游戏提供。
 
+## Lyra 作弊入口的补丁失配
+
+Lyra 0.5.12.13 的内嵌 Cheat-Lyra 1.1.3 会修改 `StoryCaption` 中的原版作弊按钮条件。枯木逢春 2.5.8 的【作弊入口与战斗数值】经秋枫白桦框架在 TweeReplacer 之前移除同一条件，导致 Cheat-Lyra 的该处补丁报告未匹配。其余补丁各自执行。ModHub 的侧栏补丁挂在存档按钮后，保留原有作弊条件。模组显示“已启用”表示加载配置已启用，具体补丁结果见日志。[Cheat-Lyra 补丁声明](https://github.com/DoL-Lyra/Cheat/blob/v1.1.3/boot.json)、[枯木逢春补丁源码](https://github.com/MaplebirchLeaf/Deadwood-Reblooms/blob/v2.5.8/src/module/UnLockCheatAndCombatStatusDisplay.ts)、[秋枫白桦框架补丁阶段](https://github.com/MaplebirchLeaf/SCML-DOL-maplebirchFramework/blob/maplebirch-release-v5.6.2/src/services/AddonPlugin.ts#L188)
+
+同时启用这两个功能时，可在枯木逢春的模块管理中关闭【作弊入口与战斗数值】，保存后重载，再核对 Cheat-Lyra 的日志和普通场景中的作弊按钮。此操作也会关闭该子模块的遭遇战数值显示。原版按钮在起始设置、跳舞或战斗场景仍受游戏条件限制。若普通场景下仍找不到按钮，请一并提供整合包版本、当前场景和 `StoryCaption` 的完整错误日志。[枯木逢春模块说明](https://github.com/MaplebirchLeaf/Deadwood-Reblooms/blob/v2.5.8/src/assets/hint/CN/UnLockCheatAndCombatStatusDisplay.md)
+
+在隔离 Chrome 中，Lyra 0.5.12.13 的 Cheat-Lyra 七处补丁全部通过。使用保留枯木逢春、秋枫白桦框架及汉化的 Thalia 0.5.12.13 测试副本时，开启该子模块复现了六处通过、一处未匹配。关闭并重载后七处全部通过，ModHub 三处补丁前后均通过，两次的侧栏作弊条件一致。实测覆盖启动页和补丁日志，玩家反馈的普通场景按钮缺失仍需按当时的场景和配置复验。
+
 ## 公开证据与入口
 
 - [Lyra 发布及构建仓库](https://github.com/DoL-Lyra/Lyra)：基于汉化发行基包制作整合，不是 DoL 或汉化组官方渠道。

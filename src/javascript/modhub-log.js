@@ -146,6 +146,7 @@ const MODHUB_ERROR_PATTERNS = [
         title: 'TweeReplacer 补丁文本不匹配 / 模组间补丁冲突',
         keywords: ['cannot find findstring', 'cannot find findregex', 'tweereplacer'],
         resolve: line => {
+            const defaultSolution = '请核对模组是否适配当前游戏或汉化版本，并查看错误详情中的目标段落和查找文本。若异常出现在调整模组之后，可在【还原点】中恢复之前的配置。';
             // 针对统计行: [TweeReplacer] do_patch() done: [某模组] okCount:[75] errorCount:[1]
             if (line.includes('do_patch() done:')) {
                 const countMatch = line.match(/errorCount:\[(\d+)\]/);
@@ -161,9 +162,10 @@ const MODHUB_ERROR_PATTERNS = [
 
                     return {
                         id: 'twee-patch-mismatch',
+                        modName: rawModName,
                         title: 'TweeReplacer 补丁文本未匹配',
                         desc,
-                        solution: '建议：1. 执行【智能整理模组与美化顺序】调整加载次序；2. 若游戏功能异常，可在【还原点】中恢复安装前的配置。若大部分补丁已匹配，通常仅影响局部选项。',
+                        solution: defaultSolution,
                         isSummary: true
                     };
                 }
@@ -185,7 +187,7 @@ const MODHUB_ERROR_PATTERNS = [
             const isChineseSnippet = /[\u4e00-\u9fa5]/.test(findTarget);
 
             let desc = '';
-            let solution = '';
+            let solution = defaultSolution;
 
             const isWraithTemple = (rawModName.includes('Wraith') || modLabel.includes('怨灵')) &&
                 (passageName.includes('Temple Jordan') || findTarget.includes('Temple Chastity') || findTarget.includes('贞操带'));
@@ -203,25 +205,25 @@ const MODHUB_ERROR_PATTERNS = [
                 desc = `模组【${modLabel}】在段落【${passageName}】的管理器入口补丁未能匹配。原因可能是入口已被 ModHub 替代，或游戏界面文本存在差异。`;
                 solution = '建议：1. 此项不影响核心剧情，游戏可正常游玩；2. 可执行【智能整理模组与美化顺序】检查次序；3. 若遇到功能异常，可在【还原点】中恢复之前的配置。';
             } else if (isCheatLyraEntry) {
-                desc = `模组【${modLabel}】在【StoryCaption】中修改作弊按钮开放条件的补丁未能匹配。可能由于其他模组修改了相同位置或游戏版本差异引起，仅凭此日志不能确定冲突来源或功能影响。`;
-                solution = '建议：1. 确认作弊入口是否正常显示；2. 检查与当前游戏版本及其他作弊模组的兼容性；3. 可执行【智能整理模组与美化顺序】，或在【还原点】中恢复安装前的配置。';
+                desc = `模组【${modLabel}】在【StoryCaption】中修改作弊按钮开放条件时未匹配到原文。模组管理中的启用状态仅反映加载配置。如果枯木逢春已解除同一显示条件，也会出现这条错误。侧栏入口仍受当前游戏场景限制。`;
+                solution = '若同时启用了枯木逢春的【作弊入口与战斗数值】模块，可停用该模块排查。保存进度并重新载入后，在非战斗、非跳舞场景检查侧栏。若问题仍存在，请保留游戏版本、整合包版本及补丁错误原文。';
             } else if (isChineseSnippet && passageName) {
                 const previewSnippet = findTarget.length > 24 ? findTarget.slice(0, 24) + '...' : findTarget;
                 desc = `模组【${modLabel}】在段落【${passageName}】中未匹配到中文文本“${previewSnippet}”。原因可能是当前游戏或汉化版本的词句、空格或排版存在差异。`;
                 solution = '建议：1. 在模组管理中执行【智能整理模组与美化顺序】，确保汉化优先加载；2. 若游戏运行正常，通常仅影响局部剧情分支。';
             } else if (rawModName && passageName) {
                 desc = `模组【${modLabel}】在段落【${passageName}】中未找到匹配目标。原因可能是多个模组修改了同一文本，或模组未适配当前游戏版本。`;
-                solution = '建议：1. 执行【智能整理模组与美化顺序】调整加载次序；2. 若出现异常，可在【还原点】中恢复配置。若大部分补丁已匹配，通常仅影响局部选项。';
             } else {
                 desc = '补丁未能找到匹配的文本目标。原因可能是多个模组修改了同一位置，或模组未适配当前游戏版本。';
-                solution = '建议：1. 执行【智能整理模组与美化顺序】；2. 若仍有异常，检查模组与当前游戏版本的兼容性。';
             }
 
             return {
                 id: 'twee-patch-mismatch',
+                modName: rawModName,
                 title: 'TweeReplacer 补丁文本未匹配',
                 desc,
-                solution
+                solution,
+                isSpecific: isWraithTemple || isOriginalOptimizationUiEntry || isCheatLyraEntry
             };
         }
     },
@@ -694,9 +696,10 @@ window.modHubAnalyzeLogs = function(rawContent) {
                     const issue = typeof pattern.resolve === 'function' ? pattern.resolve(cleanMsg) : pattern;
                     if (issue) {
                         foundIssueIdsInLine.add(issue.id);
-                        if (!matchedIssuesMap.has(issue.id) ||
-                            (matchedIssuesMap.get(issue.id).isSummary && !issue.isSummary)) {
-                            matchedIssuesMap.set(issue.id, issue);
+                        const key = issue.modName ? `${issue.id}:${issue.modName}` : issue.id;
+                        const previous = matchedIssuesMap.get(key);
+                        if (!previous || (previous.isSummary && !issue.isSummary) || (issue.isSpecific && !previous.isSpecific)) {
+                            matchedIssuesMap.set(key, issue);
                         }
                     }
                 }
