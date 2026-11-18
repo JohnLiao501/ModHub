@@ -79,6 +79,7 @@
       "repositoryKeys": [
         "3naka/DarksOuLs"
       ],
+      "releaseTrackingSourceUrl": "https://github.com/3naka/DarksOuLs/releases",
       "sharedRepository": true,
       "packageLanguages": [
         "zh-CN"
@@ -97,6 +98,7 @@
       "repositoryKeys": [
         "3naka/DarksOuLs"
       ],
+      "releaseTrackingSourceUrl": "https://github.com/3naka/DarksOuLs/releases",
       "sharedRepository": true,
       "category": "玩法与内容",
       "tags": [
@@ -128,6 +130,7 @@
       "repositoryKeys": [
         "3naka/DarkSoULs"
       ],
+      "releaseTrackingSourceUrl": "https://github.com/3naka/DarksOuLs/releases",
       "sharedRepository": true,
       "packageLanguages": [
         "zh-CN"
@@ -3291,6 +3294,31 @@
         }
       ],
       "sharedRepository": true
+    },
+    {
+      "id": "community-918c2d27-7e82-456c-8426-d47f3f566eb2",
+      "name": "SwipeNav 滑动翻页",
+      "bootNames": [
+        "SwipeNav"
+      ],
+      "aliases": [],
+      "repositories": [],
+      "repositoryKeys": [
+        "sillyfish/dolmods"
+      ],
+      "category": "界面与便利",
+      "tags": [],
+      "sharedRepository": true,
+      "verifiedReleaseAssets": [
+        {
+          "sourceUrl": "https://github.com/sillyfish/dolmods/releases/download/swipenav-v0.1.1/SwipeNav_0_2_1.mod.zip",
+          "sha256": "40e9227deb961a5f1dfedeba650325c5dec2ec3e80213a90415e70998c9ecd57",
+          "bootName": "SwipeNav",
+          "version": "0.2.0",
+          "size": 4567,
+          "verifiedAt": "2026-11-18T02:17:59.601149+00:00"
+        }
+      ]
     }
   ]
 }
