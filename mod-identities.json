@@ -3319,6 +3319,45 @@
           "verifiedAt": "2026-11-18T02:17:59.601149+00:00"
         }
       ]
+    },
+    {
+      "id": "community-b0668d9a-5339-4c9b-9ffd-29961d4fc892",
+      "name": "灯台卡片UI",
+      "bootNames": [
+        "MapleLantern"
+      ],
+      "aliases": [
+        "灯台卡片UI",
+        "灯台"
+      ],
+      "repositories": [
+        "MapleLantern"
+      ],
+      "repositoryKeys": [
+        "TXF182/MapleLantern"
+      ],
+      "category": "界面与便利",
+      "tags": [
+        "头像",
+        "界面",
+        "美化"
+      ],
+      "optionalResources": [
+        {
+          "bootName": "MapleLantern-ImagePack",
+          "label": "灯台布景图库",
+          "assetSeries": "MapleLantern-ImagePack",
+          "version": "1.5.7",
+          "packageRole": "resource",
+          "evidenceUrl": "https://github.com/TXF182/MapleLantern/releases/tag/v1.5.7",
+          "sourceUrl": "https://github.com/TXF182/MapleLantern/releases/download/v1.5.7/MapleLantern-ImagePack-1.5.7.mod.zip",
+          "sha256": "e181a147ce95f2bdcc8ee78696753908225a357673c82994a03783170266966d",
+          "size": 8809487
+        }
+      ],
+      "packageLanguages": [
+        "zh-CN"
+      ]
     }
   ]
 }
